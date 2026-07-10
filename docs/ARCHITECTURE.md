@@ -1,8 +1,8 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: first working raster map milestone.
+> Documented state: raster base map with official hiking-trail overlay.
 
-This document describes the architecture that is currently implemented in the
+This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
 directory, or primary application flow changes.
 
@@ -30,15 +30,17 @@ The current version is a frontend-only application with no backend.
 It can:
 
 - display the swisstopo color raster map;
+- display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
 - pan and zoom;
 - restrict navigation to Switzerland and a small border area;
 - display a metric scale;
 - display the swisstopo attribution;
-- report an initial tile-loading failure.
+- report an initial base-map tile-loading failure.
 
 It does not yet include:
 
-- a swissTLM3D layer;
+- raw swissTLM3D vector geometries;
+- feature inspection or attribute queries;
 - route drawing;
 - routing;
 - distance or elevation calculations;
@@ -59,21 +61,22 @@ much space as possible.
 The project evolves through independent functional layers:
 
 1. raster background;
-2. swissTLM3D vector display;
-3. manual route drawing and GPX export;
-4. routable graph preparation;
-5. hiking routing.
+2. rendered hiking-trail overlay;
+3. raw swissTLM3D vector display and inspection;
+4. manual route drawing and GPX export;
+5. routable graph preparation;
+6. hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
 ### 3.3 Avoid premature abstraction
 
-The current architecture is intentionally small. Map configuration is extracted
-to `src/map/config.ts`, but map creation remains in `App.tsx` while there is
-only one view and a limited set of interactions.
+The current architecture remains intentionally small. Provider and geographic
+configuration live in `src/map/config.ts`, while map creation remains in
+`App.tsx`.
 
-When drawing tools, additional layers, and routing are introduced, OpenLayers
-logic can move into dedicated modules or hooks.
+When drawing tools, feature selection, additional layers, and routing are
+introduced, OpenLayers logic can move into dedicated modules or hooks.
 
 ### 3.4 Comments explain decisions
 
@@ -102,11 +105,12 @@ Browser
    ├── App.tsx
    │      │ creates and destroys
    │      ▼
-   ├── OpenLayers Map / View / TileLayer
-   │      │ HTTPS XYZ requests
-   │      ▼
-   └── wmts.geo.admin.ch
-          └── swisstopo raster tiles
+   ├── OpenLayers Map / View
+   │      │
+   │      ├── TileLayer: national map (JPEG)
+   │      └── TileLayer: hiking trails (transparent PNG)
+   │
+   └── HTTPS XYZ requests to wmts.geo.admin.ch
 ```
 
 No project-owned service runs on the server. The Vite development server only
@@ -126,32 +130,62 @@ compiles and serves frontend assets.
 ### Why OpenLayers?
 
 OpenLayers provides first-class support for raster layers, mapping services,
-projections, and extent constraints. These features fit a project that will
-eventually consume several swisstopo geodata formats.
+projections, layer ordering, and extent constraints. These features fit a
+project that will eventually consume several swisstopo geodata formats.
 
-### Why use a direct XYZ URL?
+### Why use direct XYZ URLs?
 
 An earlier implementation parsed WMTS capabilities during startup. That
 approach failed because of a projection mismatch while the capabilities
 document was being interpreted.
 
 The current implementation therefore uses the official XYZ URL pattern
-directly in `EPSG:3857`. This reduces the number of steps required before the
-map can be rendered.
+directly in `EPSG:3857`. The national map uses JPEG tiles, while the hiking
+overlay uses transparent PNG tiles.
 
-## 6. Coordinate reference systems
+The hiking layer has a layer-level `minZoom` constraint. Its configured value
+is 11, which is an exclusive OpenLayers boundary, so the overlay normally first
+appears at integer zoom level 12. This keeps overview maps readable and avoids
+downloading trail tiles before the base map shows useful road detail.
 
-The OpenLayers view and raster tiles use Web Mercator, `EPSG:3857`, which is
-the standard projection for many web maps.
+## 6. Rendered overlay versus vector data
+
+The layer `ch.swisstopo.swisstlm3d-wanderwege` is currently consumed through
+WMTS-compatible XYZ tiles.
+
+This means the browser receives already-rendered images. The implementation can
+display the official trail symbology efficiently, but it cannot access the
+individual trail geometries or attributes contained in the source dataset.
+
+The current layer can therefore be used to validate:
+
+- visual alignment with the national map;
+- official trail categories and symbology;
+- rendering quality at different zoom levels;
+- browser-side tile performance.
+
+It cannot yet be used for:
+
+- selecting a trail segment;
+- reading its attributes;
+- snapping a waypoint to a segment;
+- constructing a routing graph;
+- calculating a route.
+
+Those capabilities require the raw vector dataset or a suitable vector service.
+
+## 7. Coordinate reference systems
+
+The OpenLayers view and both tile layers use Web Mercator, `EPSG:3857`.
 
 Values that are easier for humans to understand, such as the initial center and
 application bounds, are declared in WGS 84 longitude/latitude (`EPSG:4326`) and
 then transformed to `EPSG:3857` by OpenLayers.
 
-Future swissTLM3D data may be delivered in LV95 (`EPSG:2056`). Its conversion
-must be handled explicitly during import or display.
+Raw swissTLM3D data is distributed in LV95 (`EPSG:2056`). Its conversion must
+be handled explicitly when raw vector data is introduced.
 
-## 7. Geographic constraint
+## 8. Geographic constraint
 
 The application defines a rectangular extent covering Switzerland with a small
 border margin.
@@ -167,7 +201,7 @@ OpenLayers' smooth extent constraint is disabled so the boundary feels firm.
 The current extent is a UI decision, not an official administrative geometry.
 It can be adjusted after user testing.
 
-## 8. Repository structure
+## 9. Repository structure
 
 ```text
 swiss-trail-planner/
@@ -190,7 +224,7 @@ swiss-trail-planner/
 └── vite.config.ts
 ```
 
-## 9. File responsibilities
+## 10. File responsibilities
 
 ### `index.html`
 
@@ -218,9 +252,12 @@ Root component and integration boundary between React and OpenLayers.
 It:
 
 - reserves a DOM element for OpenLayers through a React ref;
-- creates the raster source;
-- instantiates the map, view, layer, and scale control;
-- listens to tile-loading events;
+- creates the two tile sources;
+- creates the base-map layer and hiking-trail overlay;
+- orders the hiking layer above the base map;
+- applies the hiking layer's minimum zoom threshold;
+- instantiates the map, view, and scale control;
+- listens to base-map tile-loading events;
 - handles the `loading`, `ready`, and `error` states;
 - removes listeners and detaches the map on unmount.
 
@@ -230,19 +267,20 @@ DOM.
 
 ### `src/map/config.ts`
 
-Central map configuration.
+Central map and provider configuration.
 
 It contains:
 
-- the swisstopo raster layer identifier;
+- the two swisstopo layer identifiers;
 - the required attribution;
 - the initial center;
 - the allowed extent;
-- zoom levels;
-- the XYZ source factory.
+- map zoom levels and the hiking-overlay visibility threshold;
+- a shared XYZ source factory;
+- factories for the JPEG base map and PNG hiking overlay.
 
-This file prevents provider-specific constants and geographic configuration
-from being scattered across React components.
+The hiking-source documentation explicitly records that the tile layer is only
+a rendered representation and cannot be used directly for routing.
 
 ### `src/styles.css`
 
@@ -257,11 +295,7 @@ It:
 
 ### `package.json`
 
-Declares:
-
-- runtime dependencies;
-- development dependencies;
-- npm scripts.
+Declares runtime dependencies, development dependencies, and npm scripts.
 
 Available scripts:
 
@@ -292,13 +326,8 @@ trailing whitespace handling.
 
 ### `.gitignore`
 
-Excludes files such as:
-
-- `node_modules/`;
-- the `dist/` build output;
-- logs;
-- local IDE files;
-- local environment files.
+Excludes dependencies, build output, logs, local IDE files, and local
+environment files.
 
 ### `README.md`
 
@@ -313,53 +342,64 @@ MIT license for the project's source code.
 The source code license does not replace swisstopo's geodata usage and
 attribution requirements.
 
-## 10. Runtime flow
+## 11. Runtime flow
 
 1. The browser loads `index.html`.
 2. `src/main.tsx` mounts React into `#root`.
 3. React renders `App`.
 4. `App` runs its effect after the first render.
-5. The effect creates the XYZ source and OpenLayers map instance.
-6. OpenLayers requests visible tiles from `wmts.geo.admin.ch`.
-7. The first successful tile removes the loading message.
-8. If no first tile loads, an error message is displayed.
-9. On unmount, listeners are removed and the map target is detached.
+5. The effect creates the base-map and hiking-trail XYZ sources.
+6. OpenLayers creates two ordered tile layers.
+7. The base map requests visible tiles from `wmts.geo.admin.ch`.
+8. The hiking overlay starts requesting and rendering tiles only after the view
+   zoom moves beyond level 11.
+9. The first successful base-map tile removes the loading message.
+10. If the initial base map fails, an error message is displayed.
+11. On unmount, listeners are removed and the map target is detached.
 
-## 11. Error handling
+## 12. Error handling
 
-The current version handles initial tile-loading failures.
+The current version treats failure of the initial base map as fatal.
 
-A single tile error that occurs after the map has already loaded does not hide
-the entire map. This rule prevents a local or temporary tile failure from
-making an otherwise usable map unavailable.
+A single base-map tile error that occurs after the map has already loaded does
+not hide the entire map. This prevents a local or temporary failure from making
+an otherwise usable map unavailable.
+
+The hiking overlay is deliberately non-blocking in this milestone: its failure
+does not hide a successfully loaded base map. Dedicated layer-status reporting
+can be added when the application gains a layer panel or notification system.
 
 There is no application logging or automatic retry mechanism yet.
 
-## 12. Code conventions
+## 13. Code conventions
 
 - Keep strict TypeScript enabled.
 - Use explicit module imports.
-- Centralize map constants.
+- Centralize provider and map constants.
 - Do not scatter geographic values across React components.
+- Preserve explicit layer ordering.
 - Remove every OpenLayers listener added inside an effect during cleanup.
 - Comments should explain why, not restate obvious code.
 - Keep files small and focused on one responsibility.
 - Add abstractions only when they simplify multiple real use cases.
 - `npm run build` must succeed before an important commit.
 
-## 13. Planned evolution
+## 14. Planned evolution
 
-### Phase 2 — Display swissTLM3D
+### Phase 2B — Display raw swissTLM3D vectors
 
-Add a vector layer above the raster map and validate:
+Load a limited vector sample and validate:
 
-- alignment;
+- reprojection from `EPSG:2056`;
+- geometric alignment;
 - useful attributes;
+- feature selection;
 - rendering performance;
-- styles by road or trail type.
+- styles by trail type.
 
-This phase will probably require data tiling or a vector-tile service instead
-of loading all of Switzerland as GeoJSON.
+Loading all of Switzerland as one GeoJSON file is not a viable target.
+Production-scale display will probably require data tiling, preprocessing, or a
+vector-tile service.
 
 ### Phase 3 — Route editing
 
@@ -393,13 +433,13 @@ GeoJSON / GPX route
 
 The final backend and graph engine have not been selected yet.
 
-## 14. When to evolve the architecture
+## 15. When to evolve the architecture
 
 A new abstraction or directory becomes justified when one of these cases
 appears:
 
 - multiple components reuse the same map logic;
-- several layers must be created and ordered;
+- several more layers must be created and ordered;
 - OpenLayers interactions become numerous;
 - shared state outgrows the root component;
 - network calls other than tile requests are introduced;

@@ -4,8 +4,10 @@ import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import TileLayer from 'ol/layer/Tile.js';
 import {
+  createHikingTrailsSource,
   createSwissTopoRasterSource,
   DEFAULT_MAP_CENTER,
+  HIKING_TRAILS_MIN_ZOOM,
   MAP_EXTENT,
   MAP_ZOOM,
 } from './map/config';
@@ -25,6 +27,7 @@ export default function App() {
     }
 
     const rasterSource = createSwissTopoRasterSource();
+    const hikingTrailsSource = createHikingTrailsSource();
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -66,6 +69,11 @@ export default function App() {
       layers: [
         new TileLayer({
           source: rasterSource,
+        }),
+        new TileLayer({
+          source: hikingTrailsSource,
+          minZoom: HIKING_TRAILS_MIN_ZOOM,
+          zIndex: 10,
         }),
       ],
       view: new View({

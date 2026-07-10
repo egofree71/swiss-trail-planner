@@ -3,17 +3,18 @@
 Open-source web application for planning hiking routes on official swisstopo
 maps and geodata.
 
-The current version is the first project milestone: an interactive swisstopo
-raster map that fills the browser window.
+The current version displays the Swiss national raster map together with the
+official swissTLM3D hiking-trail overlay.
 
 ## Current features
 
 - full-screen interactive Swiss national map;
+- official hiking trails displayed above the base map at detailed zoom levels;
 - panning and zooming;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
-- error message when the initial tile load fails;
+- error message when the initial base-map tile load fails;
 - no permanent toolbar covering the map.
 
 ## Architecture
@@ -68,20 +69,37 @@ Local preview:
 npm run preview
 ```
 
-## Map source
+## Map sources
+
+Base map:
 
 - XYZ URL template:
   `https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{x}/{y}.jpeg`
 - Layer:
   `ch.swisstopo.pixelkarte-farbe`
-- Display projection:
+
+Hiking trails:
+
+- XYZ URL template:
+  `https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{x}/{y}.png`
+- Layer:
+  `ch.swisstopo.swisstlm3d-wanderwege`
+
+Shared settings:
+
+- display projection:
   `EPSG:3857`
-- Attribution:
+- attribution:
   `© swisstopo`
+
+The hiking-trail layer is currently a rendered transparent tile overlay. It is
+hidden at overview scales and appears when the view zooms beyond level 11. Raw
+vector geometries will be required later for inspection, editing, and routing.
 
 ## Next milestone
 
-Display a first swissTLM3D layer above the raster background, without routing.
+Load and inspect a small raw swissTLM3D vector sample, including its geometry
+and useful trail attributes.
 
 ## License
 

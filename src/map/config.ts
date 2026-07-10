@@ -1,7 +1,9 @@
 import { fromLonLat, transformExtent } from 'ol/proj.js';
 import XYZ from 'ol/source/XYZ.js';
 
-const SWISSTOPO_LAYER_ID = 'ch.swisstopo.pixelkarte-farbe';
+const SWISSTOPO_BASE_MAP_LAYER_ID = 'ch.swisstopo.pixelkarte-farbe';
+const SWISSTOPO_HIKING_TRAILS_LAYER_ID =
+  'ch.swisstopo.swisstlm3d-wanderwege';
 
 const SWISSTOPO_ATTRIBUTION =
   '<a href="https://www.swisstopo.admin.ch/" target="_blank" rel="noopener noreferrer">© swisstopo</a>';
@@ -29,19 +31,45 @@ export const MAP_ZOOM = {
   maximum: 20,
 } as const;
 
-/**
- * Creates the official raster source used as the map background.
- *
- * The XYZ URL is built directly on purpose. This avoids making application
- * startup depend on parsing a WMTS capabilities document.
+/*
+ * OpenLayers treats a layer's minZoom as an exclusive boundary. Setting the
+ * value to 11 therefore makes the hiking overlay appear once the view zooms
+ * beyond level 11, normally at level 12 with the standard zoom controls.
  */
-export function createSwissTopoRasterSource(): XYZ {
+export const HIKING_TRAILS_MIN_ZOOM = 12;
+
+type SwissTopoTileFormat = 'jpeg' | 'png';
+
+function createSwissTopoXyzSource(
+  layerId: string,
+  format: SwissTopoTileFormat,
+): XYZ {
   return new XYZ({
-    url: `https://wmts.geo.admin.ch/1.0.0/${SWISSTOPO_LAYER_ID}/default/current/3857/{z}/{x}/{y}.jpeg`,
+    url: `https://wmts.geo.admin.ch/1.0.0/${layerId}/default/current/3857/{z}/{x}/{y}.${format}`,
     attributions: SWISSTOPO_ATTRIBUTION,
     crossOrigin: 'anonymous',
     projection: 'EPSG:3857',
     maxZoom: MAP_ZOOM.maximum,
     wrapX: false,
   });
+}
+
+/**
+ * Creates the official national-map raster source used as the background.
+ */
+export function createSwissTopoRasterSource(): XYZ {
+  return createSwissTopoXyzSource(SWISSTOPO_BASE_MAP_LAYER_ID, 'jpeg');
+}
+
+/**
+ * Creates the official hiking-trail overlay as transparent PNG tiles.
+ *
+ * This layer is a rendered WMTS representation of swissTLM3D. It is useful
+ * for visualization, but it does not expose vector geometries for routing.
+ */
+export function createHikingTrailsSource(): XYZ {
+  return createSwissTopoXyzSource(
+    SWISSTOPO_HIKING_TRAILS_LAYER_ID,
+    'png',
+  );
 }
