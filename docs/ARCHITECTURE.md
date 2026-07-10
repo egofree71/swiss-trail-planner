@@ -144,8 +144,8 @@ directly in `EPSG:3857`. The national map uses JPEG tiles, while the hiking
 overlay uses transparent PNG tiles.
 
 The hiking layer has a layer-level `minZoom` constraint. Its configured value
-is 11, which is an exclusive OpenLayers boundary, so the overlay normally first
-appears at integer zoom level 12. This keeps overview maps readable and avoids
+is 12, which is an exclusive OpenLayers boundary, so the overlay normally first
+appears at integer zoom level 13. This keeps overview maps readable and avoids
 downloading trail tiles before the base map shows useful road detail.
 
 ## 6. Rendered overlay versus vector data

@@ -93,7 +93,7 @@ Shared settings:
   `© swisstopo`
 
 The hiking-trail layer is currently a rendered transparent tile overlay. It is
-hidden at overview scales and appears when the view zooms beyond level 11. Raw
+hidden at overview scales and appears when the view zooms beyond level 12. Raw
 vector geometries will be required later for inspection, editing, and routing.
 
 ## Next milestone

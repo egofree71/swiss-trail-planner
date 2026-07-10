@@ -33,8 +33,8 @@ export const MAP_ZOOM = {
 
 /*
  * OpenLayers treats a layer's minZoom as an exclusive boundary. Setting the
- * value to 11 therefore makes the hiking overlay appear once the view zooms
- * beyond level 11, normally at level 12 with the standard zoom controls.
+ * value to 12 therefore makes the hiking overlay appear once the view zooms
+ * beyond level 12, normally at level 13 with the standard zoom controls.
  */
 export const HIKING_TRAILS_MIN_ZOOM = 12;
 
