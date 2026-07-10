@@ -109,6 +109,26 @@ Local preview:
 npm run preview
 ```
 
+## Deployment
+
+The application is deployed to GitHub Pages through:
+
+```text
+.github/workflows/deploy.yml
+```
+
+Every push to `main` installs the locked npm dependencies, builds the Vite
+application, and deploys the generated `dist/` directory.
+
+The project is configured for a repository site published at:
+
+```text
+https://<username>.github.io/swiss-trail-planner/
+```
+
+GitHub Pages must be enabled once in the repository settings by selecting
+**GitHub Actions** as the Pages source.
+
 ## Map sources
 
 Base map:

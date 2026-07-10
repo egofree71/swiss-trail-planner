@@ -115,6 +115,14 @@ Browser
    └── HTTPS requests
           ├── wmts.geo.admin.ch
           └── api3.geo.admin.ch
+
+Deployment
+   │
+   ├── push to main
+   ├── GitHub Actions
+   │      ├── npm ci
+   │      └── npm run build
+   └── GitHub Pages
 ```
 
 No project-owned service runs on the server. Vite only compiles and serves
@@ -127,11 +135,13 @@ frontend assets during development.
 | React 19 | UI components, search state, and status messages |
 | TypeScript 5 | Static typing and compile-time verification |
 | OpenLayers 10 | Map, view, layers, projections, markers, and controls |
-| Vite 8 | Development server and production build |
+| Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
 | Browser Geolocation API | On-demand user position lookup |
 | Browser Fullscreen API | Distraction-free map display |
 | HTML/CSS | Full-screen layout, floating controls, and result panel |
+| GitHub Actions | Automated GitHub Pages deployment |
+| GitHub Pages | Static production hosting over HTTPS |
 | npm | Dependency installation and lockfile management |
 
 ## 6. Map services
@@ -219,7 +229,42 @@ Entering or leaving fullscreen changes the viewport dimensions. The listener
 therefore schedules `map.updateSize()` on the next animation frame so
 OpenLayers recalculates its canvas and visible tile area.
 
-## 11. Geographic constraint
+
+## 11. GitHub Pages deployment
+
+The repository is deployed as a GitHub Pages project site:
+
+```text
+https://<username>.github.io/swiss-trail-planner/
+```
+
+Because the application is hosted below a repository-specific path rather than
+the domain root, `vite.config.ts` sets:
+
+```ts
+base: '/swiss-trail-planner/'
+```
+
+Vite uses this value when generating production asset URLs. Production
+artifacts are written to `dist/`.
+
+The workflow `.github/workflows/deploy.yml` runs on every push to `main` and can
+also be started manually. It:
+
+1. checks out the repository;
+2. installs the exact dependencies from `package-lock.json` with `npm ci`;
+3. runs the TypeScript check and Vite build through `npm run build`;
+4. uploads `dist/` as a GitHub Pages artifact;
+5. deploys that artifact to the `github-pages` environment.
+
+The workflow receives only the permissions required to read the repository and
+deploy Pages. Deployment concurrency is limited to one active Pages run, and a
+newer push cancels an obsolete deployment.
+
+GitHub Pages serves the application over HTTPS. This is important because
+browser geolocation requires a secure context outside `localhost`.
+
+## 12. Geographic constraint
 
 The application uses a rectangular extent covering Switzerland with a small
 border margin. It keeps nearby cross-border access visible while preventing
@@ -228,10 +273,13 @@ navigation to distant empty areas.
 The constraint applies to the full viewport, not only its center, and the
 smooth boundary effect is disabled.
 
-## 12. Repository structure
+## 13. Repository structure
 
 ```text
 swiss-trail-planner/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── src/
@@ -257,7 +305,7 @@ swiss-trail-planner/
 └── vite.config.ts
 ```
 
-## 13. File responsibilities
+## 14. File responsibilities
 
 ### `src/App.tsx`
 
@@ -310,13 +358,14 @@ controls, result panel, status messages, and OpenLayers control placement.
 - `index.html` is the browser entry point.
 - `package.json` declares dependencies and npm scripts.
 - `package-lock.json` locks dependency versions.
-- `vite.config.ts` configures Vite and React.
+- `vite.config.ts` configures React and the GitHub Pages base path.
+- `.github/workflows/deploy.yml` builds and deploys `dist/` to GitHub Pages.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
 - `LICENSE` contains the MIT license.
 
-## 14. Runtime flow
+## 15. Runtime flow
 
 1. The browser loads the React application.
 2. `App` creates the OpenLayers map, tile layers, and vector markers.
@@ -331,8 +380,10 @@ controls, result panel, status messages, and OpenLayers control placement.
 11. Pressing `Escape` exits fullscreen through the browser.
 12. On unmount, listeners, timers, requests, references, and the map target are
     cleaned up by their owning components.
+13. A push to `main` triggers the Pages workflow.
+14. GitHub Actions runs `npm ci`, builds `dist/`, and deploys the artifact.
 
-## 15. Error handling
+## 16. Error handling
 
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
@@ -347,7 +398,7 @@ retried by clicking the button again.
 
 There is no persistent logging or automatic retry mechanism yet.
 
-## 16. Code conventions
+## 17. Code conventions
 
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
@@ -362,8 +413,9 @@ There is no persistent logging or automatic retry mechanism yet.
 - Remove listeners and clear timers during cleanup.
 - Comments should explain why, not restate obvious code.
 - `npm run build` must succeed before an important commit.
+- Production asset paths must remain compatible with the configured Pages base.
 
-## 17. Planned evolution
+## 18. Planned evolution
 
 ### Phase 2B — Display raw swissTLM3D vectors
 
@@ -400,7 +452,7 @@ GeoJSON / GPX route
 
 The final backend and graph engine have not been selected yet.
 
-## 18. When to evolve the architecture
+## 19. When to evolve the architecture
 
 Create a new abstraction when several components reuse the same map logic,
 OpenLayers interactions become numerous, shared state outgrows `App`, additional
