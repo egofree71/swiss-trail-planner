@@ -1,6 +1,6 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: raster map, hiking overlay, location search, and map controls.
+> Documented state: raster map, hiking overlay, search, geolocation, and fullscreen controls.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -34,6 +34,7 @@ It can:
 - search official Swiss location indexes;
 - display a selected search result as a vector marker;
 - request and display the user's current position;
+- enter and leave browser fullscreen mode;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
 - display a metric scale and swisstopo attribution;
@@ -97,8 +98,9 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── floating zoom and geolocation controls
-   │      └── browser Geolocation API
+   │      ├── floating zoom, geolocation, and fullscreen controls
+   │      ├── browser Geolocation API
+   │      └── browser Fullscreen API
    │
    ├── App.tsx
    │      │ creates and destroys
@@ -128,6 +130,7 @@ frontend assets during development.
 | Vite 8 | Development server and production build |
 | geo.admin.ch SearchServer | Official location search |
 | Browser Geolocation API | On-demand user position lookup |
+| Browser Fullscreen API | Distraction-free map display |
 | HTML/CSS | Full-screen layout, floating controls, and result panel |
 | npm | Dependency installation and lockfile management |
 
@@ -202,7 +205,21 @@ extent are rejected.
 Browser geolocation requires a secure context. Development on `localhost` is
 supported, while a deployed version must use HTTPS.
 
-## 10. Geographic constraint
+## 10. Fullscreen mode
+
+The fullscreen control calls `requestFullscreen()` on the root `.app` element,
+so the map, search field, controls, and temporary messages remain available.
+
+The browser owns the actual fullscreen lifecycle. Pressing `Escape` exits the
+mode without application-specific keyboard handling. A `fullscreenchange`
+listener keeps the React button state synchronized even when fullscreen is
+left through the browser UI or the Escape key.
+
+Entering or leaving fullscreen changes the viewport dimensions. The listener
+therefore schedules `map.updateSize()` on the next animation frame so
+OpenLayers recalculates its canvas and visible tile area.
+
+## 11. Geographic constraint
 
 The application uses a rectangular extent covering Switzerland with a small
 border margin. It keeps nearby cross-border access visible while preventing
@@ -211,7 +228,7 @@ navigation to distant empty areas.
 The constraint applies to the full viewport, not only its center, and the
 smooth boundary effect is disabled.
 
-## 11. Repository structure
+## 12. Repository structure
 
 ```text
 swiss-trail-planner/
@@ -240,15 +257,15 @@ swiss-trail-planner/
 └── vite.config.ts
 ```
 
-## 12. File responsibilities
+## 13. File responsibilities
 
 ### `src/App.tsx`
 
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
-It creates the tile layers and marker layers, handles map and geolocation
-status, reacts to a selected search result, and cleans up imperative resources
-when React unmounts the component.
+It creates the tile layers and marker layers, handles map, geolocation, and
+fullscreen state, reacts to a selected search result, and cleans up imperative
+resources when React unmounts the component.
 
 ### `src/components/LocationSearch.tsx`
 
@@ -299,20 +316,23 @@ controls, result panel, status messages, and OpenLayers control placement.
 - `README.md` is the quick-start guide.
 - `LICENSE` contains the MIT license.
 
-## 13. Runtime flow
+## 14. Runtime flow
 
 1. The browser loads the React application.
 2. `App` creates the OpenLayers map, tile layers, and vector markers.
 3. The base map begins loading from `wmts.geo.admin.ch`.
 4. The hiking overlay starts loading when zoom moves beyond level 12.
-5. Typing two characters schedules a SearchServer request after 300 ms.
-6. A changed query aborts the previous request.
-7. Selecting a result updates the red search marker and recenters the map.
-8. Clicking geolocation requests permission and updates the blue user marker.
-9. On unmount, listeners, timers, requests, references, and the map target are
-   cleaned up by their owning components.
+5. The fullscreen button requests fullscreen for the root application element.
+6. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+7. Typing two characters schedules a SearchServer request after 300 ms.
+8. A changed query aborts the previous request.
+9. Selecting a result updates the red search marker and recenters the map.
+10. Clicking geolocation requests permission and updates the blue user marker.
+11. Pressing `Escape` exits fullscreen through the browser.
+12. On unmount, listeners, timers, requests, references, and the map target are
+    cleaned up by their owning components.
 
-## 14. Error handling
+## 15. Error handling
 
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
@@ -327,7 +347,7 @@ retried by clicking the button again.
 
 There is no persistent logging or automatic retry mechanism yet.
 
-## 15. Code conventions
+## 16. Code conventions
 
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
@@ -336,11 +356,14 @@ There is no persistent logging or automatic retry mechanism yet.
 - Abort superseded network requests.
 - Preserve explicit layer ordering.
 - Request privacy-sensitive capabilities only after explicit user input.
+- Keep fullscreen state synchronized through `fullscreenchange` rather than
+  assuming a button click always succeeds.
+- Recalculate the OpenLayers size after viewport mode changes.
 - Remove listeners and clear timers during cleanup.
 - Comments should explain why, not restate obvious code.
 - `npm run build` must succeed before an important commit.
 
-## 16. Planned evolution
+## 17. Planned evolution
 
 ### Phase 2B — Display raw swissTLM3D vectors
 
@@ -377,7 +400,7 @@ GeoJSON / GPX route
 
 The final backend and graph engine have not been selected yet.
 
-## 17. When to evolve the architecture
+## 18. When to evolve the architecture
 
 Create a new abstraction when several components reuse the same map logic,
 OpenLayers interactions become numerous, shared state outgrows `App`, additional

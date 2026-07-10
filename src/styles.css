@@ -33,6 +33,12 @@ input {
   position: relative;
   width: 100%;
   height: 100%;
+  background: #eef2f4;
+}
+
+.app:fullscreen {
+  width: 100vw;
+  height: 100vh;
 }
 
 .map {
@@ -260,7 +266,8 @@ input {
   line-height: 1;
 }
 
-.map-control-button--location svg {
+.map-control-button--location svg,
+.map-control-button--fullscreen svg {
   width: 1.55rem;
   height: 1.55rem;
   fill: none;

@@ -34,6 +34,7 @@ type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
 const LOCATION_MESSAGE_DURATION_MS = 6_000;
 
 export default function App() {
+  const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
@@ -45,6 +46,7 @@ export default function App() {
   const [locationStatus, setLocationStatus] =
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const clearLocationMessageTimer = () => {
     if (locationMessageTimerRef.current !== null) {
@@ -75,6 +77,25 @@ export default function App() {
       zoom: currentZoom + delta,
       duration: 200,
     });
+  };
+
+
+  const toggleFullscreen = async () => {
+    const app = appRef.current;
+
+    if (!app || !document.fullscreenEnabled) {
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await app.requestFullscreen();
+      }
+    } catch (error) {
+      console.error('Unable to toggle fullscreen mode.', error);
+    }
   };
 
   const selectSearchResult = (result: LocationSearchResult) => {
@@ -259,12 +280,28 @@ export default function App() {
       ]),
     });
 
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === appRef.current);
+
+      /*
+       * The browser changes the available viewport when entering or leaving
+       * fullscreen. OpenLayers must recalculate its canvas size afterwards.
+       */
+      window.requestAnimationFrame(() => map.updateSize());
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
     mapRef.current = map;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
 
     return () => {
       clearLocationMessageTimer();
+      document.removeEventListener(
+        'fullscreenchange',
+        handleFullscreenChange,
+      );
       rasterSource.un('tileloadend', handleTileLoaded);
       rasterSource.un('tileloaderror', handleTileError);
       map.setTarget(undefined);
@@ -279,8 +316,12 @@ export default function App() {
       ? 'Recentrer sur ma position'
       : 'Afficher ma position';
 
+  const fullscreenButtonLabel = isFullscreen
+    ? 'Quitter le plein écran'
+    : 'Afficher en plein écran';
+
   return (
-    <main className="app">
+    <main className="app" ref={appRef}>
       <div
         ref={mapTargetRef}
         className="map"
@@ -344,6 +385,35 @@ export default function App() {
             <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
           </svg>
         </button>
+
+        {document.fullscreenEnabled && (
+          <button
+            type="button"
+            className={[
+              'map-control-button',
+              'map-control-button--fullscreen',
+              isFullscreen ? 'map-control-button--active' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            aria-label={fullscreenButtonLabel}
+            aria-pressed={isFullscreen}
+            title={fullscreenButtonLabel}
+            onClick={() => void toggleFullscreen()}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              {isFullscreen ? (
+                <path d="M9 3v6H3M15 3v6h6M21 15h-6v6M3 15h6v6" />
+              ) : (
+                <path d="M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6" />
+              )}
+            </svg>
+          </button>
+        )}
 
         {locationMessage && (
           <div

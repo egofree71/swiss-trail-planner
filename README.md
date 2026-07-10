@@ -14,6 +14,7 @@ swissTLM3D hiking-trail overlay, and lightweight map navigation tools.
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
 - one-click browser geolocation with a map marker;
+- fullscreen map mode with automatic exit through the Escape key;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
@@ -86,6 +87,13 @@ The location button requests the user's current position through the browser.
 
 The application requests a position only when the button is clicked. It does
 not continuously track the user.
+
+## Fullscreen mode
+
+The fullscreen button uses the browser Fullscreen API to display the complete
+application without the browser chrome. The button changes state while
+fullscreen is active, and the browser exits fullscreen when the user presses
+`Escape`.
 
 ## Production build
 
