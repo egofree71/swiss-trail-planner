@@ -3,20 +3,20 @@
 Open-source web application for planning hiking routes on official swisstopo
 maps and geodata.
 
-The current version displays the Swiss national raster map together with the
-official swissTLM3D hiking-trail overlay.
+The current version displays the Swiss national raster map, the official
+swissTLM3D hiking-trail overlay, and lightweight map navigation tools.
 
 ## Current features
 
 - full-screen interactive Swiss national map;
 - official hiking trails displayed above the base map at detailed zoom levels;
+- search for Swiss communes, localities, postal codes, and geographic names;
+- selected search result displayed with a map marker;
 - large, separated zoom controls;
 - one-click browser geolocation with a map marker;
-- panning and zooming;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
-- error message when the initial base-map tile load fails;
 - no permanent toolbar covering the map.
 
 ## Architecture
@@ -56,6 +56,24 @@ Vite then displays a local address, usually:
 ```text
 http://localhost:5173/
 ```
+
+## Location search
+
+The search field uses the official geo.admin.ch `SearchServer` endpoint:
+
+```text
+https://api3.geo.admin.ch/rest/services/ech/SearchServer
+```
+
+The current search is limited to:
+
+- communes;
+- localities and postal codes;
+- geographic names printed on the national map.
+
+Search requests start after two characters and a short delay. A newer request
+cancels the previous one. Selecting a result places a marker and recenters the
+map at zoom level 13.
 
 ## Geolocation
 

@@ -44,6 +44,12 @@ export const HIKING_TRAILS_MIN_ZOOM = 12;
  */
 export const USER_LOCATION_ZOOM = 15;
 
+/*
+ * Selecting a locality should reveal useful street detail and make the hiking
+ * overlay visible without zooming as closely as browser geolocation.
+ */
+export const LOCATION_SEARCH_ZOOM = 13;
+
 type SwissTopoTileFormat = 'jpeg' | 'png';
 
 function createSwissTopoXyzSource(

@@ -5,15 +5,23 @@ import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
 import { fromLonLat } from 'ol/proj.js';
+import LocationSearch from './components/LocationSearch';
+import type { LocationSearchResult } from './search/locationSearch';
 import {
   createHikingTrailsSource,
   createSwissTopoRasterSource,
   DEFAULT_MAP_CENTER,
   HIKING_TRAILS_MIN_ZOOM,
+  LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
   MAP_ZOOM,
   USER_LOCATION_ZOOM,
 } from './map/config';
+import {
+  createSearchResultMarker,
+  type SearchResultMarker,
+  updateSearchResultMarker,
+} from './map/searchResult';
 import {
   createUserLocationMarker,
   type UserLocationMarker,
@@ -29,6 +37,7 @@ export default function App() {
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
+  const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
 
   const [status, setStatus] = useState<LoadStatus>('loading');
@@ -65,6 +74,32 @@ export default function App() {
     view.animate({
       zoom: currentZoom + delta,
       duration: 200,
+    });
+  };
+
+  const selectSearchResult = (result: LocationSearchResult) => {
+    const map = mapRef.current;
+    const marker = searchResultMarkerRef.current;
+
+    if (!map || !marker) {
+      return;
+    }
+
+    const coordinate = fromLonLat([
+      result.longitude,
+      result.latitude,
+    ]);
+
+    if (!containsCoordinate(MAP_EXTENT, coordinate)) {
+      return;
+    }
+
+    updateSearchResultMarker(marker, coordinate);
+
+    map.getView().animate({
+      center: coordinate,
+      zoom: LOCATION_SEARCH_ZOOM,
+      duration: 600,
     });
   };
 
@@ -152,6 +187,7 @@ export default function App() {
     const rasterSource = createSwissTopoRasterSource();
     const hikingTrailsSource = createHikingTrailsSource();
     const userLocationMarker = createUserLocationMarker();
+    const searchResultMarker = createSearchResultMarker();
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -199,6 +235,7 @@ export default function App() {
           minZoom: HIKING_TRAILS_MIN_ZOOM,
           zIndex: 10,
         }),
+        searchResultMarker.layer,
         userLocationMarker.layer,
       ],
       view: new View({
@@ -224,6 +261,7 @@ export default function App() {
 
     mapRef.current = map;
     userLocationMarkerRef.current = userLocationMarker;
+    searchResultMarkerRef.current = searchResultMarker;
 
     return () => {
       clearLocationMessageTimer();
@@ -232,6 +270,7 @@ export default function App() {
       map.setTarget(undefined);
       mapRef.current = null;
       userLocationMarkerRef.current = null;
+      searchResultMarkerRef.current = null;
     };
   }, []);
 
@@ -247,6 +286,8 @@ export default function App() {
         className="map"
         aria-label="Carte nationale suisse interactive"
       />
+
+      <LocationSearch onSelect={selectSearchResult} />
 
       <nav className="map-controls" aria-label="Contrôles de la carte">
         <div className="zoom-controls">
@@ -294,7 +335,12 @@ export default function App() {
             focusable="false"
           >
             <circle cx="12" cy="12" r="7" />
-            <circle cx="12" cy="12" r="2.2" className="location-icon-center" />
+            <circle
+              cx="12"
+              cy="12"
+              r="2.2"
+              className="location-icon-center"
+            />
             <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
           </svg>
         </button>

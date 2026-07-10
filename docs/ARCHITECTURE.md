@@ -1,6 +1,6 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: raster base map, hiking-trail overlay, and map controls.
+> Documented state: raster map, hiking overlay, location search, and map controls.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -31,11 +31,13 @@ It can:
 
 - display the swisstopo color raster map;
 - display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
-- pan and zoom;
+- search official Swiss location indexes;
+- display a selected search result as a vector marker;
+- request and display the user's current position;
+- pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
-- display a metric scale;
-- display the swisstopo attribution;
-- report an initial base-map tile-loading failure.
+- display a metric scale and swisstopo attribution;
+- report map, search, and geolocation failures.
 
 It does not yet include:
 
@@ -53,9 +55,8 @@ It does not yet include:
 
 ### 3.1 The map is the main interface
 
-No permanent toolbar occupies the top of the window. Future tools should use
-compact buttons, floating panels, or collapsible controls so the map retains as
-much space as possible.
+No permanent toolbar occupies the top of the window. Tools use compact floating
+controls and temporary panels so the map retains as much space as possible.
 
 ### 3.2 Incremental delivery
 
@@ -63,46 +64,40 @@ The project evolves through independent functional layers:
 
 1. raster background;
 2. rendered hiking-trail overlay;
-3. raw swissTLM3D vector display and inspection;
-4. manual route drawing and GPX export;
-5. routable graph preparation;
-6. hiking routing.
+3. basic map controls, geolocation, and location search;
+4. raw swissTLM3D vector display and inspection;
+5. manual route drawing and GPX export;
+6. routable graph preparation;
+7. hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
 ### 3.3 Avoid premature abstraction
 
-The current architecture remains intentionally small. Provider and geographic
-configuration live in `src/map/config.ts`, while map creation remains in
-`App.tsx`.
+Provider and geographic configuration live in `src/map/config.ts`. Marker
+creation is isolated in small map modules, and the location-search UI and API
+client are separated from `App.tsx`.
 
-When drawing tools, feature selection, additional layers, and routing are
-introduced, OpenLayers logic can move into dedicated modules or hooks.
+OpenLayers map ownership remains in `App.tsx` because there is still only one
+map view. More extensive drawing and routing interactions may later justify a
+dedicated hook or map-controller module.
 
 ### 3.4 Comments explain decisions
 
-Comments should not restate obvious code. They should document:
-
-- an architecture decision;
-- an external constraint;
-- non-obvious behavior;
-- a lifecycle precaution;
-- a geographic value chosen by the project.
-
-Public or reusable functions may receive short JSDoc comments when their
-contract is not immediately obvious.
+Comments should not restate obvious code. They should document architecture
+decisions, external constraints, non-obvious behavior, lifecycle precautions,
+and geographic values chosen by the project.
 
 ## 4. Technical overview
 
 ```text
 Browser
    │
-   ├── index.html
-   │      │
-   │      ▼
    ├── React 19 + TypeScript
    │      │
-   │      ├── floating zoom and location controls
+   │      ├── LocationSearch component
+   │      │      └── geo.admin.ch SearchServer
+   │      ├── floating zoom and geolocation controls
    │      └── browser Geolocation API
    │
    ├── App.tsx
@@ -112,86 +107,87 @@ Browser
    │      │
    │      ├── TileLayer: national map (JPEG)
    │      ├── TileLayer: hiking trails (transparent PNG)
-   │      └── VectorLayer: user-location marker
+   │      ├── VectorLayer: selected search result
+   │      └── VectorLayer: user location
    │
-   └── HTTPS XYZ requests to wmts.geo.admin.ch
+   └── HTTPS requests
+          ├── wmts.geo.admin.ch
+          └── api3.geo.admin.ch
 ```
 
-No project-owned service runs on the server. The Vite development server only
-compiles and serves frontend assets.
+No project-owned service runs on the server. Vite only compiles and serves
+frontend assets during development.
 
 ## 5. Technologies
 
 | Technology | Role |
 |---|---|
-| React 19 | UI components and loading states |
+| React 19 | UI components, search state, and status messages |
 | TypeScript 5 | Static typing and compile-time verification |
-| OpenLayers 10 | Map, view, layers, tiles, projections, and controls |
+| OpenLayers 10 | Map, view, layers, projections, markers, and controls |
 | Vite 8 | Development server and production build |
+| geo.admin.ch SearchServer | Official location search |
 | Browser Geolocation API | On-demand user position lookup |
-| HTML/CSS | Page structure, full-screen layout, and floating controls |
+| HTML/CSS | Full-screen layout, floating controls, and result panel |
 | npm | Dependency installation and lockfile management |
 
-### Why OpenLayers?
+## 6. Map services
 
-OpenLayers provides first-class support for raster layers, mapping services,
-projections, layer ordering, and extent constraints. These features fit a
-project that will eventually consume several swisstopo geodata formats.
+The national map and hiking overlay use direct XYZ-compatible WMTS URLs in
+`EPSG:3857`.
 
-### Why use direct XYZ URLs?
+The national map uses JPEG tiles. The hiking overlay uses transparent PNG tiles
+and has `minZoom` set to 12. Because OpenLayers treats this boundary as
+exclusive, the overlay normally appears at integer zoom level 13.
 
-An earlier implementation parsed WMTS capabilities during startup. That
-approach failed because of a projection mismatch while the capabilities
-document was being interpreted.
-
-The current implementation therefore uses the official XYZ URL pattern
-directly in `EPSG:3857`. The national map uses JPEG tiles, while the hiking
-overlay uses transparent PNG tiles.
-
-The hiking layer has a layer-level `minZoom` constraint. Its configured value
-is 12, which is an exclusive OpenLayers boundary, so the overlay normally first
-appears at integer zoom level 13. This keeps overview maps readable and avoids
-downloading trail tiles before the base map shows useful road detail.
-
-## 6. Rendered overlay versus vector data
-
-The layer `ch.swisstopo.swisstlm3d-wanderwege` is currently consumed through
-WMTS-compatible XYZ tiles.
-
-This means the browser receives already-rendered images. The implementation can
-display the official trail symbology efficiently, but it cannot access the
-individual trail geometries or attributes contained in the source dataset.
-
-The current layer can therefore be used to validate:
-
-- visual alignment with the national map;
-- official trail categories and symbology;
-- rendering quality at different zoom levels;
-- browser-side tile performance.
-
-It cannot yet be used for:
-
-- selecting a trail segment;
-- reading its attributes;
-- snapping a waypoint to a segment;
-- constructing a routing graph;
-- calculating a route.
-
-Those capabilities require the raw vector dataset or a suitable vector service.
+The hiking overlay is already rendered and therefore cannot expose individual
+trail geometries or attributes. Raw vector data will still be required for
+selection, snapping, and routing.
 
 ## 7. Coordinate reference systems
 
-The OpenLayers view and both tile layers use Web Mercator, `EPSG:3857`.
+The OpenLayers view and tile layers use Web Mercator (`EPSG:3857`).
 
-Values that are easier for humans to understand, such as the initial center and
-application bounds, are declared in WGS 84 longitude/latitude (`EPSG:4326`) and
-then transformed to `EPSG:3857` by OpenLayers.
+Human-readable centers and bounds, browser geolocation, and SearchServer
+results use WGS 84 longitude/latitude (`EPSG:4326`). OpenLayers transforms those
+coordinates with `fromLonLat()` before displaying them.
 
-Raw swissTLM3D data is distributed in LV95 (`EPSG:2056`). Its conversion must
-be handled explicitly when raw vector data is introduced.
+Raw swissTLM3D data is distributed in LV95 (`EPSG:2056`) and will require
+explicit conversion when introduced.
 
+## 8. Location search
 
-## 8. Browser geolocation
+`src/search/locationSearch.ts` calls:
+
+```text
+https://api3.geo.admin.ch/rest/services/ech/SearchServer
+```
+
+The request uses `type=locations` and limits `origins` to:
+
+- `gg25` for communes;
+- `zipcode` for localities and postal codes;
+- `gazetteer` for geographic names.
+
+The UI starts searching after two characters and 300 milliseconds of inactivity.
+Each effect owns an `AbortController`, so changing the query cancels the older
+request.
+
+SearchServer labels may contain simple HTML emphasis tags. The API client parses
+them as an HTML document, removes italic classification text, and returns only
+plain text to React. The UI never injects returned HTML.
+
+The component supports mouse, touch, and keyboard interaction:
+
+- arrow keys change the active result;
+- Enter selects it;
+- Escape closes the panel;
+- a pointer press outside closes the panel.
+
+Selecting a result transforms its longitude and latitude to `EPSG:3857`,
+updates a dedicated marker, and animates the view to zoom level 13.
+
+## 9. Browser geolocation
 
 The location control uses `navigator.geolocation.getCurrentPosition()` only
 after an explicit user action.
@@ -199,49 +195,37 @@ after an explicit user action.
 The browser may display a permission prompt. The application does not request
 the position during startup and does not use continuous tracking.
 
-The returned WGS 84 longitude and latitude are transformed to the map's
-`EPSG:3857` projection. A successful position:
-
-- updates a dedicated OpenLayers vector feature;
-- recenters the map;
-- raises the view to at least zoom level 15;
-- remains visible until the page is reloaded or another position replaces it.
-
-Positions outside the configured map extent are rejected instead of being
-silently clamped to the map boundary.
+A successful position updates a dedicated vector marker, recenters the map, and
+raises the view to at least zoom level 15. Positions outside the configured map
+extent are rejected.
 
 Browser geolocation requires a secure context. Development on `localhost` is
 supported, while a deployed version must use HTTPS.
 
-Failures such as denied permission, timeout, unavailable position, or missing
-browser support are reported through a temporary non-blocking message.
+## 10. Geographic constraint
 
-## 9. Geographic constraint
+The application uses a rectangular extent covering Switzerland with a small
+border margin. It keeps nearby cross-border access visible while preventing
+navigation to distant empty areas.
 
-The application defines a rectangular extent covering Switzerland with a small
-border margin.
+The constraint applies to the full viewport, not only its center, and the
+smooth boundary effect is disabled.
 
-This extent has two goals:
-
-- keep nearby cross-border access visible;
-- prevent users from panning to distant empty areas.
-
-The restriction applies to the full visible viewport, not only to its center.
-OpenLayers' smooth extent constraint is disabled so the boundary feels firm.
-
-The current extent is a UI decision, not an official administrative geometry.
-It can be adjusted after user testing.
-
-## 10. Repository structure
+## 11. Repository structure
 
 ```text
 swiss-trail-planner/
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── src/
+│   ├── components/
+│   │   └── LocationSearch.tsx
 │   ├── map/
 │   │   ├── config.ts
+│   │   ├── searchResult.ts
 │   │   └── userLocation.ts
+│   ├── search/
+│   │   └── locationSearch.ts
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── styles.css
@@ -256,210 +240,120 @@ swiss-trail-planner/
 └── vite.config.ts
 ```
 
-## 11. File responsibilities
-
-### `index.html`
-
-HTML entry point loaded by the browser.
-
-It contains the `#root` element used by React and references `src/main.tsx` as
-the main module.
-
-### `src/main.tsx`
-
-React entry point.
-
-It:
-
-- imports OpenLayers styles;
-- imports project styles;
-- validates the presence of `#root`;
-- mounts `App` with `createRoot`;
-- enables `StrictMode` in development.
+## 12. File responsibilities
 
 ### `src/App.tsx`
 
-Root component and integration boundary between React and OpenLayers.
+Owns the OpenLayers map instance and coordinates map-level behavior.
 
-It:
+It creates the tile layers and marker layers, handles map and geolocation
+status, reacts to a selected search result, and cleans up imperative resources
+when React unmounts the component.
 
-- reserves a DOM element for OpenLayers through a React ref;
-- creates the two tile sources;
-- creates the base-map layer and hiking-trail overlay;
-- orders the hiking layer above the base map;
-- applies the hiking layer's minimum zoom threshold;
-- instantiates the map, view, and scale control;
-- listens to base-map tile-loading events;
-- handles the `loading`, `ready`, and `error` states;
-- removes listeners and detaches the map on unmount.
+### `src/components/LocationSearch.tsx`
 
-OpenLayers is imperative, so the map is created inside a `useEffect`. React
-owns the surrounding UI, while OpenLayers owns the map canvas and map-specific
-DOM.
+Owns the search-field interface:
 
-### `src/map/config.ts`
+- query state;
+- debounce timing;
+- request cancellation lifecycle;
+- result-panel visibility;
+- keyboard navigation;
+- result selection.
 
-Central map and provider configuration.
+It does not know about OpenLayers. It reports a typed result through its
+`onSelect` callback.
 
-It contains:
+### `src/search/locationSearch.ts`
 
-- the two swisstopo layer identifiers;
-- the required attribution;
-- the initial center;
-- the allowed extent;
-- map zoom levels and the hiking-overlay visibility threshold;
-- a shared XYZ source factory;
-- factories for the JPEG base map and PNG hiking overlay.
+Owns the SearchServer HTTP contract, response validation, label normalization,
+origin labels, duplicate removal, and result limits.
 
-The hiking-source documentation explicitly records that the tile layer is only
-a rendered representation and cannot be used directly for routing.
+### `src/map/searchResult.ts`
 
-The module also exposes the minimum zoom used when centering on a user
-location.
+Creates and updates the vector marker for the selected search result.
 
 ### `src/map/userLocation.ts`
 
-Creates and updates the dedicated OpenLayers vector layer used for the
-user-location marker.
+Creates and updates the separate vector marker for browser geolocation.
 
-The marker is kept separate from `App.tsx` so its geometry and visual style can
-evolve independently from browser permission and UI state handling.
+### `src/map/config.ts`
+
+Centralizes provider identifiers, attribution, map extent, zoom settings, and
+tile-source factories.
 
 ### `src/styles.css`
 
-Global application styles.
+Defines the full-screen layout, left-side search control, right-side map
+controls, result panel, status messages, and OpenLayers control placement.
 
-It:
+### Remaining root files
 
-- gives the full window to `html`, `body`, `#root`, and the map;
-- disables page scrolling;
-- styles the large separated zoom and location controls;
-- positions temporary geolocation and map status messages;
-- places the OpenLayers scale and attribution controls.
+- `src/main.tsx` mounts React and imports styles.
+- `index.html` is the browser entry point.
+- `package.json` declares dependencies and npm scripts.
+- `package-lock.json` locks dependency versions.
+- `vite.config.ts` configures Vite and React.
+- `tsconfig.json` enables strict TypeScript.
+- `.editorconfig` and `.gitignore` define repository conventions.
+- `README.md` is the quick-start guide.
+- `LICENSE` contains the MIT license.
 
-### `package.json`
+## 13. Runtime flow
 
-Declares runtime dependencies, development dependencies, and npm scripts.
+1. The browser loads the React application.
+2. `App` creates the OpenLayers map, tile layers, and vector markers.
+3. The base map begins loading from `wmts.geo.admin.ch`.
+4. The hiking overlay starts loading when zoom moves beyond level 12.
+5. Typing two characters schedules a SearchServer request after 300 ms.
+6. A changed query aborts the previous request.
+7. Selecting a result updates the red search marker and recenters the map.
+8. Clicking geolocation requests permission and updates the blue user marker.
+9. On unmount, listeners, timers, requests, references, and the map target are
+   cleaned up by their owning components.
 
-Available scripts:
+## 14. Error handling
 
-```text
-npm run dev      start the development server
-npm run build    run the TypeScript check and Vite production build
-npm run preview  preview the production build
-```
+Initial base-map failure is blocking because the application cannot function
+without a map. Isolated later tile failures do not hide an already usable map.
 
-### `package-lock.json`
+Hiking-overlay failure remains non-blocking.
 
-Locks exact dependency versions so installations remain reproducible across
-machines.
+Search failures display a temporary result-panel message and allow immediate
+retry through another query. Aborted searches are ignored.
 
-### `vite.config.ts`
+Geolocation failures display a temporary message beside the controls and can be
+retried by clicking the button again.
 
-Configures Vite and enables the React plugin.
+There is no persistent logging or automatic retry mechanism yet.
 
-### `tsconfig.json`
-
-Enables strict TypeScript checking, React JSX support, and modern module
-resolution.
-
-### `.editorconfig`
-
-Defines basic editor consistency rules: UTF-8, line endings, indentation, and
-trailing whitespace handling.
-
-### `.gitignore`
-
-Excludes dependencies, build output, logs, local IDE files, and local
-environment files.
-
-### `README.md`
-
-Developer and repository visitor quick-start guide.
-
-It remains intentionally shorter than this architecture document.
-
-### `LICENSE`
-
-MIT license for the project's source code.
-
-The source code license does not replace swisstopo's geodata usage and
-attribution requirements.
-
-## 12. Runtime flow
-
-1. The browser loads `index.html`.
-2. `src/main.tsx` mounts React into `#root`.
-3. React renders `App`.
-4. `App` runs its effect after the first render.
-5. The effect creates the base-map and hiking-trail XYZ sources.
-6. OpenLayers creates two ordered tile layers.
-7. The base map requests visible tiles from `wmts.geo.admin.ch`.
-8. The hiking overlay starts requesting and rendering tiles only after the view
-   zoom moves beyond level 11.
-9. The first successful base-map tile removes the loading message.
-10. If the initial base map fails, an error message is displayed.
-11. On unmount, listeners are removed and the map target is detached.
-
-## 13. Error handling
-
-The current version treats failure of the initial base map as fatal.
-
-A single base-map tile error that occurs after the map has already loaded does
-not hide the entire map. This prevents a local or temporary failure from making
-an otherwise usable map unavailable.
-
-The hiking overlay is deliberately non-blocking in this milestone: its failure
-does not hide a successfully loaded base map. Dedicated layer-status reporting
-can be added when the application gains a layer panel or notification system.
-
-Geolocation errors are non-blocking and appear temporarily beside the map
-controls. The location request can be retried by clicking the button again.
-
-There is no application logging or automatic retry mechanism yet.
-
-## 14. Code conventions
+## 15. Code conventions
 
 - Keep strict TypeScript enabled.
-- Use explicit module imports.
-- Centralize provider and map constants.
-- Do not scatter geographic values across React components.
+- Centralize provider and geographic constants.
+- Keep network contracts outside React components.
+- Never inject SearchServer label HTML into the DOM.
+- Abort superseded network requests.
 - Preserve explicit layer ordering.
-- Keep controls large enough for reliable pointer and touch interaction.
-- Request privacy-sensitive browser capabilities only after explicit user input.
-- Remove every OpenLayers listener added inside an effect during cleanup.
-- Clear pending UI timers during cleanup.
+- Request privacy-sensitive capabilities only after explicit user input.
+- Remove listeners and clear timers during cleanup.
 - Comments should explain why, not restate obvious code.
-- Keep files small and focused on one responsibility.
-- Add abstractions only when they simplify multiple real use cases.
 - `npm run build` must succeed before an important commit.
 
-## 15. Planned evolution
+## 16. Planned evolution
 
 ### Phase 2B — Display raw swissTLM3D vectors
 
-Load a limited vector sample and validate:
+Load a limited vector sample and validate reprojection, alignment, attributes,
+selection, styling, and rendering performance.
 
-- reprojection from `EPSG:2056`;
-- geometric alignment;
-- useful attributes;
-- feature selection;
-- rendering performance;
-- styles by trail type.
-
-Loading all of Switzerland as one GeoJSON file is not a viable target.
-Production-scale display will probably require data tiling, preprocessing, or a
-vector-tile service.
+Loading all of Switzerland as one GeoJSON file is not viable. Production-scale
+display will probably require preprocessing or vector tiles.
 
 ### Phase 3 — Route editing
 
-Add:
-
-- waypoints;
-- an editable line;
-- point deletion and movement;
-- length calculation;
-- GPX export.
+Add waypoints, an editable line, point deletion and movement, distance
+calculation, and GPX export.
 
 ### Phase 4 — Routing
 
@@ -483,15 +377,8 @@ GeoJSON / GPX route
 
 The final backend and graph engine have not been selected yet.
 
-## 16. When to evolve the architecture
+## 17. When to evolve the architecture
 
-A new abstraction or directory becomes justified when one of these cases
-appears:
-
-- multiple components reuse the same map logic;
-- several more layers must be created and ordered;
-- OpenLayers interactions become numerous;
-- shared state outgrows the root component;
-- network calls other than tile requests are introduced;
-- unit tests require isolated pure functions;
-- a backend or offline data-processing step is added.
+Create a new abstraction when several components reuse the same map logic,
+OpenLayers interactions become numerous, shared state outgrows `App`, additional
+network APIs appear, or unit tests require isolated pure functions.
