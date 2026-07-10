@@ -10,6 +10,8 @@ official swissTLM3D hiking-trail overlay.
 
 - full-screen interactive Swiss national map;
 - official hiking trails displayed above the base map at detailed zoom levels;
+- large, separated zoom controls;
+- one-click browser geolocation with a map marker;
 - panning and zooming;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
@@ -54,6 +56,18 @@ Vite then displays a local address, usually:
 ```text
 http://localhost:5173/
 ```
+
+## Geolocation
+
+The location button requests the user's current position through the browser.
+
+- the user must grant permission;
+- `localhost` is accepted during development;
+- a deployed version must use HTTPS;
+- positions outside the configured Swiss map extent are not displayed.
+
+The application requests a position only when the button is clicked. It does
+not continuously track the user.
 
 ## Production build
 

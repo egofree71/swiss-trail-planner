@@ -24,6 +24,10 @@ body {
   overflow: hidden;
 }
 
+button {
+  font: inherit;
+}
+
 .app {
   position: relative;
   width: 100%;
@@ -34,6 +38,104 @@ body {
   position: absolute;
   inset: 0;
   background: #e7ecef;
+}
+
+.map-controls {
+  position: absolute;
+  z-index: 20;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.zoom-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.map-control-button {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(32 47 60 / 25%);
+  border-radius: 9px;
+  color: #17212b;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(8px);
+}
+
+.map-control-button:hover {
+  background: #ffffff;
+}
+
+.map-control-button:active {
+  box-shadow: 0 1px 5px rgb(0 0 0 / 20%);
+  transform: translateY(1px);
+}
+
+.map-control-button:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 45%);
+  outline-offset: 2px;
+}
+
+.map-control-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.map-control-button--zoom {
+  font-size: 1.85rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.map-control-button--location svg {
+  width: 1.55rem;
+  height: 1.55rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.map-control-button--location .location-icon-center {
+  fill: currentcolor;
+  stroke: none;
+}
+
+.map-control-button--active {
+  color: #1769e0;
+  border-color: rgb(23 105 224 / 55%);
+}
+
+.location-message {
+  position: absolute;
+  top: 7.55rem;
+  right: 3.7rem;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 5.5rem));
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgb(32 47 60 / 20%);
+  border-radius: 8px;
+  color: #26333d;
+  background: rgb(255 255 255 / 95%);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.location-message--error {
+  border-color: rgb(185 55 55 / 55%);
 }
 
 .status-card {
@@ -69,4 +171,21 @@ body {
 .ol-attribution {
   right: 0.5rem;
   bottom: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .map-controls {
+    top: 0.75rem;
+    right: 0.75rem;
+  }
+
+  .map-control-button {
+    width: 2.85rem;
+    height: 2.85rem;
+  }
+
+  .location-message {
+    top: 7.25rem;
+    right: 3.55rem;
+  }
 }

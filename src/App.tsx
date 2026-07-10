@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
+import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
+import { fromLonLat } from 'ol/proj.js';
 import {
   createHikingTrailsSource,
   createSwissTopoRasterSource,
@@ -10,14 +12,135 @@ import {
   HIKING_TRAILS_MIN_ZOOM,
   MAP_EXTENT,
   MAP_ZOOM,
+  USER_LOCATION_ZOOM,
 } from './map/config';
+import {
+  createUserLocationMarker,
+  type UserLocationMarker,
+  updateUserLocationMarker,
+} from './map/userLocation';
 
 type LoadStatus = 'loading' | 'ready' | 'error';
+type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
+
+const LOCATION_MESSAGE_DURATION_MS = 6_000;
 
 export default function App() {
   const mapTargetRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<Map | null>(null);
+  const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
+  const locationMessageTimerRef = useRef<number | null>(null);
+
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  const [locationStatus, setLocationStatus] =
+    useState<LocationStatus>('idle');
+  const [locationMessage, setLocationMessage] = useState('');
+
+  const clearLocationMessageTimer = () => {
+    if (locationMessageTimerRef.current !== null) {
+      window.clearTimeout(locationMessageTimerRef.current);
+      locationMessageTimerRef.current = null;
+    }
+  };
+
+  const showTemporaryLocationMessage = (message: string) => {
+    clearLocationMessageTimer();
+    setLocationMessage(message);
+
+    locationMessageTimerRef.current = window.setTimeout(() => {
+      setLocationMessage('');
+      locationMessageTimerRef.current = null;
+    }, LOCATION_MESSAGE_DURATION_MS);
+  };
+
+  const changeZoom = (delta: number) => {
+    const view = mapRef.current?.getView();
+    const currentZoom = view?.getZoom();
+
+    if (!view || currentZoom === undefined) {
+      return;
+    }
+
+    view.animate({
+      zoom: currentZoom + delta,
+      duration: 200,
+    });
+  };
+
+  const locateUser = () => {
+    const map = mapRef.current;
+    const marker = userLocationMarkerRef.current;
+
+    if (!map || !marker) {
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setLocationStatus('error');
+      showTemporaryLocationMessage(
+        'La géolocalisation n’est pas disponible dans ce navigateur.',
+      );
+      return;
+    }
+
+    clearLocationMessageTimer();
+    setLocationMessage('Recherche de votre position…');
+    setLocationStatus('locating');
+
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const coordinate = fromLonLat([
+          coords.longitude,
+          coords.latitude,
+        ]);
+
+        if (!containsCoordinate(MAP_EXTENT, coordinate)) {
+          setLocationStatus('error');
+          showTemporaryLocationMessage(
+            'Votre position se trouve hors de la zone couverte.',
+          );
+          return;
+        }
+
+        updateUserLocationMarker(marker, coordinate);
+
+        const view = map.getView();
+        const currentZoom = view.getZoom() ?? USER_LOCATION_ZOOM;
+
+        view.animate({
+          center: coordinate,
+          zoom: Math.max(currentZoom, USER_LOCATION_ZOOM),
+          duration: 600,
+        });
+
+        clearLocationMessageTimer();
+        setLocationMessage('');
+        setLocationStatus('located');
+      },
+      (error) => {
+        const messages: Record<number, string> = {
+          [GeolocationPositionError.PERMISSION_DENIED]:
+            'L’accès à votre position a été refusé.',
+          [GeolocationPositionError.POSITION_UNAVAILABLE]:
+            'Votre position n’a pas pu être déterminée.',
+          [GeolocationPositionError.TIMEOUT]:
+            'La recherche de votre position a pris trop de temps.',
+        };
+
+        setLocationStatus('error');
+        showTemporaryLocationMessage(
+          messages[error.code] ??
+            'Une erreur est survenue pendant la géolocalisation.',
+        );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 30_000,
+      },
+    );
+  };
 
   useEffect(() => {
     const target = mapTargetRef.current;
@@ -28,6 +151,7 @@ export default function App() {
 
     const rasterSource = createSwissTopoRasterSource();
     const hikingTrailsSource = createHikingTrailsSource();
+    const userLocationMarker = createUserLocationMarker();
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -75,6 +199,7 @@ export default function App() {
           minZoom: HIKING_TRAILS_MIN_ZOOM,
           zIndex: 10,
         }),
+        userLocationMarker.layer,
       ],
       view: new View({
         center: DEFAULT_MAP_CENTER,
@@ -85,7 +210,9 @@ export default function App() {
         constrainOnlyCenter: false,
         smoothExtentConstraint: false,
       }),
-      controls: defaultControls().extend([
+      controls: defaultControls({
+        zoom: false,
+      }).extend([
         new ScaleLine({
           units: 'metric',
           bar: true,
@@ -95,12 +222,23 @@ export default function App() {
       ]),
     });
 
+    mapRef.current = map;
+    userLocationMarkerRef.current = userLocationMarker;
+
     return () => {
+      clearLocationMessageTimer();
       rasterSource.un('tileloadend', handleTileLoaded);
       rasterSource.un('tileloaderror', handleTileError);
       map.setTarget(undefined);
+      mapRef.current = null;
+      userLocationMarkerRef.current = null;
     };
   }, []);
+
+  const locationButtonLabel =
+    locationStatus === 'located'
+      ? 'Recentrer sur ma position'
+      : 'Afficher ma position';
 
   return (
     <main className="app">
@@ -109,6 +247,74 @@ export default function App() {
         className="map"
         aria-label="Carte nationale suisse interactive"
       />
+
+      <nav className="map-controls" aria-label="Contrôles de la carte">
+        <div className="zoom-controls">
+          <button
+            type="button"
+            className="map-control-button map-control-button--zoom"
+            aria-label="Zoomer"
+            title="Zoomer"
+            onClick={() => changeZoom(1)}
+          >
+            +
+          </button>
+
+          <button
+            type="button"
+            className="map-control-button map-control-button--zoom"
+            aria-label="Dézoomer"
+            title="Dézoomer"
+            onClick={() => changeZoom(-1)}
+          >
+            −
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className={[
+            'map-control-button',
+            'map-control-button--location',
+            locationStatus === 'located'
+              ? 'map-control-button--active'
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          aria-label={locationButtonLabel}
+          aria-busy={locationStatus === 'locating'}
+          title={locationButtonLabel}
+          disabled={locationStatus === 'locating'}
+          onClick={locateUser}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <circle cx="12" cy="12" r="7" />
+            <circle cx="12" cy="12" r="2.2" className="location-icon-center" />
+            <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+          </svg>
+        </button>
+
+        {locationMessage && (
+          <div
+            className={[
+              'location-message',
+              locationStatus === 'error'
+                ? 'location-message--error'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            role={locationStatus === 'error' ? 'alert' : 'status'}
+          >
+            {locationMessage}
+          </div>
+        )}
+      </nav>
 
       {status === 'loading' && (
         <div className="status-card" role="status">

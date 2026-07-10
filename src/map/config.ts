@@ -38,6 +38,12 @@ export const MAP_ZOOM = {
  */
 export const HIKING_TRAILS_MIN_ZOOM = 12;
 
+/*
+ * Locating the user should reveal nearby streets and trails without zooming
+ * all the way to the most detailed tile level.
+ */
+export const USER_LOCATION_ZOOM = 15;
+
 type SwissTopoTileFormat = 'jpeg' | 'png';
 
 function createSwissTopoXyzSource(
