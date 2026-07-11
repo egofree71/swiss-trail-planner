@@ -25,6 +25,7 @@ positions selected by the user.
 - straight-line segments when snapping is disabled;
 - functional undo and redo that restore the exact generated segment geometry;
 - route reversal, complete route deletion, and GPX track export;
+- compact route summary with distance, ascent, descent, and estimated walking time;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
@@ -148,6 +149,15 @@ creates a GPX 1.1 track containing the complete displayed geometry, including
 all intermediate swissTLM3D vertices, so another application can reproduce the
 same path without recalculating it. Elevation values are not exported yet.
 
+Once the route contains a complete section, a compact bar appears at the bottom
+of the map. Distance is calculated immediately from the displayed geometry. The
+application then requests a smoothed elevation profile from the official
+GeoAdmin profile service and displays total ascent, total descent, and an
+estimated walking time. The estimate follows the Swiss rule of thumb: 15 minutes
+per kilometre, 15 minutes per 100 metres of ascent, and 15 minutes per 200 metres
+of descent. Breaks are not included. If elevation lookup fails, distance remains
+available while the altitude-dependent values display a dash.
+
 ## Production build
 
 ```bash
@@ -212,9 +222,8 @@ as an inspectable development layer.
 
 ## Next milestone
 
-Test dynamic routing in several contrasting Swiss regions, inspect missing or
-false connections, and measure API and graph performance before deciding whether
-a preprocessed graph or backend is actually necessary.
+Validate dynamic routing and elevation summaries in several contrasting Swiss
+regions, then add elevation values to GPX export and a compact elevation profile.
 
 ## License
 

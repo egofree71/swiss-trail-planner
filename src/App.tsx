@@ -4,7 +4,7 @@
  * route history, dynamic swissTLM3D loading, and route-editing controls while
  * keeping provider/network details in dedicated modules.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
@@ -14,6 +14,9 @@ import TileLayer from 'ol/layer/Tile.js';
 import { fromLonLat } from 'ol/proj.js';
 import LocationSearch from './components/LocationSearch';
 import RouteControls from './components/RouteControls';
+import RouteStatistics, {
+  type RouteElevationStatus,
+} from './components/RouteStatistics';
 import { downloadRouteGpx } from './export/gpx';
 import {
   createHikingTrailsSource,
@@ -26,6 +29,7 @@ import {
   USER_LOCATION_ZOOM,
 } from './map/config';
 import {
+  collectRouteCoordinates,
   createRouteDisplay,
   reverseRouteSteps,
   type RouteDisplay,
@@ -46,6 +50,12 @@ import {
   DynamicRoutingNetworkLoader,
   RoutingAreaTooLargeError,
 } from './routing/dynamicRoutingNetwork';
+import {
+  calculateRouteDistance,
+  estimateHikingDuration,
+  fetchRouteElevationSummary,
+  type RouteElevationSummary,
+} from './metrics/routeMetrics';
 import type { LocationSearchResult } from './search/locationSearch';
 
 /** Base-map loading state used by the blocking startup card. */
@@ -69,6 +79,8 @@ const LOCATION_MESSAGE_DURATION_MS = 6_000;
 const ROUTE_MESSAGE_DURATION_MS = 7_000;
 /** Squared distance in square map units below which a route connector is unnecessary. */
 const ROUTE_CONNECTOR_DISTANCE_SQUARED = 0.01;
+/** Delay in milliseconds before requesting elevations after a route mutation. */
+const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 
 /** Returns squared horizontal distance in map units for inexpensive continuity checks. */
 function coordinateDistanceSquared(
@@ -120,6 +132,25 @@ export default function App() {
   const [routeHistory, setRouteHistory] = useState<RouteHistory>(
     routeHistoryRef.current,
   );
+  const [routeElevationStatus, setRouteElevationStatus] =
+    useState<RouteElevationStatus>('loading');
+  const [routeElevation, setRouteElevation] =
+    useState<RouteElevationSummary | null>(null);
+  const routeCoordinates = useMemo(
+    () => collectRouteCoordinates(routeHistory.steps),
+    [routeHistory.steps],
+  );
+  const routeDistanceMeters = useMemo(
+    () => calculateRouteDistance(routeCoordinates),
+    [routeCoordinates],
+  );
+  const routeDurationMinutes = routeElevation
+    ? estimateHikingDuration(
+        routeDistanceMeters,
+        routeElevation.ascentMeters,
+        routeElevation.descentMeters,
+      )
+    : null;
 
   /**
    * Keeps the synchronous ref and React render state on the same immutable
@@ -579,6 +610,50 @@ export default function App() {
   }, [routeHistory.steps]);
 
   /**
+   * Retrieves a fresh elevation profile after route history settles. Previous
+   * requests are aborted so rapid undo/redo actions cannot publish stale data.
+   */
+  useEffect(() => {
+    if (routeCoordinates.length < 2 || routeDistanceMeters <= 0) {
+      setRouteElevation(null);
+      setRouteElevationStatus('loading');
+      return;
+    }
+
+    const abortController = new AbortController();
+    setRouteElevation(null);
+    setRouteElevationStatus('loading');
+
+    const requestTimer = window.setTimeout(() => {
+      void fetchRouteElevationSummary(
+        routeCoordinates,
+        routeDistanceMeters,
+        abortController.signal,
+      )
+        .then((summary) => {
+          if (!abortController.signal.aborted) {
+            setRouteElevation(summary);
+            setRouteElevationStatus('ready');
+          }
+        })
+        .catch((error: unknown) => {
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          console.error('Unable to load the route elevation profile.', error);
+          setRouteElevation(null);
+          setRouteElevationStatus('error');
+        });
+    }, ELEVATION_REQUEST_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(requestTimer);
+      abortController.abort();
+    };
+  }, [routeCoordinates, routeDistanceMeters]);
+
+  /**
    * Registers the route-click interaction only while editing is active. Network
    * operations are serialized because each new segment depends on the endpoint
    * committed by the previous operation.
@@ -914,6 +989,16 @@ export default function App() {
           </div>
         )}
       </nav>
+
+      {routeCoordinates.length >= 2 && (
+        <RouteStatistics
+          distanceMeters={routeDistanceMeters}
+          elevationStatus={routeElevationStatus}
+          ascentMeters={routeElevation?.ascentMeters ?? null}
+          descentMeters={routeElevation?.descentMeters ?? null}
+          durationMinutes={routeDurationMinutes}
+        />
+      )}
 
       {routeMessage && (
         <div

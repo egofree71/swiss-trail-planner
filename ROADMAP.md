@@ -116,7 +116,7 @@ Tasks:
 - [x] Clear the current route.
 - [x] Reverse the complete route without recalculating sections.
 - [x] Add undo and redo support for waypoint creation.
-- [ ] Show route distance.
+- [x] Show route distance.
 - [ ] Keep controls compact and collapsible.
 
 Acceptance criteria:
@@ -155,11 +155,11 @@ Tasks:
 - [x] Define the internal route data model.
 - [x] Export the current route as a GPX 1.1 track.
 - [x] Include the complete route geometry in the correct order.
-- [ ] Retrieve elevation values for route points.
-- [ ] Calculate total ascent and descent.
-- [ ] Display route distance and elevation summary.
+- [x] Retrieve a smoothed elevation profile for the route.
+- [x] Calculate total ascent and descent.
+- [x] Display route distance, elevation summary, and estimated walking time.
 - [ ] Add a compact elevation profile.
-- [ ] Handle missing or incomplete elevation data.
+- [x] Handle missing or incomplete elevation data without blocking editing.
 
 Acceptance criteria:
 

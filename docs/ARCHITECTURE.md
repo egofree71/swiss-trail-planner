@@ -1,8 +1,8 @@
 # Swiss Trail Planner Architecture
 
 > Documented state: raster map, hiking overlay, search, geolocation,
-> fullscreen, manual route creation, GPX export, and experimental on-demand
-> swissTLM3D routing around user-selected positions.
+> fullscreen, manual route creation, route statistics, GPX export, and
+> experimental on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -47,6 +47,7 @@ It can:
 - reverse the complete route without recalculating sections;
 - clear the complete route;
 - export the displayed route geometry as a GPX 1.1 track;
+- display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal a compact route action strip for snap mode, reversal, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
@@ -60,7 +61,6 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - waypoint movement, insertion, or individual deletion;
-- distance or elevation calculations;
 - elevation values in GPX export;
 - local or remote persistence;
 - an application server.
@@ -83,9 +83,10 @@ The project evolves through independent functional layers:
 5. straight-line route creation with undo and redo;
 6. dynamic cell-based swissTLM3D routing around selected waypoints;
 7. route reversal, deletion, and GPX export;
-8. waypoint editing, distance, and elevation;
-9. repeatable routing-data preparation;
-10. reliable national hiking routing.
+8. distance, elevation summary, and walking-time estimate;
+9. waypoint editing and elevation-profile visualization;
+10. repeatable routing-data preparation;
+11. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -123,14 +124,15 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── RouteControls component
-   │      ├── route history and temporary routing status
+   │      ├── RouteControls and RouteStatistics components
+   │      ├── route history, statistics, and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
    │      ├── owns OpenLayers lifecycle and route-editing state
-   │      └── requests dynamic routing cells for snapped clicks
+   │      ├── requests dynamic routing cells for snapped clicks
+   │      └── refreshes elevation statistics after route changes
    │
    ├── OpenLayers Map / View
    │      ├── TileLayer: national map (JPEG)
@@ -148,7 +150,7 @@ Browser
    │
    └── HTTPS requests
           ├── wmts.geo.admin.ch
-          └── api3.geo.admin.ch
+          └── api3.geo.admin.ch (search, identify, and elevation profile)
 
 Deployment
    │
@@ -174,6 +176,7 @@ selected route section.
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand prototype access to swissTLM3D line geometries |
+| GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
 | Browser Fullscreen API | Distraction-free map display |
@@ -339,6 +342,20 @@ route actions use an opaque light-grey background so map details do not bleed
 through the toolbar. The route toggle displays a small animated spinner during
 asynchronous network work.
 
+`src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
+flattened route geometry. For altitude-dependent figures, it converts the route
+from Web Mercator through WGS 84 to approximate LV95 coordinates and sends a
+bounded POST request to GeoAdmin's elevation-profile service. The official
+swisstopo approximation is sufficiently precise for terrain samples spaced at
+about 20 metres. The service applies a small moving-average offset before the
+client accumulates positive and negative elevation changes.
+
+`src/components/RouteStatistics.tsx` renders the floating bottom summary. It
+shows distance immediately, uses an ellipsis while elevations are loading, and
+keeps distance visible with dashes for the remaining values if the external
+profile request fails. Walking time follows the Swiss rule of thumb and is
+rounded to five minutes because it is an estimate excluding breaks.
+
 Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
 stored section geometry without issuing another routing request. The redo stack
 is cleared because its entries belong to the previous direction. Deletion clears
@@ -413,9 +430,12 @@ swiss-trail-planner/
 ├── src/
 │   ├── components/
 │   │   ├── LocationSearch.tsx
-│   │   └── RouteControls.tsx
+│   │   ├── RouteControls.tsx
+│   │   └── RouteStatistics.tsx
 │   ├── export/
 │   │   └── gpx.ts
+│   ├── metrics/
+│   │   └── routeMetrics.ts
 │   ├── map/
 │   │   ├── config.ts
 │   │   ├── route.ts
@@ -449,9 +469,9 @@ swiss-trail-planner/
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the tile and vector layers, handles map, geolocation, fullscreen,
-route-creation mode, immutable route history, dynamic graph loading, and
-temporary routing status. It reacts to selected search results and cleans up
-imperative resources and pending requests when React unmounts.
+route-creation mode, immutable route history, dynamic graph loading, route
+statistics, and temporary routing status. It reacts to selected search results
+and cleans up imperative resources and pending requests when React unmounts.
 
 ### `src/components/LocationSearch.tsx`
 
@@ -472,6 +492,19 @@ It does not know about OpenLayers. It reports a typed result through its
 Renders the route-mode toggle and the contextual route action buttons. It is a
 controlled component: `App.tsx` supplies availability state and callbacks for
 snap, undo, redo, reversal, deletion, and GPX export.
+
+### `src/components/RouteStatistics.tsx`
+
+Formats and renders the compact distance, ascent, descent, and duration bar. It
+owns presentation and responsive layout semantics but performs no network
+requests or geographic calculations.
+
+### `src/metrics/routeMetrics.ts`
+
+Calculates geodesic distance, converts route coordinates to LV95 for the
+official elevation-profile service, validates external profile samples,
+accumulates ascent and descent, and applies the standard Swiss walking-time
+estimate. Requests are abortable so stale route histories cannot update the UI.
 
 ### `src/export/gpx.ts`
 
@@ -528,7 +561,8 @@ tile-source factories.
 ### `src/styles.css`
 
 Defines the full-screen layout, left-side search control, right-side map
-controls, result panel, status messages, and OpenLayers control placement.
+controls, route statistics, result panels, status messages, and OpenLayers
+control placement.
 
 ### Remaining root files
 
@@ -564,18 +598,21 @@ controls, result panel, status messages, and OpenLayers control placement.
     cells, and run A* on the resulting graph.
 13. A disconnected corridor is retried once with a wider cell radius.
 14. Updating route history rebuilds the route line and waypoint features.
-15. Undo moves the last complete step to redo; redo restores it without routing.
-16. Reversal rebuilds immutable steps in the opposite order and clears redo.
-17. Deletion clears both applied and redo histories.
-18. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
-19. Leaving route mode removes the click listener and aborts active network work
-    while keeping completed cells and the route available.
-20. The fullscreen button requests fullscreen for the root application element.
-21. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-22. Location search and browser geolocation continue to operate independently.
-23. On unmount, map listeners, timers, requests, references, and the map target
+15. Distance is recalculated locally from the flattened route geometry.
+16. After a short debounce, an abortable profile request refreshes ascent,
+    descent, and estimated walking time.
+17. Undo moves the last complete step to redo; redo restores it without routing.
+18. Reversal rebuilds immutable steps in the opposite order and clears redo.
+19. Deletion clears both applied and redo histories and hides the summary.
+20. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
+21. Leaving route mode removes the click listener and aborts active network work
+    while keeping completed cells, route geometry, and statistics available.
+22. The fullscreen button requests fullscreen for the root application element.
+23. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+24. Location search and browser geolocation continue to operate independently.
+25. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-24. A push to `main` triggers the Pages workflow, which builds and deploys
+26. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
@@ -598,6 +635,10 @@ any failure. An active operation is aborted when route mode is left or the
 application unmounts. Disconnected sections receive one automatic wider-corridor
 retry; there is no persistent logging or general retry mechanism yet.
 
+Elevation-profile failures are non-blocking. The distance remains visible,
+altitude-dependent values become dashes, and route editing continues normally.
+Superseded profile requests are aborted after route mutations.
+
 ## 18. Code conventions
 
 - Keep strict TypeScript enabled.
@@ -615,6 +656,7 @@ retry; there is no persistent logging or general retry mechanism yet.
 - Store generated section geometry instead of recalculating it during redo.
 - Keep experimental identify requests geographically bounded and abortable.
 - Preserve available swissTLM3D elevation when identifying graph nodes.
+- Keep elevation-profile requests abortable and independent from route editing.
 - Recalculate the OpenLayers size after viewport mode changes.
 - Remove listeners and clear timers during cleanup.
 - Comments should explain why, not restate obvious code.
@@ -645,7 +687,8 @@ it.
 
 Straight and dynamically routed waypoint creation, undo/redo, route reversal,
 route clearing, and GPX track export are implemented. The next steps are
-waypoint movement and insertion, distance calculation, and elevation handling.
+waypoint movement and insertion, elevation values in GPX export, and a compact
+elevation-profile visualization.
 
 ### Phase 4 — Production routing
 
