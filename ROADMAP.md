@@ -49,6 +49,8 @@ The application should remain lightweight and map-centered:
 - [x] Add location search using the official geo.admin.ch SearchServer.
 - [x] Search communes, localities, postal codes, and geographic names.
 - [x] Display the selected search result as a map marker.
+- [x] Support French, German, Italian, and English interface languages.
+- [x] Detect the browser language and persist an explicit language choice.
 
 ## Current focus
 

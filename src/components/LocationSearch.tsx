@@ -1,3 +1,7 @@
+/**
+ * Business context: provides a compact, keyboard-accessible search field for
+ * official Swiss places while keeping the map visible beneath temporary results.
+ */
 import {
   useEffect,
   useId,
@@ -5,23 +9,28 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { useI18n } from '../i18n/I18nContext';
 import {
   searchLocations,
   type LocationSearchResult,
 } from '../search/locationSearch';
 
 interface LocationSearchProps {
+  /** Moves the map to the selected official search result. */
   onSelect: (result: LocationSearchResult) => void;
 }
 
 type SearchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+/** Minimum characters required before GeoAdmin is queried. */
 const MINIMUM_QUERY_LENGTH = 2;
+/** Debounce delay in milliseconds to avoid a request for every keystroke. */
 const SEARCH_DELAY_MS = 300;
 
 export default function LocationSearch({
   onSelect,
 }: LocationSearchProps) {
+  const { language, t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const skipNextSearchRef = useRef(false);
   const listboxId = useId();
@@ -76,6 +85,7 @@ export default function LocationSearch({
       try {
         const nextResults = await searchLocations(
           searchText,
+          language,
           abortController.signal,
         );
 
@@ -96,7 +106,7 @@ export default function LocationSearch({
       window.clearTimeout(timeoutId);
       abortController.abort();
     };
-  }, [query]);
+  }, [language, query]);
 
   const selectResult = (result: LocationSearchResult) => {
     skipNextSearchRef.current = true;
@@ -148,8 +158,7 @@ export default function LocationSearch({
   };
 
   const showPanel =
-    isOpen &&
-    query.trim().length >= MINIMUM_QUERY_LENGTH;
+    isOpen && query.trim().length >= MINIMUM_QUERY_LENGTH;
 
   return (
     <div className="location-search" ref={containerRef}>
@@ -167,8 +176,8 @@ export default function LocationSearch({
         <input
           type="search"
           value={query}
-          placeholder="Rechercher une localité…"
-          aria-label="Rechercher une localité"
+          placeholder={t('search.placeholder')}
+          aria-label={t('search.label')}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={showPanel}
@@ -196,8 +205,8 @@ export default function LocationSearch({
           <button
             type="button"
             className="location-search-clear"
-            aria-label="Effacer la recherche"
-            title="Effacer"
+            aria-label={t('search.clearLabel')}
+            title={t('search.clearTitle')}
             onClick={clearSearch}
           >
             ×
@@ -209,7 +218,7 @@ export default function LocationSearch({
         <div className="location-search-panel">
           {status === 'loading' && (
             <div className="location-search-status" role="status">
-              Recherche…
+              {t('search.loading')}
             </div>
           )}
 
@@ -218,13 +227,13 @@ export default function LocationSearch({
               className="location-search-status location-search-status--error"
               role="alert"
             >
-              La recherche est momentanément indisponible.
+              {t('search.unavailable')}
             </div>
           )}
 
           {status === 'ready' && results.length === 0 && (
             <div className="location-search-status">
-              Aucun lieu trouvé.
+              {t('search.noResults')}
             </div>
           )}
 
@@ -233,7 +242,7 @@ export default function LocationSearch({
               id={listboxId}
               className="location-search-results"
               role="listbox"
-              aria-label="Résultats de recherche"
+              aria-label={t('search.results')}
             >
               {results.map((result, index) => (
                 <li key={result.id} role="presentation">
@@ -265,7 +274,9 @@ export default function LocationSearch({
 
                     <span className="location-search-result-text">
                       <strong>{result.label}</strong>
-                      <span>{result.category}</span>
+                      <span>
+                        {t(`search.category.${result.origin}`)}
+                      </span>
                     </span>
                   </button>
                 </li>

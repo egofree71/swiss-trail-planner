@@ -3,6 +3,8 @@
  * permanent space away from the map. It exposes route-mode state, undo/redo,
  * the straight-versus-network choice, route reversal, deletion, and GPX export.
  */
+import { useI18n } from '../i18n/I18nContext';
+
 /** Controlled state and actions for the route-editing toolbar. */
 interface RouteControlsProps {
   /** Whether map clicks currently create route waypoints. */
@@ -61,21 +63,22 @@ export default function RouteControls({
   onDelete,
   onExport,
 }: RouteControlsProps) {
+  const { t } = useI18n();
   const toggleLabel = isActive
-    ? 'Quitter le mode création d’itinéraire'
-    : 'Créer un itinéraire';
+    ? t('route.exitCreation')
+    : t('route.create');
 
   const snapLabel = !hasRoute
-    ? 'Ajoutez un premier point pour choisir le type de tracé'
+    ? t('route.addFirstPoint')
     : isSnapEnabled
-      ? 'Suivre les chemins de randonnée'
-      : 'Ajouter des segments linéaires';
+      ? t('route.followPaths')
+      : t('route.straightSegments');
 
   return (
     <div
       className="route-controls"
       role="toolbar"
-      aria-label="Itinéraire"
+      aria-label={t('route.toolbar')}
       aria-busy={isBusy}
     >
       {isActive && (
@@ -83,8 +86,8 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Annuler la dernière modification"
-            title="Annuler"
+            aria-label={t('route.undoChange')}
+            title={t('route.undo')}
             disabled={!canUndo}
             onClick={onUndo}
           >
@@ -97,8 +100,8 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Refaire la dernière modification"
-            title="Refaire"
+            aria-label={t('route.redoChange')}
+            title={t('route.redo')}
             disabled={!canRedo}
             onClick={onRedo}
           >
@@ -137,8 +140,8 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Inverser l’itinéraire"
-            title="Inverser l’itinéraire"
+            aria-label={t('route.reverse')}
+            title={t('route.reverse')}
             disabled={!canReverse}
             onClick={onReverse}
           >
@@ -153,8 +156,8 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Supprimer l’itinéraire"
-            title="Supprimer l’itinéraire"
+            aria-label={t('route.delete')}
+            title={t('route.delete')}
             disabled={!canDelete}
             onClick={onDelete}
           >
@@ -172,8 +175,8 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Exporter l’itinéraire"
-            title="Exporter l’itinéraire"
+            aria-label={t('route.export')}
+            title={t('route.export')}
             disabled={!canExport}
             onClick={onExport}
           >

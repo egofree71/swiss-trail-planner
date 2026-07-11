@@ -37,6 +37,7 @@ It can:
 - search official Swiss location indexes;
 - display a selected search result as a vector marker;
 - request and display the user's current position;
+- switch the complete interface between French, German, Italian, and English;
 - enter and leave browser fullscreen mode;
 - enter a visual route-creation mode with a crosshair map cursor;
 - add ordered route waypoints by clicking or tapping the map;
@@ -80,15 +81,16 @@ The project evolves through independent functional layers:
 
 1. raster background;
 2. rendered hiking-trail overlay;
-3. basic map controls, geolocation, and location search;
-4. route-creation interface shell;
-5. straight-line route creation with undo and redo;
-6. dynamic cell-based swissTLM3D routing around selected waypoints;
-7. route reversal, deletion, and GPX export;
-8. distance, elevation summary, walking-time estimate, and elevation profile;
-9. waypoint editing and elevation-aware GPX export;
-10. repeatable routing-data preparation;
-11. reliable national hiking routing.
+4. basic map controls, geolocation, and location search;
+5. route-creation interface shell;
+6. straight-line route creation with undo and redo;
+7. dynamic cell-based swissTLM3D routing around selected waypoints;
+8. route reversal, deletion, and GPX export;
+9. distance, elevation summary, walking-time estimate, and elevation profile;
+10. four-language interface and localized GeoAdmin search;
+11. waypoint editing and elevation-aware GPX export;
+12. repeatable routing-data preparation;
+14. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -126,7 +128,8 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── RouteControls and RouteStatistics components
+   │      ├── RouteControls, RouteStatistics, and LanguageSelector components
+   │      ├── typed French, German, Italian, and English dictionaries
    │      ├── route history, statistics, and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
@@ -172,7 +175,7 @@ selected route section.
 
 | Technology | Role |
 |---|---|
-| React 19 | UI components, search state, and status messages |
+| React 19 | UI components, search state, status messages, and language context |
 | TypeScript 5 | Static typing and compile-time verification |
 | OpenLayers 10 | Map, view, layers, projections, markers, and controls |
 | Vite 8 | Development server, production build, and Pages base path |
@@ -182,6 +185,7 @@ selected route section.
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
 | Browser Fullscreen API | Distraction-free map display |
+| Typed in-project i18n dictionaries | Four-language UI without an additional runtime dependency |
 | HTML/CSS | Full-screen layout, floating controls, and result panel |
 | GitHub Actions | Automated GitHub Pages deployment |
 | GitHub Pages | Static production hosting over HTTPS |
@@ -193,7 +197,7 @@ The national map and hiking overlay use direct XYZ-compatible WMTS URLs in
 `EPSG:3857`.
 
 The national map uses JPEG tiles. The hiking overlay uses transparent PNG tiles
-and has `minZoom` set to 12. Because OpenLayers treats this boundary as
+and has `minZoom` set to 14. Because OpenLayers treats this boundary as
 exclusive, the overlay normally appears at integer zoom level 13.
 
 The hiking overlay is already rendered and therefore cannot expose individual
@@ -259,6 +263,25 @@ The component supports mouse, touch, and keyboard interaction:
 Selecting a result transforms its longitude and latitude to `EPSG:3857`,
 updates a dedicated marker, and animates the view to zoom level 13.
 
+### 8.1 Interface localization
+
+`src/i18n/I18nContext.tsx` owns the selected language and exposes a typed `t()`
+helper. It reads a previously stored choice first, otherwise selects the first
+supported browser language, and falls back to English. The provider synchronizes
+the document `lang` attribute, metadata description, Swiss `Intl` locale, and
+local storage.
+
+`src/i18n/translations.ts` contains complete French, German, Italian, and English
+dictionaries. User-facing React text, accessibility labels, temporary errors,
+route statistics, elevation-profile labels, and GPX track names use these keys.
+The compact `LanguageSelector` is part of the right-side map controls, so
+localization does not require a permanent settings panel.
+
+Location search passes the selected two-letter language to SearchServer. Search
+origins remain language-neutral in the API module and are translated only by the
+UI component. Changing language reruns an open search and applies the matching
+Swiss number-format locale to route figures and elevation axes.
+
 ## 9. Browser geolocation
 
 The location control uses `navigator.geolocation.getCurrentPosition()` only
@@ -268,7 +291,7 @@ The browser may display a permission prompt. The application does not request
 the position during startup and does not use continuous tracking.
 
 A successful position updates a dedicated vector marker, recenters the map, and
-raises the view to at least zoom level 15. Positions outside the configured map
+raises the view to at least zoom level 17. Positions outside the configured map
 extent are rejected.
 
 Browser geolocation requires a secure context. Development on `localhost` is
@@ -400,9 +423,9 @@ also be started manually. It:
 
 1. checks out the repository;
 2. installs the exact dependencies from `package-lock.json` with `npm ci`;
-3. runs the TypeScript check and Vite build through `npm run build`;
-4. uploads `dist/` as a GitHub Pages artifact;
-5. deploys that artifact to the `github-pages` environment.
+4. runs the TypeScript check and Vite build through `npm run build`;
+5. uploads `dist/` as a GitHub Pages artifact;
+6. deploys that artifact to the `github-pages` environment.
 
 The workflow receives only the permissions required to read the repository and
 deploy Pages. Deployment concurrency is limited to one active Pages run, and a
@@ -437,6 +460,7 @@ swiss-trail-planner/
 │   └── ARCHITECTURE.md
 ├── src/
 │   ├── components/
+│   │   ├── LanguageSelector.tsx
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
 │   │   ├── RouteElevationProfile.tsx
@@ -445,6 +469,9 @@ swiss-trail-planner/
 │   │   └── gpx.ts
 │   ├── metrics/
 │   │   └── routeMetrics.ts
+│   ├── i18n/
+│   │   ├── I18nContext.tsx
+│   │   └── translations.ts
 │   ├── map/
 │   │   ├── config.ts
 │   │   ├── route.ts
@@ -481,6 +508,12 @@ It creates the tile and vector layers, handles map, geolocation, fullscreen,
 route-creation mode, immutable route history, dynamic graph loading, route
 statistics, and temporary routing status. It reacts to selected search results
 and cleans up imperative resources and pending requests when React unmounts.
+
+### `src/components/LanguageSelector.tsx`
+
+Renders the compact native language select inside the floating map controls. It
+uses the shared language context and intentionally contains no translation data
+or persistence logic.
 
 ### `src/components/LocationSearch.tsx`
 
@@ -558,7 +591,20 @@ and protects the API from excessively large single operations.
 ### `src/search/locationSearch.ts`
 
 Owns the SearchServer HTTP contract, response validation, label normalization,
-origin labels, duplicate removal, and result limits.
+language-aware requests, origin identifiers, duplicate removal, and result
+limits. It deliberately returns language-neutral origins so React translates
+category labels.
+
+### `src/i18n/I18nContext.tsx`
+
+Detects, persists, and publishes the current language and Swiss number-format
+locale. It also updates the document language and description metadata.
+
+### `src/i18n/translations.ts`
+
+Defines the supported languages, locale metadata, typed translation keys, and
+complete translation dictionaries. Adding a key to French forces every other
+language to provide the same key at compile time.
 
 ### `src/map/searchResult.ts`
 
@@ -581,7 +627,7 @@ control placement.
 
 ### Remaining root files
 
-- `src/main.tsx` mounts React and imports styles.
+- `src/main.tsx` mounts React, the language provider, and styles.
 - `index.html` is the browser entry point.
 - `package.json` declares dependencies and npm scripts.
 - `package-lock.json` locks dependency versions.
@@ -595,40 +641,44 @@ control placement.
 
 ## 16. Runtime flow
 
-1. The browser loads the React application.
-2. `App` creates the OpenLayers map, tile layers, marker layers, and route layer.
-3. The base map begins loading from `wmts.geo.admin.ch`.
-4. The rendered hiking overlay starts loading when zoom moves beyond level 12.
-5. The route button toggles route-creation mode and the crosshair cursor.
-6. Entering route mode attaches a map `singleclick` listener and reveals the
+1. The browser loads the React application and resolves a stored or browser language.
+2. The language provider updates document metadata and exposes localized strings.
+3. `App` creates the OpenLayers map, tile layers, marker layers, and route layer.
+4. The base map begins loading from `wmts.geo.admin.ch`.
+5. The rendered hiking overlay starts loading when zoom moves beyond level 12.
+6. The route button toggles route-creation mode and the crosshair cursor.
+7. Entering route mode attaches a map `singleclick` listener and reveals the
    route toolbar.
-7. With snapping disabled, a click stores a direct section immediately.
-8. The first snapped click derives and loads a local 3 × 3 cell group while
+8. With snapping disabled, a click stores a direct section immediately.
+9. The first snapped click derives and loads a local 3 × 3 cell group while
    the route toggle shows a compact spinner.
-9. Dense identify requests are subdivided when either layer reaches 200 results.
-10. Returned road vertices become graph nodes and edges; hiking geometry marks
+10. Dense identify requests are subdivided when either layer reaches 200 results.
+11. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-11. The first clicked point is snapped to the nearest walkable segment.
-12. Later clicks derive a corridor of cells between waypoints, load only missing
+12. The first clicked point is snapped to the nearest walkable segment.
+13. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-13. A disconnected corridor is retried once with a wider cell radius.
-14. Updating route history rebuilds the route line and waypoint features.
-15. Distance is recalculated locally from the flattened route geometry.
-16. After a short debounce, an abortable profile request refreshes ascent,
+14. A disconnected corridor is retried once with a wider cell radius.
+15. Updating route history rebuilds the route line and waypoint features.
+16. Distance is recalculated locally from the flattened route geometry.
+17. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-17. The profile button reveals or hides the SVG chart without another request.
-18. Undo moves the last complete step to redo; redo restores it without routing.
-19. Reversal rebuilds immutable steps in the opposite order and clears redo.
-20. Deletion clears both applied and redo histories and hides the summary.
-21. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
-22. Leaving route mode removes the click listener and aborts active network work
+18. The profile button reveals or hides the SVG chart without another request.
+19. Undo moves the last complete step to redo; redo restores it without routing.
+20. Reversal rebuilds immutable steps in the opposite order and clears redo.
+21. Deletion clears both applied and redo histories and hides the summary.
+22. GPX export converts the flattened route to WGS 84 and downloads a localized
+    GPX track.
+23. Changing language updates interface text, number formatting, document
+    metadata, and subsequent SearchServer requests without recreating the map.
+24. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-23. The fullscreen button requests fullscreen for the root application element.
-24. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-25. Location search and browser geolocation continue to operate independently.
-26. On unmount, map listeners, timers, requests, references, and the map target
+25. The fullscreen button requests fullscreen for the root application element.
+26. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+27. Location search and browser geolocation continue to operate independently.
+28. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-27. A push to `main` triggers the Pages workflow, which builds and deploys
+29. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
@@ -646,7 +696,7 @@ retried by clicking the button again.
 
 Routing reports points without a nearby walkable segment, disconnected graph
 requests, overly large single sections, GeoAdmin failures, and result-limit
-overflow with temporary French messages. The existing route is unchanged after
+overflow with temporary messages in the selected interface language. The existing route is unchanged after
 any failure. An active operation is aborted when route mode is left or the
 application unmounts. Disconnected sections receive one automatic wider-corridor
 retry; there is no persistent logging or general retry mechanism yet.
@@ -660,6 +710,8 @@ Superseded profile requests are aborted after route mutations.
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
 - Keep network contracts outside React components.
+- Keep every user-facing string in the typed translation dictionaries.
+- Keep search origins language-neutral and translate them in the UI layer.
 - Never inject SearchServer label HTML into the DOM.
 - Abort superseded network requests.
 - Preserve explicit layer ordering.

@@ -12,12 +12,14 @@ import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
 import { fromLonLat } from 'ol/proj.js';
+import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
 import RouteControls from './components/RouteControls';
 import RouteStatistics, {
   type RouteElevationStatus,
 } from './components/RouteStatistics';
 import { downloadRouteGpx } from './export/gpx';
+import { useI18n } from './i18n/I18nContext';
 import {
   createHikingTrailsSource,
   createSwissTopoRasterSource,
@@ -94,6 +96,7 @@ function coordinateDistanceSquared(
 
 /** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
+  const { t } = useI18n();
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -117,7 +120,6 @@ export default function App() {
   }
 
   const [status, setStatus] = useState<LoadStatus>('loading');
-  const [errorMessage, setErrorMessage] = useState('');
   const [locationStatus, setLocationStatus] =
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
@@ -269,11 +271,14 @@ export default function App() {
     }
 
     try {
-      downloadRouteGpx(routeHistoryRef.current.steps);
+      downloadRouteGpx(
+        routeHistoryRef.current.steps,
+        t('gpx.routeName'),
+      );
     } catch (error) {
       console.error('Unable to export the route as GPX.', error);
       showTemporaryRouteMessage(
-        'L’itinéraire doit contenir au moins deux points pour être exporté.',
+        t('route.exportError'),
         'error',
       );
     }
@@ -415,13 +420,13 @@ export default function App() {
     if (!navigator.geolocation) {
       setLocationStatus('error');
       showTemporaryLocationMessage(
-        'La géolocalisation n’est pas disponible dans ce navigateur.',
+        t('geolocation.unavailable'),
       );
       return;
     }
 
     clearLocationMessageTimer();
-    setLocationMessage('Recherche de votre position…');
+    setLocationMessage(t('geolocation.searching'));
     setLocationStatus('locating');
 
     navigator.geolocation.getCurrentPosition(
@@ -434,7 +439,7 @@ export default function App() {
         if (!containsCoordinate(MAP_EXTENT, coordinate)) {
           setLocationStatus('error');
           showTemporaryLocationMessage(
-            'Votre position se trouve hors de la zone couverte.',
+            t('geolocation.outside'),
           );
           return;
         }
@@ -457,17 +462,17 @@ export default function App() {
       (error) => {
         const messages: Record<number, string> = {
           [GeolocationPositionError.PERMISSION_DENIED]:
-            'L’accès à votre position a été refusé.',
+            t('geolocation.permissionDenied'),
           [GeolocationPositionError.POSITION_UNAVAILABLE]:
-            'Votre position n’a pas pu être déterminée.',
+            t('geolocation.positionUnavailable'),
           [GeolocationPositionError.TIMEOUT]:
-            'La recherche de votre position a pris trop de temps.',
+            t('geolocation.timeout'),
         };
 
         setLocationStatus('error');
         showTemporaryLocationMessage(
           messages[error.code] ??
-            'Une erreur est survenue pendant la géolocalisation.',
+            t('geolocation.error'),
         );
       },
       {
@@ -505,7 +510,6 @@ export default function App() {
 
       firstTileLoaded = true;
       setStatus('ready');
-      setErrorMessage('');
     };
 
     const handleTileError = () => {
@@ -518,9 +522,6 @@ export default function App() {
       }
 
       setStatus('error');
-      setErrorMessage(
-        'Le navigateur n’a pas réussi à télécharger les tuiles swisstopo.',
-      );
     };
 
     rasterSource.on('tileloadend', handleTileLoaded);
@@ -719,7 +720,7 @@ export default function App() {
 
             if (!snappedCoordinate) {
               showTemporaryRouteMessage(
-                'Aucun chemin swissTLM3D n’a été trouvé à proximité de ce point.',
+                t('route.noNearbyPath'),
                 'error',
               );
               return;
@@ -739,7 +740,7 @@ export default function App() {
 
             if (!routedPath || routedPath.coordinates.length < 2) {
               showTemporaryRouteMessage(
-                'Aucun chemin connecté n’a été trouvé entre ces deux points.',
+                t('route.noConnectedPath'),
                 'error',
               );
               return;
@@ -792,7 +793,7 @@ export default function App() {
 
           if (error instanceof RoutingAreaTooLargeError) {
             showTemporaryRouteMessage(
-              'Ce segment est trop long pour le chargement dynamique actuel. Ajoutez un point intermédiaire.',
+              t('route.areaTooLarge'),
               'error',
             );
             return;
@@ -800,7 +801,7 @@ export default function App() {
 
           console.error('Unable to load or route on swissTLM3D.', error);
           showTemporaryRouteMessage(
-            'Le réseau swissTLM3D de cette zone n’a pas pu être chargé.',
+            t('route.networkLoadError'),
             'error',
           );
         } finally {
@@ -827,16 +828,16 @@ export default function App() {
     return () => {
       map.un('singleclick', handleRouteClick);
     };
-  }, [isRouteCreationActive, isRouteSnapEnabled]);
+  }, [isRouteCreationActive, isRouteSnapEnabled, t]);
 
   const locationButtonLabel =
     locationStatus === 'located'
-      ? 'Recentrer sur ma position'
-      : 'Afficher ma position';
+      ? t('geolocation.recenter')
+      : t('geolocation.show');
 
   const fullscreenButtonLabel = isFullscreen
-    ? 'Quitter le plein écran'
-    : 'Afficher en plein écran';
+    ? t('map.fullscreenExit')
+    : t('map.fullscreenEnter');
 
   return (
     <main
@@ -852,12 +853,12 @@ export default function App() {
       <div
         ref={mapTargetRef}
         className="map"
-        aria-label="Carte nationale suisse interactive"
+        aria-label={t('map.aria')}
       />
 
       <LocationSearch onSelect={selectSearchResult} />
 
-      <nav className="map-controls" aria-label="Contrôles de la carte">
+      <nav className="map-controls" aria-label={t('map.controls')}>
         <RouteControls
           isActive={isRouteCreationActive}
           isSnapEnabled={isRouteSnapEnabled}
@@ -893,8 +894,8 @@ export default function App() {
           <button
             type="button"
             className="map-control-button map-control-button--zoom"
-            aria-label="Zoomer"
-            title="Zoomer"
+            aria-label={t('map.zoomIn')}
+            title={t('map.zoomIn')}
             onClick={() => changeZoom(1)}
           >
             +
@@ -903,8 +904,8 @@ export default function App() {
           <button
             type="button"
             className="map-control-button map-control-button--zoom"
-            aria-label="Dézoomer"
-            title="Dézoomer"
+            aria-label={t('map.zoomOut')}
+            title={t('map.zoomOut')}
             onClick={() => changeZoom(-1)}
           >
             −
@@ -967,6 +968,8 @@ export default function App() {
           </button>
         )}
 
+        <LanguageSelector />
+
         {locationMessage && (
           <div
             className={[
@@ -1011,15 +1014,15 @@ export default function App() {
 
       {status === 'loading' && (
         <div className="status-card" role="status">
-          Chargement de la carte swisstopo…
+          {t('map.loading')}
         </div>
       )}
 
       {status === 'error' && (
         <div className="status-card status-card--error" role="alert">
-          <strong>Impossible de charger la carte.</strong>
-          <span>{errorMessage}</span>
-          <span>Vérifie la connexion Internet, puis recharge la page.</span>
+          <strong>{t('map.loadFailed')}</strong>
+          <span>{t('map.tileError')}</span>
+          <span>{t('map.retry')}</span>
         </div>
       )}
     </main>

@@ -1,10 +1,18 @@
+/**
+ * Business context: adapts the official GeoAdmin SearchServer response to the
+ * small location-search contract used by the map interface.
+ */
+import type { Language } from '../i18n/translations';
+
 const SEARCH_ENDPOINT =
   'https://api3.geo.admin.ch/rest/services/ech/SearchServer';
 
+/** Maximum results displayed by the compact search panel. */
 const RESULT_LIMIT = 8;
 const SEARCH_ORIGINS = ['zipcode', 'gg25', 'gazetteer'] as const;
 
-type SearchOrigin = (typeof SEARCH_ORIGINS)[number];
+/** GeoAdmin origin used to translate the category in the interface layer. */
+export type SearchOrigin = (typeof SEARCH_ORIGINS)[number];
 
 interface SearchServerResponse {
   results?: SearchServerItem[];
@@ -20,19 +28,14 @@ interface SearchServerItem {
   };
 }
 
+/** Normalized location result returned to the React component. */
 export interface LocationSearchResult {
   id: string;
   label: string;
-  category: string;
+  origin: SearchOrigin;
   latitude: number;
   longitude: number;
 }
-
-const ORIGIN_LABELS: Record<SearchOrigin, string> = {
-  zipcode: 'Localité ou code postal',
-  gg25: 'Commune',
-  gazetteer: 'Nom géographique',
-};
 
 function isSearchOrigin(value: string): value is SearchOrigin {
   return SEARCH_ORIGINS.includes(value as SearchOrigin);
@@ -64,15 +67,22 @@ function normalizeLabel(value: unknown): string {
     .trim();
 }
 
+/**
+ * Searches official Swiss place indexes in the selected interface language.
+ * @param searchText - User-entered place text.
+ * @param language - Language passed to GeoAdmin for returned labels.
+ * @param signal - Abort signal owned by the debounced React effect.
+ */
 export async function searchLocations(
   searchText: string,
+  language: Language,
   signal: AbortSignal,
 ): Promise<LocationSearchResult[]> {
   const parameters = new URLSearchParams({
     searchText,
     type: 'locations',
     origins: SEARCH_ORIGINS.join(','),
-    lang: 'fr',
+    lang: language,
     limit: String(RESULT_LIMIT),
   });
 
@@ -110,7 +120,7 @@ export async function searchLocations(
     }
 
     const duplicateKey =
-      `${label.toLocaleLowerCase('fr-CH')}:${latitude}:${longitude}`;
+      `${label.toLocaleLowerCase(language)}:${latitude}:${longitude}`;
 
     if (uniqueResults.has(duplicateKey)) {
       continue;
@@ -119,7 +129,7 @@ export async function searchLocations(
     uniqueResults.set(duplicateKey, {
       id: `${origin}:${String(item.id ?? duplicateKey)}`,
       label,
-      category: ORIGIN_LABELS[origin],
+      origin,
       latitude,
       longitude,
     });

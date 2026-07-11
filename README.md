@@ -16,6 +16,7 @@ positions selected by the user.
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
 - one-click browser geolocation with a map marker;
+- interface available in French, German, Italian, and English;
 - fullscreen map mode with automatic exit through the Escape key;
 - route-creation mode with a dedicated cursor and inverted active button;
 - ordered waypoints and a clearly visible red route added by map clicks or
@@ -75,6 +76,18 @@ Vite then displays a local address, usually:
 ```text
 http://localhost:5173/
 ```
+
+## Interface languages
+
+The interface supports French, German, Italian, and English. On first use, the
+application selects the first supported browser language and falls back to
+English. A compact language selector in the map controls changes the interface
+immediately and stores the choice in local browser storage.
+
+Location search requests use the selected language when calling GeoAdmin, and
+number formatting follows the corresponding Swiss locale. All user-facing
+labels, messages, accessibility text, route statistics, and elevation-profile
+text come from typed translation dictionaries under `src/i18n/`.
 
 ## Location search
 

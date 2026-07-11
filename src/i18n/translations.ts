@@ -1,0 +1,407 @@
+/**
+ * Business context: centralizes every user-facing label so the interface can
+ * switch languages without scattering translation logic across map modules.
+ */
+
+/** Languages supported by the application interface and GeoAdmin search. */
+export const SUPPORTED_LANGUAGES = ['fr', 'de', 'it', 'en'] as const;
+
+/** One supported interface language. */
+export type Language = (typeof SUPPORTED_LANGUAGES)[number];
+
+/** Metadata used by number formatting and the compact language selector. */
+export const LANGUAGE_METADATA: Record<
+  Language,
+  { locale: string; shortLabel: string }
+> = {
+  fr: { locale: 'fr-CH', shortLabel: 'FR' },
+  de: { locale: 'de-CH', shortLabel: 'DE' },
+  it: { locale: 'it-CH', shortLabel: 'IT' },
+  en: { locale: 'en-CH', shortLabel: 'EN' },
+};
+
+const frenchTranslations = {
+  'app.description':
+    "Swiss Trail Planner — planificateur d'itinéraires suisse open source.",
+  'language.select': 'Choisir la langue',
+  'language.fr': 'Français',
+  'language.de': 'Allemand',
+  'language.it': 'Italien',
+  'language.en': 'Anglais',
+
+  'search.placeholder': 'Rechercher une localité…',
+  'search.label': 'Rechercher une localité',
+  'search.clearLabel': 'Effacer la recherche',
+  'search.clearTitle': 'Effacer',
+  'search.loading': 'Recherche…',
+  'search.unavailable': 'La recherche est momentanément indisponible.',
+  'search.noResults': 'Aucun lieu trouvé.',
+  'search.results': 'Résultats de recherche',
+  'search.category.zipcode': 'Localité ou code postal',
+  'search.category.gg25': 'Commune',
+  'search.category.gazetteer': 'Nom géographique',
+
+  'route.toolbar': 'Itinéraire',
+  'route.create': 'Créer un itinéraire',
+  'route.exitCreation': 'Quitter le mode création d’itinéraire',
+  'route.addFirstPoint':
+    'Ajoutez un premier point pour choisir le type de tracé',
+  'route.followPaths': 'Suivre les chemins de randonnée',
+  'route.straightSegments': 'Ajouter des segments linéaires',
+  'route.undoChange': 'Annuler la dernière modification',
+  'route.undo': 'Annuler',
+  'route.redoChange': 'Refaire la dernière modification',
+  'route.redo': 'Refaire',
+  'route.reverse': 'Inverser l’itinéraire',
+  'route.delete': 'Supprimer l’itinéraire',
+  'route.export': 'Exporter l’itinéraire',
+  'route.exportError':
+    'L’itinéraire doit contenir au moins deux points pour être exporté.',
+  'route.noNearbyPath':
+    'Aucun chemin swissTLM3D n’a été trouvé à proximité de ce point.',
+  'route.noConnectedPath':
+    'Aucun chemin connecté n’a été trouvé entre ces deux points.',
+  'route.areaTooLarge':
+    'Ce segment est trop long pour le chargement dynamique actuel. Ajoutez un point intermédiaire.',
+  'route.networkLoadError':
+    'Le réseau swissTLM3D de cette zone n’a pas pu être chargé.',
+
+  'geolocation.show': 'Afficher ma position',
+  'geolocation.recenter': 'Recentrer sur ma position',
+  'geolocation.unavailable':
+    'La géolocalisation n’est pas disponible dans ce navigateur.',
+  'geolocation.searching': 'Recherche de votre position…',
+  'geolocation.outside': 'Votre position se trouve hors de la zone couverte.',
+  'geolocation.permissionDenied': 'L’accès à votre position a été refusé.',
+  'geolocation.positionUnavailable':
+    'Votre position n’a pas pu être déterminée.',
+  'geolocation.timeout':
+    'La recherche de votre position a pris trop de temps.',
+  'geolocation.error':
+    'Une erreur est survenue pendant la géolocalisation.',
+
+  'map.aria': 'Carte nationale suisse interactive',
+  'map.controls': 'Contrôles de la carte',
+  'map.zoomIn': 'Zoomer',
+  'map.zoomOut': 'Dézoomer',
+  'map.fullscreenEnter': 'Afficher en plein écran',
+  'map.fullscreenExit': 'Quitter le plein écran',
+  'map.loading': 'Chargement de la carte swisstopo…',
+  'map.loadFailed': 'Impossible de charger la carte.',
+  'map.tileError':
+    'Le navigateur n’a pas réussi à télécharger les tuiles swisstopo.',
+  'map.retry': 'Vérifie la connexion Internet, puis recharge la page.',
+
+  'statistics.aria': 'Statistiques de l’itinéraire',
+  'statistics.distance': 'Distance',
+  'statistics.ascent': 'Montée',
+  'statistics.descent': 'Descente',
+  'statistics.duration': 'Durée',
+  'statistics.durationTitle':
+    'Temps de marche estimé, pauses non comprises',
+  'profile.show': 'Afficher le profil d’altitude',
+  'profile.hide': 'Masquer le profil d’altitude',
+  'profile.loading': 'Chargement du profil d’altitude',
+  'profile.unavailable': 'Profil d’altitude indisponible',
+  'profile.aria': 'Profil d’altitude de l’itinéraire',
+  'profile.title': 'Profil d’altitude',
+  'profile.rangeAria': 'Profil d’altitude de {minimum} à {maximum}',
+
+  'units.hourShort': 'h',
+  'units.minuteShort': 'min',
+  'gpx.routeName': 'Itinéraire Swiss Trail Planner',
+} as const;
+
+/** Translation keys accepted by the typed `t()` helper. */
+export type TranslationKey = keyof typeof frenchTranslations;
+
+const germanTranslations: Record<TranslationKey, string> = {
+  'app.description':
+    'Swiss Trail Planner — quelloffener Schweizer Routenplaner.',
+  'language.select': 'Sprache wählen',
+  'language.fr': 'Französisch',
+  'language.de': 'Deutsch',
+  'language.it': 'Italienisch',
+  'language.en': 'Englisch',
+
+  'search.placeholder': 'Ort suchen…',
+  'search.label': 'Ort suchen',
+  'search.clearLabel': 'Suche löschen',
+  'search.clearTitle': 'Löschen',
+  'search.loading': 'Suche…',
+  'search.unavailable': 'Die Suche ist vorübergehend nicht verfügbar.',
+  'search.noResults': 'Kein Ort gefunden.',
+  'search.results': 'Suchergebnisse',
+  'search.category.zipcode': 'Ort oder Postleitzahl',
+  'search.category.gg25': 'Gemeinde',
+  'search.category.gazetteer': 'Geografischer Name',
+
+  'route.toolbar': 'Route',
+  'route.create': 'Route erstellen',
+  'route.exitCreation': 'Routenerstellung beenden',
+  'route.addFirstPoint':
+    'Fügen Sie zuerst einen Punkt hinzu, um die Linienart zu wählen',
+  'route.followPaths': 'Wanderwegen folgen',
+  'route.straightSegments': 'Gerade Segmente hinzufügen',
+  'route.undoChange': 'Letzte Änderung rückgängig machen',
+  'route.undo': 'Rückgängig',
+  'route.redoChange': 'Letzte Änderung wiederherstellen',
+  'route.redo': 'Wiederholen',
+  'route.reverse': 'Route umkehren',
+  'route.delete': 'Route löschen',
+  'route.export': 'Route exportieren',
+  'route.exportError':
+    'Die Route muss mindestens zwei Punkte enthalten, damit sie exportiert werden kann.',
+  'route.noNearbyPath':
+    'In der Nähe dieses Punkts wurde kein swissTLM3D-Weg gefunden.',
+  'route.noConnectedPath':
+    'Zwischen diesen beiden Punkten wurde kein verbundener Weg gefunden.',
+  'route.areaTooLarge':
+    'Dieses Segment ist für das aktuelle dynamische Laden zu lang. Fügen Sie einen Zwischenpunkt hinzu.',
+  'route.networkLoadError':
+    'Das swissTLM3D-Netz in diesem Gebiet konnte nicht geladen werden.',
+
+  'geolocation.show': 'Meinen Standort anzeigen',
+  'geolocation.recenter': 'Auf meinen Standort zentrieren',
+  'geolocation.unavailable':
+    'Die Standortbestimmung ist in diesem Browser nicht verfügbar.',
+  'geolocation.searching': 'Standort wird gesucht…',
+  'geolocation.outside':
+    'Ihr Standort liegt ausserhalb des abgedeckten Gebiets.',
+  'geolocation.permissionDenied':
+    'Der Zugriff auf Ihren Standort wurde verweigert.',
+  'geolocation.positionUnavailable':
+    'Ihr Standort konnte nicht bestimmt werden.',
+  'geolocation.timeout': 'Die Standortsuche hat zu lange gedauert.',
+  'geolocation.error':
+    'Bei der Standortbestimmung ist ein Fehler aufgetreten.',
+
+  'map.aria': 'Interaktive Schweizer Landeskarte',
+  'map.controls': 'Kartensteuerung',
+  'map.zoomIn': 'Vergrössern',
+  'map.zoomOut': 'Verkleinern',
+  'map.fullscreenEnter': 'Im Vollbild anzeigen',
+  'map.fullscreenExit': 'Vollbild verlassen',
+  'map.loading': 'swisstopo-Karte wird geladen…',
+  'map.loadFailed': 'Die Karte konnte nicht geladen werden.',
+  'map.tileError':
+    'Der Browser konnte die swisstopo-Kacheln nicht herunterladen.',
+  'map.retry':
+    'Prüfen Sie die Internetverbindung und laden Sie die Seite neu.',
+
+  'statistics.aria': 'Routenstatistik',
+  'statistics.distance': 'Distanz',
+  'statistics.ascent': 'Aufstieg',
+  'statistics.descent': 'Abstieg',
+  'statistics.duration': 'Dauer',
+  'statistics.durationTitle':
+    'Geschätzte Gehzeit ohne Pausen',
+  'profile.show': 'Höhenprofil anzeigen',
+  'profile.hide': 'Höhenprofil ausblenden',
+  'profile.loading': 'Höhenprofil wird geladen',
+  'profile.unavailable': 'Höhenprofil nicht verfügbar',
+  'profile.aria': 'Höhenprofil der Route',
+  'profile.title': 'Höhenprofil',
+  'profile.rangeAria': 'Höhenprofil von {minimum} bis {maximum}',
+
+  'units.hourShort': 'Std.',
+  'units.minuteShort': 'Min.',
+  'gpx.routeName': 'Swiss Trail Planner Route',
+};
+
+const italianTranslations: Record<TranslationKey, string> = {
+  'app.description':
+    'Swiss Trail Planner — pianificatore svizzero di itinerari open source.',
+  'language.select': 'Scegli la lingua',
+  'language.fr': 'Francese',
+  'language.de': 'Tedesco',
+  'language.it': 'Italiano',
+  'language.en': 'Inglese',
+
+  'search.placeholder': 'Cerca una località…',
+  'search.label': 'Cerca una località',
+  'search.clearLabel': 'Cancella la ricerca',
+  'search.clearTitle': 'Cancella',
+  'search.loading': 'Ricerca…',
+  'search.unavailable': 'La ricerca non è momentaneamente disponibile.',
+  'search.noResults': 'Nessuna località trovata.',
+  'search.results': 'Risultati della ricerca',
+  'search.category.zipcode': 'Località o codice postale',
+  'search.category.gg25': 'Comune',
+  'search.category.gazetteer': 'Nome geografico',
+
+  'route.toolbar': 'Itinerario',
+  'route.create': 'Crea un itinerario',
+  'route.exitCreation': 'Esci dalla modalità di creazione',
+  'route.addFirstPoint':
+    'Aggiungi un primo punto per scegliere il tipo di tracciato',
+  'route.followPaths': 'Segui i sentieri escursionistici',
+  'route.straightSegments': 'Aggiungi segmenti rettilinei',
+  'route.undoChange': 'Annulla l’ultima modifica',
+  'route.undo': 'Annulla',
+  'route.redoChange': 'Ripristina l’ultima modifica',
+  'route.redo': 'Ripristina',
+  'route.reverse': 'Inverti l’itinerario',
+  'route.delete': 'Elimina l’itinerario',
+  'route.export': 'Esporta l’itinerario',
+  'route.exportError':
+    'L’itinerario deve contenere almeno due punti per poter essere esportato.',
+  'route.noNearbyPath':
+    'Nessun percorso swissTLM3D è stato trovato vicino a questo punto.',
+  'route.noConnectedPath':
+    'Nessun percorso collegato è stato trovato tra questi due punti.',
+  'route.areaTooLarge':
+    'Questo segmento è troppo lungo per il caricamento dinamico attuale. Aggiungi un punto intermedio.',
+  'route.networkLoadError':
+    'Non è stato possibile caricare la rete swissTLM3D di questa zona.',
+
+  'geolocation.show': 'Mostra la mia posizione',
+  'geolocation.recenter': 'Ricentra sulla mia posizione',
+  'geolocation.unavailable':
+    'La geolocalizzazione non è disponibile in questo browser.',
+  'geolocation.searching': 'Ricerca della posizione…',
+  'geolocation.outside':
+    'La tua posizione si trova fuori dall’area coperta.',
+  'geolocation.permissionDenied':
+    'L’accesso alla tua posizione è stato negato.',
+  'geolocation.positionUnavailable':
+    'Non è stato possibile determinare la tua posizione.',
+  'geolocation.timeout': 'La ricerca della posizione è durata troppo a lungo.',
+  'geolocation.error':
+    'Si è verificato un errore durante la geolocalizzazione.',
+
+  'map.aria': 'Carta nazionale svizzera interattiva',
+  'map.controls': 'Controlli della carta',
+  'map.zoomIn': 'Ingrandisci',
+  'map.zoomOut': 'Riduci',
+  'map.fullscreenEnter': 'Mostra a schermo intero',
+  'map.fullscreenExit': 'Esci dallo schermo intero',
+  'map.loading': 'Caricamento della carta swisstopo…',
+  'map.loadFailed': 'Impossibile caricare la carta.',
+  'map.tileError':
+    'Il browser non è riuscito a scaricare le tessere swisstopo.',
+  'map.retry':
+    'Controlla la connessione Internet e ricarica la pagina.',
+
+  'statistics.aria': 'Statistiche dell’itinerario',
+  'statistics.distance': 'Distanza',
+  'statistics.ascent': 'Salita',
+  'statistics.descent': 'Discesa',
+  'statistics.duration': 'Durata',
+  'statistics.durationTitle':
+    'Tempo di cammino stimato, soste escluse',
+  'profile.show': 'Mostra il profilo altimetrico',
+  'profile.hide': 'Nascondi il profilo altimetrico',
+  'profile.loading': 'Caricamento del profilo altimetrico',
+  'profile.unavailable': 'Profilo altimetrico non disponibile',
+  'profile.aria': 'Profilo altimetrico dell’itinerario',
+  'profile.title': 'Profilo altimetrico',
+  'profile.rangeAria': 'Profilo altimetrico da {minimum} a {maximum}',
+
+  'units.hourShort': 'h',
+  'units.minuteShort': 'min',
+  'gpx.routeName': 'Itinerario Swiss Trail Planner',
+};
+
+const englishTranslations: Record<TranslationKey, string> = {
+  'app.description':
+    'Swiss Trail Planner — open-source Swiss hiking route planner.',
+  'language.select': 'Choose language',
+  'language.fr': 'French',
+  'language.de': 'German',
+  'language.it': 'Italian',
+  'language.en': 'English',
+
+  'search.placeholder': 'Search for a place…',
+  'search.label': 'Search for a place',
+  'search.clearLabel': 'Clear search',
+  'search.clearTitle': 'Clear',
+  'search.loading': 'Searching…',
+  'search.unavailable': 'Search is temporarily unavailable.',
+  'search.noResults': 'No place found.',
+  'search.results': 'Search results',
+  'search.category.zipcode': 'Place or postal code',
+  'search.category.gg25': 'Municipality',
+  'search.category.gazetteer': 'Geographic name',
+
+  'route.toolbar': 'Route',
+  'route.create': 'Create a route',
+  'route.exitCreation': 'Exit route creation mode',
+  'route.addFirstPoint':
+    'Add a first point to choose the drawing mode',
+  'route.followPaths': 'Follow hiking paths',
+  'route.straightSegments': 'Add straight segments',
+  'route.undoChange': 'Undo the latest change',
+  'route.undo': 'Undo',
+  'route.redoChange': 'Redo the latest change',
+  'route.redo': 'Redo',
+  'route.reverse': 'Reverse the route',
+  'route.delete': 'Delete the route',
+  'route.export': 'Export the route',
+  'route.exportError':
+    'The route must contain at least two points before it can be exported.',
+  'route.noNearbyPath':
+    'No swissTLM3D path was found near this point.',
+  'route.noConnectedPath':
+    'No connected path was found between these two points.',
+  'route.areaTooLarge':
+    'This segment is too long for the current dynamic loading strategy. Add an intermediate point.',
+  'route.networkLoadError':
+    'The swissTLM3D network for this area could not be loaded.',
+
+  'geolocation.show': 'Show my location',
+  'geolocation.recenter': 'Recenter on my location',
+  'geolocation.unavailable':
+    'Geolocation is not available in this browser.',
+  'geolocation.searching': 'Finding your location…',
+  'geolocation.outside':
+    'Your location is outside the covered area.',
+  'geolocation.permissionDenied':
+    'Access to your location was denied.',
+  'geolocation.positionUnavailable':
+    'Your location could not be determined.',
+  'geolocation.timeout': 'Finding your location took too long.',
+  'geolocation.error': 'An error occurred while locating you.',
+
+  'map.aria': 'Interactive Swiss national map',
+  'map.controls': 'Map controls',
+  'map.zoomIn': 'Zoom in',
+  'map.zoomOut': 'Zoom out',
+  'map.fullscreenEnter': 'Enter fullscreen',
+  'map.fullscreenExit': 'Exit fullscreen',
+  'map.loading': 'Loading the swisstopo map…',
+  'map.loadFailed': 'Unable to load the map.',
+  'map.tileError':
+    'The browser could not download the swisstopo map tiles.',
+  'map.retry': 'Check the Internet connection, then reload the page.',
+
+  'statistics.aria': 'Route statistics',
+  'statistics.distance': 'Distance',
+  'statistics.ascent': 'Ascent',
+  'statistics.descent': 'Descent',
+  'statistics.duration': 'Duration',
+  'statistics.durationTitle':
+    'Estimated walking time, excluding breaks',
+  'profile.show': 'Show elevation profile',
+  'profile.hide': 'Hide elevation profile',
+  'profile.loading': 'Loading elevation profile',
+  'profile.unavailable': 'Elevation profile unavailable',
+  'profile.aria': 'Route elevation profile',
+  'profile.title': 'Elevation profile',
+  'profile.rangeAria': 'Elevation profile from {minimum} to {maximum}',
+
+  'units.hourShort': 'h',
+  'units.minuteShort': 'min',
+  'gpx.routeName': 'Swiss Trail Planner route',
+};
+
+/** Complete translation dictionaries keyed by supported language. */
+export const TRANSLATIONS: Record<
+  Language,
+  Record<TranslationKey, string>
+> = {
+  fr: frenchTranslations,
+  de: germanTranslations,
+  it: italianTranslations,
+  en: englishTranslations,
+};

@@ -3,6 +3,8 @@
  * replacing the map. The chart is intentionally lightweight and uses the same
  * elevation samples already fetched for ascent/descent calculations.
  */
+import { useMemo } from 'react';
+import { useI18n } from '../i18n/I18nContext';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
 /** Data and identity required by the collapsible elevation chart. */
@@ -25,25 +27,25 @@ const CHART_PADDING = {
 /** Three horizontal guides keep the compact chart readable without visual noise. */
 const GRID_LINE_COUNT = 3;
 
-const INTEGER_FORMAT = new Intl.NumberFormat('fr-CH', {
-  maximumFractionDigits: 0,
-});
-const DISTANCE_FORMAT = new Intl.NumberFormat('fr-CH', {
-  maximumFractionDigits: 1,
-});
-
 /** Formats one chart altitude in whole metres. */
-function formatAltitude(elevationMeters: number): string {
-  return `${INTEGER_FORMAT.format(Math.round(elevationMeters))} m`;
+function formatAltitude(
+  elevationMeters: number,
+  integerFormat: Intl.NumberFormat,
+): string {
+  return `${integerFormat.format(Math.round(elevationMeters))} m`;
 }
 
 /** Formats cumulative profile distance using metres or kilometres. */
-function formatDistance(distanceMeters: number): string {
+function formatDistance(
+  distanceMeters: number,
+  integerFormat: Intl.NumberFormat,
+  distanceFormat: Intl.NumberFormat,
+): string {
   if (distanceMeters < 1_000) {
-    return `${INTEGER_FORMAT.format(Math.round(distanceMeters))} m`;
+    return `${integerFormat.format(Math.round(distanceMeters))} m`;
   }
 
-  return `${DISTANCE_FORMAT.format(distanceMeters / 1_000)} km`;
+  return `${distanceFormat.format(distanceMeters / 1_000)} km`;
 }
 
 /**
@@ -109,6 +111,15 @@ export default function RouteElevationProfile({
   id,
   points,
 }: RouteElevationProfileProps) {
+  const { locale, t } = useI18n();
+  const integerFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
+    [locale],
+  );
+  const distanceFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }),
+    [locale],
+  );
   const {
     linePoints,
     areaPath,
@@ -118,18 +129,19 @@ export default function RouteElevationProfile({
   } = buildChartPoints(points);
   const plotHeight =
     CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
+  const formattedMinimum = formatAltitude(minimumElevation, integerFormat);
+  const formattedMaximum = formatAltitude(maximumElevation, integerFormat);
 
   return (
     <section
       id={id}
       className="route-elevation-profile"
-      aria-label="Profil d’altitude de l’itinéraire"
+      aria-label={t('profile.aria')}
     >
       <div className="route-elevation-profile-header">
-        <strong>Profil d’altitude</strong>
+        <strong>{t('profile.title')}</strong>
         <span>
-          {formatAltitude(minimumElevation)} –{' '}
-          {formatAltitude(maximumElevation)}
+          {formattedMinimum} – {formattedMaximum}
         </span>
       </div>
 
@@ -137,7 +149,10 @@ export default function RouteElevationProfile({
         className="route-elevation-profile-chart"
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
         role="img"
-        aria-label={`Profil d’altitude de ${formatAltitude(minimumElevation)} à ${formatAltitude(maximumElevation)}`}
+        aria-label={t('profile.rangeAria', {
+          minimum: formattedMinimum,
+          maximum: formattedMaximum,
+        })}
         preserveAspectRatio="xMidYMid meet"
       >
         {Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
@@ -162,7 +177,7 @@ export default function RouteElevationProfile({
                 y={y + 4}
                 textAnchor="end"
               >
-                {INTEGER_FORMAT.format(Math.round(elevation))}
+                {integerFormat.format(Math.round(elevation))}
               </text>
             </g>
           );
@@ -188,7 +203,7 @@ export default function RouteElevationProfile({
           y={CHART_HEIGHT - 7}
           textAnchor="end"
         >
-          {formatDistance(totalDistance)}
+          {formatDistance(totalDistance, integerFormat, distanceFormat)}
         </text>
       </svg>
     </section>

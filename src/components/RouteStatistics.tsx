@@ -3,7 +3,8 @@
  * drawn hike in a compact floating bar. It can reveal the elevation profile
  * above the bar while preserving the map as the main interface.
  */
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
+import { useI18n } from '../i18n/I18nContext';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 import RouteElevationProfile from './RouteElevationProfile';
 
@@ -26,32 +27,37 @@ interface RouteStatisticsProps {
   elevationPoints: RouteElevationPoint[];
 }
 
-const DISTANCE_FORMAT = new Intl.NumberFormat('fr-CH', {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
-const INTEGER_FORMAT = new Intl.NumberFormat('fr-CH', {
-  maximumFractionDigits: 0,
-});
 /** Duration is rounded to five minutes because it is an indicative estimate. */
 const DURATION_ROUNDING_MINUTES = 5;
 
 /** Formats metres as metres for short lines and kilometres for hiking routes. */
-function formatDistance(distanceMeters: number): string {
+function formatDistance(
+  distanceMeters: number,
+  integerFormat: Intl.NumberFormat,
+  distanceFormat: Intl.NumberFormat,
+): string {
   if (distanceMeters < 1_000) {
-    return `${INTEGER_FORMAT.format(Math.round(distanceMeters))} m`;
+    return `${integerFormat.format(Math.round(distanceMeters))} m`;
   }
 
-  return `${DISTANCE_FORMAT.format(distanceMeters / 1_000)} km`;
+  return `${distanceFormat.format(distanceMeters / 1_000)} km`;
 }
 
 /** Formats an altitude difference in whole metres. */
-function formatElevation(elevationMeters: number): string {
-  return `${INTEGER_FORMAT.format(Math.round(elevationMeters))} m`;
+function formatElevation(
+  elevationMeters: number,
+  integerFormat: Intl.NumberFormat,
+): string {
+  return `${integerFormat.format(Math.round(elevationMeters))} m`;
 }
 
 /** Formats approximate walking time after rounding to the nearest five minutes. */
-function formatDuration(durationMinutes: number): string {
+function formatDuration(
+  durationMinutes: number,
+  integerFormat: Intl.NumberFormat,
+  hourUnit: string,
+  minuteUnit: string,
+): string {
   const roundedMinutes = Math.max(
     DURATION_ROUNDING_MINUTES,
     Math.round(durationMinutes / DURATION_ROUNDING_MINUTES) *
@@ -61,14 +67,14 @@ function formatDuration(durationMinutes: number): string {
   const minutes = roundedMinutes % 60;
 
   if (hours === 0) {
-    return `≈ ${minutes} min`;
+    return `≈ ${integerFormat.format(minutes)} ${minuteUnit}`;
   }
 
   if (minutes === 0) {
-    return `≈ ${hours} h`;
+    return `≈ ${integerFormat.format(hours)} ${hourUnit}`;
   }
 
-  return `≈ ${hours} h ${String(minutes).padStart(2, '0')}`;
+  return `≈ ${integerFormat.format(hours)} ${hourUnit} ${String(minutes).padStart(2, '0')}`;
 }
 
 /** Uses an ellipsis while loading and a dash if altitude lookup failed. */
@@ -85,8 +91,21 @@ export default function RouteStatistics({
   durationMinutes,
   elevationPoints,
 }: RouteStatisticsProps) {
+  const { locale, t } = useI18n();
   const [isProfileVisible, setIsProfileVisible] = useState(false);
   const profileId = useId();
+  const integerFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }),
+    [locale],
+  );
+  const distanceFormat = useMemo(
+    () =>
+      new Intl.NumberFormat(locale, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }),
+    [locale],
+  );
   const hasElevation =
     elevationStatus === 'ready' &&
     ascentMeters !== null &&
@@ -97,11 +116,11 @@ export default function RouteStatistics({
   const unavailableValue = pendingValue(elevationStatus);
   const profileButtonLabel = hasProfile
     ? isProfileVisible
-      ? 'Masquer le profil d’altitude'
-      : 'Afficher le profil d’altitude'
+      ? t('profile.hide')
+      : t('profile.show')
     : elevationStatus === 'loading'
-      ? 'Chargement du profil d’altitude'
-      : 'Profil d’altitude indisponible';
+      ? t('profile.loading')
+      : t('profile.unavailable');
 
   return (
     <div className="route-summary">
@@ -111,35 +130,48 @@ export default function RouteStatistics({
 
       <section
         className="route-statistics"
-        aria-label="Statistiques de l’itinéraire"
+        aria-label={t('statistics.aria')}
         aria-busy={elevationStatus === 'loading'}
       >
         <div className="route-statistics-item">
-          <span>Distance</span>
-          <strong>{formatDistance(distanceMeters)}</strong>
-        </div>
-
-        <div className="route-statistics-item">
-          <span>Montée</span>
+          <span>{t('statistics.distance')}</span>
           <strong>
-            {hasElevation ? formatElevation(ascentMeters) : unavailableValue}
+            {formatDistance(distanceMeters, integerFormat, distanceFormat)}
           </strong>
         </div>
 
         <div className="route-statistics-item">
-          <span>Descente</span>
+          <span>{t('statistics.ascent')}</span>
           <strong>
-            {hasElevation ? formatElevation(descentMeters) : unavailableValue}
+            {hasElevation
+              ? formatElevation(ascentMeters, integerFormat)
+              : unavailableValue}
+          </strong>
+        </div>
+
+        <div className="route-statistics-item">
+          <span>{t('statistics.descent')}</span>
+          <strong>
+            {hasElevation
+              ? formatElevation(descentMeters, integerFormat)
+              : unavailableValue}
           </strong>
         </div>
 
         <div
           className="route-statistics-item"
-          title="Temps de marche estimé, pauses non comprises"
+          title={t('statistics.durationTitle')}
         >
-          <span>Durée</span>
+          <span>{t('statistics.duration')}</span>
           <strong>
-            {hasElevation ? formatDuration(durationMinutes) : unavailableValue}
+            {hasElevation
+              ? formatDuration(
+                  durationMinutes,
+                  integerFormat,
+                  t('units.hourShort'),
+                  t('units.minuteShort'),
+                )
+              : unavailableValue}
           </strong>
         </div>
 
