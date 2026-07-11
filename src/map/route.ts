@@ -114,7 +114,7 @@ function appendCoordinate(
  * @param steps - Ordered immutable route history.
  * @returns Deduplicated route coordinates in display order.
  */
-function collectRouteCoordinates(steps: RouteStep[]): Coordinate[] {
+export function collectRouteCoordinates(steps: RouteStep[]): Coordinate[] {
   const coordinates: Coordinate[] = [];
 
   for (const step of steps) {
@@ -128,6 +128,50 @@ function collectRouteCoordinates(steps: RouteStep[]): Coordinate[] {
   }
 
   return coordinates;
+}
+
+/**
+ * Reverses waypoint order and every stored incoming section without routing again.
+ *
+ * Each original section belongs to its destination step. After reversal, that
+ * same section belongs to the former start waypoint, so both the geometry and
+ * owning step must be rebuilt in the opposite direction.
+ *
+ * @param steps - Applied route steps in their current display order.
+ * @returns A new immutable step array representing the same geometry backwards.
+ */
+export function reverseRouteSteps(steps: RouteStep[]): RouteStep[] {
+  if (steps.length === 0) {
+    return [];
+  }
+
+  const lastStep = steps[steps.length - 1];
+  const reversedSteps: RouteStep[] = [
+    {
+      waypoint: [...lastStep.waypoint],
+      segment: null,
+      mode: lastStep.mode,
+    },
+  ];
+
+  for (let index = steps.length - 1; index > 0; index -= 1) {
+    const sourceStep = steps[index];
+    const destinationStep = steps[index - 1];
+    const reversedSegment = sourceStep.segment
+      ? sourceStep.segment
+          .slice()
+          .reverse()
+          .map((coordinate): Coordinate => [...coordinate])
+      : [[...sourceStep.waypoint], [...destinationStep.waypoint]];
+
+    reversedSteps.push({
+      waypoint: [...destinationStep.waypoint],
+      segment: reversedSegment,
+      mode: sourceStep.mode,
+    });
+  }
+
+  return reversedSteps;
 }
 
 /**

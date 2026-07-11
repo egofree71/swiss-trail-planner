@@ -113,7 +113,8 @@ Tasks:
 - [ ] Move existing waypoints.
 - [ ] Delete waypoints.
 - [ ] Insert a waypoint into an existing segment.
-- [ ] Clear the current route.
+- [x] Clear the current route.
+- [x] Reverse the complete route without recalculating sections.
 - [x] Add undo and redo support for waypoint creation.
 - [ ] Show route distance.
 - [ ] Keep controls compact and collapsible.
@@ -151,9 +152,9 @@ Goal: turn the manually edited route into a useful hiking file.
 
 Tasks:
 
-- [ ] Define the internal route data model.
-- [ ] Export the current route as GPX.
-- [ ] Include waypoint coordinates in the correct order.
+- [x] Define the internal route data model.
+- [x] Export the current route as a GPX 1.1 track.
+- [x] Include the complete route geometry in the correct order.
 - [ ] Retrieve elevation values for route points.
 - [ ] Calculate total ascent and descent.
 - [ ] Display route distance and elevation summary.

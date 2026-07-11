@@ -1,7 +1,7 @@
 /**
  * Business context: renders the compact route-editing toolbar without taking
  * permanent space away from the map. It exposes route-mode state, undo/redo,
- * the straight-versus-network choice, and placeholders for later route actions.
+ * the straight-versus-network choice, route reversal, deletion, and GPX export.
  */
 /** Controlled state and actions for the route-editing toolbar. */
 interface RouteControlsProps {
@@ -17,6 +17,12 @@ interface RouteControlsProps {
   canUndo: boolean;
   /** Whether at least one previously undone step can be restored. */
   canRedo: boolean;
+  /** Whether the route contains enough waypoints to reverse direction. */
+  canReverse: boolean;
+  /** Whether a current route exists and can be cleared. */
+  canDelete: boolean;
+  /** Whether the route contains enough geometry for GPX export. */
+  canExport: boolean;
   /** Enters or leaves route-creation mode. */
   onToggle: () => void;
   /** Removes the latest applied route step. */
@@ -25,6 +31,12 @@ interface RouteControlsProps {
   onRedo: () => void;
   /** Switches between network routing and direct segments. */
   onToggleSnap: () => void;
+  /** Reverses waypoint and segment order. */
+  onReverse: () => void;
+  /** Clears the complete route. */
+  onDelete: () => void;
+  /** Downloads the complete route as GPX. */
+  onExport: () => void;
 }
 
 /**
@@ -38,10 +50,16 @@ export default function RouteControls({
   hasRoute,
   canUndo,
   canRedo,
+  canReverse,
+  canDelete,
+  canExport,
   onToggle,
   onUndo,
   onRedo,
   onToggleSnap,
+  onReverse,
+  onDelete,
+  onExport,
 }: RouteControlsProps) {
   const toggleLabel = isActive
     ? 'Quitter le mode création d’itinéraire'
@@ -95,7 +113,9 @@ export default function RouteControls({
             className={[
               'map-control-button',
               'map-control-button--route-action',
-              hasRoute && isSnapEnabled ? 'map-control-button--route-active' : '',
+              hasRoute && isSnapEnabled
+                ? 'map-control-button--route-active'
+                : '',
             ]
               .filter(Boolean)
               .join(' ')}
@@ -117,9 +137,10 @@ export default function RouteControls({
           <button
             type="button"
             className="map-control-button map-control-button--route-action"
-            aria-label="Inverser le parcours"
-            title="Inverser le parcours"
-            disabled
+            aria-label="Inverser l’itinéraire"
+            title="Inverser l’itinéraire"
+            disabled={!canReverse}
+            onClick={onReverse}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M5 7h12" />
@@ -134,7 +155,8 @@ export default function RouteControls({
             className="map-control-button map-control-button--route-action"
             aria-label="Supprimer l’itinéraire"
             title="Supprimer l’itinéraire"
-            disabled
+            disabled={!canDelete}
+            onClick={onDelete}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
               <path d="M3 5.5h14" />
@@ -152,7 +174,8 @@ export default function RouteControls({
             className="map-control-button map-control-button--route-action"
             aria-label="Exporter l’itinéraire"
             title="Exporter l’itinéraire"
-            disabled
+            disabled={!canExport}
+            onClick={onExport}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M12 3v12" />

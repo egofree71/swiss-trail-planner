@@ -1,8 +1,8 @@
 # Swiss Trail Planner Architecture
 
 > Documented state: raster map, hiking overlay, search, geolocation,
-> fullscreen, manual route creation, and experimental on-demand swissTLM3D
-> routing around user-selected positions.
+> fullscreen, manual route creation, GPX export, and experimental on-demand
+> swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -44,7 +44,10 @@ It can:
 - build a regional walkable graph and calculate snapped sections with A*;
 - prefer official hiking-trail sections through routing costs;
 - undo and redo exact straight or routed route steps;
-- reveal a compact route action strip for snap mode, reverse, deletion, and export;
+- reverse the complete route without recalculating sections;
+- clear the complete route;
+- export the displayed route geometry as a GPX 1.1 track;
+- reveal a compact route action strip for snap mode, reversal, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
 - display a metric scale and swisstopo attribution;
@@ -57,9 +60,8 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - waypoint movement, insertion, or individual deletion;
-- functional route reversal, route deletion, or export actions;
 - distance or elevation calculations;
-- GPX export;
+- elevation values in GPX export;
 - local or remote persistence;
 - an application server.
 
@@ -80,9 +82,10 @@ The project evolves through independent functional layers:
 4. route-creation interface shell;
 5. straight-line route creation with undo and redo;
 6. dynamic cell-based swissTLM3D routing around selected waypoints;
-7. waypoint editing and GPX export;
-8. repeatable routing-data preparation;
-9. reliable national hiking routing.
+7. route reversal, deletion, and GPX export;
+8. waypoint editing, distance, and elevation;
+9. repeatable routing-data preparation;
+10. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -332,10 +335,16 @@ intentionally simple while routes are small and waypoints are not draggable.
 are enabled from history state. The snap button selects network or straight
 creation; it becomes available after the first waypoint and is temporarily
 disabled while cells are loading or a route is being calculated. Disabled
-route actions keep an opaque background while muting their icons so map details
-do not visually bleed through the toolbar. The route toggle displays a small
-animated spinner during asynchronous network work. Reverse, delete, and export
-remain disabled placeholders.
+route actions use an opaque light-grey background so map details do not bleed
+through the toolbar. The route toggle displays a small animated spinner during
+asynchronous network work.
+
+Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
+stored section geometry without issuing another routing request. The redo stack
+is cleared because its entries belong to the previous direction. Deletion clears
+the applied and redo histories while keeping route-creation mode active. GPX
+export is enabled after two waypoints and delegates XML generation and browser
+download to `src/export/gpx.ts`.
 
 Routine loading and graph-construction details are intentionally not shown to
 the user. Temporary route messages are reserved for actionable problems such as
@@ -405,6 +414,8 @@ swiss-trail-planner/
 │   ├── components/
 │   │   ├── LocationSearch.tsx
 │   │   └── RouteControls.tsx
+│   ├── export/
+│   │   └── gpx.ts
 │   ├── map/
 │   │   ├── config.ts
 │   │   ├── route.ts
@@ -459,15 +470,22 @@ It does not know about OpenLayers. It reports a typed result through its
 ### `src/components/RouteControls.tsx`
 
 Renders the route-mode toggle and the contextual route action buttons. It is a
-controlled component: `App.tsx` supplies active, snap, undo, and redo state plus
-the corresponding callbacks. Reverse, delete, and export remain disabled until
-those operations are implemented.
+controlled component: `App.tsx` supplies availability state and callbacks for
+snap, undo, redo, reversal, deletion, and GPX export.
+
+### `src/export/gpx.ts`
+
+Converts the complete displayed route geometry from Web Mercator to WGS 84,
+builds a GPX 1.1 track, and starts a browser download through a temporary object
+URL. It exports routed intermediate vertices rather than only user waypoints so
+external applications preserve the exact path.
 
 ### `src/map/route.ts`
 
-Defines the immutable route-step shape, creates the route vector layer, and
-rebuilds its line and waypoint features from stored section geometries. It owns
-route styling but not route history or UI state.
+Defines the immutable route-step shape, flattens stored section geometry,
+reverses complete routes without recalculation, creates the route vector layer,
+and rebuilds its line and waypoint features. It owns route geometry helpers and
+styling but not route history or UI state.
 
 ### `src/routing/swissTlmApi.ts`
 
@@ -547,14 +565,17 @@ controls, result panel, status messages, and OpenLayers control placement.
 13. A disconnected corridor is retried once with a wider cell radius.
 14. Updating route history rebuilds the route line and waypoint features.
 15. Undo moves the last complete step to redo; redo restores it without routing.
-16. Leaving route mode removes the click listener and aborts active network work
+16. Reversal rebuilds immutable steps in the opposite order and clears redo.
+17. Deletion clears both applied and redo histories.
+18. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
+19. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells and the route available.
-17. The fullscreen button requests fullscreen for the root application element.
-18. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-19. Location search and browser geolocation continue to operate independently.
-20. On unmount, map listeners, timers, requests, references, and the map target
+20. The fullscreen button requests fullscreen for the root application element.
+21. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+22. Location search and browser geolocation continue to operate independently.
+23. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-21. A push to `main` triggers the Pages workflow, which builds and deploys
+24. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
@@ -622,9 +643,9 @@ it.
 
 ### Phase 3 — Route editing
 
-Straight and dynamically routed waypoint creation with undo and redo is
-implemented. The next steps are route clearing and reversal, waypoint movement
-and insertion, distance calculation, and GPX export.
+Straight and dynamically routed waypoint creation, undo/redo, route reversal,
+route clearing, and GPX track export are implemented. The next steps are
+waypoint movement and insertion, distance calculation, and elevation handling.
 
 ### Phase 4 — Production routing
 

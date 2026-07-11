@@ -24,7 +24,7 @@ positions selected by the user.
   on demand;
 - straight-line segments when snapping is disabled;
 - functional undo and redo that restore the exact generated segment geometry;
-- contextual reverse, delete, and export controls for future steps;
+- route reversal, complete route deletion, and GPX track export;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
@@ -140,7 +140,13 @@ Undo removes the most recently added waypoint and its segment. Redo restores
 the exact stored geometry without repeating the network request. Adding a new
 waypoint after an undo clears the redo history. The route remains visible when
 route-creation mode is left and can be continued by entering the mode again.
-Reverse, delete, and export are still disabled placeholders.
+
+The route can be reversed without another routing request: waypoint order and
+each stored section geometry are reversed in memory. Deleting clears the
+complete route and its redo history while keeping creation mode active. Export
+creates a GPX 1.1 track containing the complete displayed geometry, including
+all intermediate swissTLM3D vertices, so another application can reproduce the
+same path without recalculating it. Elevation values are not exported yet.
 
 ## Production build
 

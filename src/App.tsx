@@ -14,6 +14,7 @@ import TileLayer from 'ol/layer/Tile.js';
 import { fromLonLat } from 'ol/proj.js';
 import LocationSearch from './components/LocationSearch';
 import RouteControls from './components/RouteControls';
+import { downloadRouteGpx } from './export/gpx';
 import {
   createHikingTrailsSource,
   createSwissTopoRasterSource,
@@ -26,6 +27,7 @@ import {
 } from './map/config';
 import {
   createRouteDisplay,
+  reverseRouteSteps,
   type RouteDisplay,
   type RouteStep,
   updateRouteDisplay,
@@ -193,6 +195,59 @@ export default function App() {
     });
   };
 
+  /** Reverses the exact stored route geometry and starts future edits at its former beginning. */
+  const reverseRoute = () => {
+    if (routeOperationPendingRef.current) {
+      return;
+    }
+
+    const currentHistory = routeHistoryRef.current;
+
+    if (currentHistory.steps.length < 2) {
+      return;
+    }
+
+    commitRouteHistory({
+      steps: reverseRouteSteps(currentHistory.steps),
+      // Redo entries belong to the old direction and cannot be applied safely.
+      redoSteps: [],
+    });
+  };
+
+  /** Clears the complete route while leaving route-creation mode ready for a new start. */
+  const deleteRoute = () => {
+    if (
+      routeOperationPendingRef.current ||
+      routeHistoryRef.current.steps.length === 0
+    ) {
+      return;
+    }
+
+    commitRouteHistory({
+      steps: [],
+      redoSteps: [],
+    });
+    clearRouteMessageTimer();
+    setRouteMessage('');
+  };
+
+  /** Downloads the exact displayed route geometry as a GPX 1.1 track. */
+  const exportRoute = () => {
+    if (routeOperationPendingRef.current) {
+      return;
+    }
+
+    try {
+      downloadRouteGpx(routeHistoryRef.current.steps);
+    } catch (error) {
+      console.error('Unable to export the route as GPX.', error);
+      showTemporaryRouteMessage(
+        'L’itinéraire doit contenir au moins deux points pour être exporté.',
+        'error',
+      );
+    }
+  };
+
   const clearLocationMessageTimer = () => {
     if (locationMessageTimerRef.current !== null) {
       window.clearTimeout(locationMessageTimerRef.current);
@@ -237,7 +292,6 @@ export default function App() {
       routeMessageTimerRef.current = null;
     }, ROUTE_MESSAGE_DURATION_MS);
   };
-
 
   const changeZoom = (delta: number) => {
     const view = mapRef.current?.getView();
@@ -740,12 +794,24 @@ export default function App() {
           canRedo={
             !isRouteOperationPending && routeHistory.redoSteps.length > 0
           }
+          canReverse={
+            !isRouteOperationPending && routeHistory.steps.length > 1
+          }
+          canDelete={
+            !isRouteOperationPending && routeHistory.steps.length > 0
+          }
+          canExport={
+            !isRouteOperationPending && routeHistory.steps.length > 1
+          }
           onToggle={toggleRouteCreation}
           onUndo={undoRoutePoint}
           onRedo={redoRoutePoint}
           onToggleSnap={() =>
             setIsRouteSnapEnabled((isSnapEnabled) => !isSnapEnabled)
           }
+          onReverse={reverseRoute}
+          onDelete={deleteRoute}
+          onExport={exportRoute}
         />
 
         <div className="zoom-controls">
