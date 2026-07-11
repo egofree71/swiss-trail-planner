@@ -1,4 +1,11 @@
+/**
+ * Business context: coordinates the map-centred application shell and owns the
+ * imperative OpenLayers lifecycle. It connects search, geolocation, fullscreen,
+ * route history, dynamic swissTLM3D loading, and route-editing controls while
+ * keeping provider/network details in dedicated modules.
+ */
 import { useEffect, useRef, useState } from 'react';
+import type { Coordinate } from 'ol/coordinate.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
@@ -6,7 +13,7 @@ import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
 import { fromLonLat } from 'ol/proj.js';
 import LocationSearch from './components/LocationSearch';
-import type { LocationSearchResult } from './search/locationSearch';
+import RouteControls from './components/RouteControls';
 import {
   createHikingTrailsSource,
   createSwissTopoRasterSource,
@@ -18,6 +25,12 @@ import {
   USER_LOCATION_ZOOM,
 } from './map/config';
 import {
+  createRouteDisplay,
+  type RouteDisplay,
+  type RouteStep,
+  updateRouteDisplay,
+} from './map/route';
+import {
   createSearchResultMarker,
   type SearchResultMarker,
   updateSearchResultMarker,
@@ -27,19 +40,67 @@ import {
   type UserLocationMarker,
   updateUserLocationMarker,
 } from './map/userLocation';
+import {
+  DynamicRoutingNetworkLoader,
+  RoutingAreaTooLargeError,
+} from './routing/dynamicRoutingNetwork';
+import type { LocationSearchResult } from './search/locationSearch';
 
+/** Base-map loading state used by the blocking startup card. */
 type LoadStatus = 'loading' | 'ready' | 'error';
+/** Browser geolocation state used by the location control and its feedback. */
 type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
+/** Severity of a temporary route-editing message. */
+type RouteMessageType = 'info' | 'error';
 
+/** Immutable undo/redo state for route creation. */
+interface RouteHistory {
+  /** Applied route steps in display order. */
+  steps: RouteStep[];
+  /** Undone steps stored in reverse restoration order. */
+  redoSteps: RouteStep[];
+}
+
+/** Duration in milliseconds for transient geolocation feedback. */
 const LOCATION_MESSAGE_DURATION_MS = 6_000;
+/** Duration in milliseconds for actionable route errors before auto-dismissal. */
+const ROUTE_MESSAGE_DURATION_MS = 7_000;
+/** Squared distance in square map units below which a route connector is unnecessary. */
+const ROUTE_CONNECTOR_DISTANCE_SQUARED = 0.01;
 
+/** Returns squared horizontal distance in map units for inexpensive continuity checks. */
+function coordinateDistanceSquared(
+  first: Coordinate,
+  second: Coordinate,
+): number {
+  const deltaX = first[0] - second[0];
+  const deltaY = first[1] - second[1];
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
+/** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
   const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
+  const routeDisplayRef = useRef<RouteDisplay | null>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
+  const routeMessageTimerRef = useRef<number | null>(null);
+  const routeHistoryRef = useRef<RouteHistory>({
+    steps: [],
+    redoSteps: [],
+  });
+  const routeCreationActiveRef = useRef(false);
+  const routeCreationSessionRef = useRef(0);
+  const routeOperationPendingRef = useRef(false);
+  const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
+  const routingAbortControllerRef = useRef<AbortController | null>(null);
+
+  if (!routingLoaderRef.current) {
+    routingLoaderRef.current = new DynamicRoutingNetworkLoader();
+  }
 
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [errorMessage, setErrorMessage] = useState('');
@@ -47,6 +108,90 @@ export default function App() {
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
+  const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
+  const [isRouteOperationPending, setIsRouteOperationPending] =
+    useState(false);
+  const [routeMessage, setRouteMessage] = useState('');
+  const [routeMessageType, setRouteMessageType] =
+    useState<RouteMessageType>('info');
+  const [routeHistory, setRouteHistory] = useState<RouteHistory>(
+    routeHistoryRef.current,
+  );
+
+  /**
+   * Keeps the synchronous ref and React render state on the same immutable
+   * history object.
+   */
+  const commitRouteHistory = (history: RouteHistory) => {
+    routeHistoryRef.current = history;
+    setRouteHistory(history);
+  };
+
+  /**
+   * Commits an asynchronously generated route step only if history and editing
+   * mode still match the state captured when the operation began.
+   */
+  const appendRouteStep = (
+    expectedSteps: RouteStep[],
+    step: RouteStep,
+  ): boolean => {
+    const currentHistory = routeHistoryRef.current;
+
+    if (
+      currentHistory.steps !== expectedSteps ||
+      !routeCreationActiveRef.current
+    ) {
+      return false;
+    }
+
+    commitRouteHistory({
+      steps: [...currentHistory.steps, step],
+      redoSteps: [],
+    });
+    return true;
+  };
+
+  /** Moves the latest applied step to the redo stack without recomputing geometry. */
+  const undoRoutePoint = () => {
+    if (routeOperationPendingRef.current) {
+      return;
+    }
+
+    const currentHistory = routeHistoryRef.current;
+
+    if (currentHistory.steps.length === 0) {
+      return;
+    }
+
+    const lastStep = currentHistory.steps[currentHistory.steps.length - 1];
+
+    commitRouteHistory({
+      steps: currentHistory.steps.slice(0, -1),
+      redoSteps: [...currentHistory.redoSteps, lastStep],
+    });
+  };
+
+  /** Restores the latest undone step with the exact geometry stored in history. */
+  const redoRoutePoint = () => {
+    if (routeOperationPendingRef.current) {
+      return;
+    }
+
+    const currentHistory = routeHistoryRef.current;
+
+    if (currentHistory.redoSteps.length === 0) {
+      return;
+    }
+
+    const restoredStep =
+      currentHistory.redoSteps[currentHistory.redoSteps.length - 1];
+
+    commitRouteHistory({
+      steps: [...currentHistory.steps, restoredStep],
+      redoSteps: currentHistory.redoSteps.slice(0, -1),
+    });
+  };
 
   const clearLocationMessageTimer = () => {
     if (locationMessageTimerRef.current !== null) {
@@ -65,6 +210,35 @@ export default function App() {
     }, LOCATION_MESSAGE_DURATION_MS);
   };
 
+  const clearRouteMessageTimer = () => {
+    if (routeMessageTimerRef.current !== null) {
+      window.clearTimeout(routeMessageTimerRef.current);
+      routeMessageTimerRef.current = null;
+    }
+  };
+
+  const setPersistentRouteMessage = (
+    message: string,
+    type: RouteMessageType = 'info',
+  ) => {
+    clearRouteMessageTimer();
+    setRouteMessageType(type);
+    setRouteMessage(message);
+  };
+
+  const showTemporaryRouteMessage = (
+    message: string,
+    type: RouteMessageType = 'info',
+  ) => {
+    setPersistentRouteMessage(message, type);
+
+    routeMessageTimerRef.current = window.setTimeout(() => {
+      setRouteMessage('');
+      routeMessageTimerRef.current = null;
+    }, ROUTE_MESSAGE_DURATION_MS);
+  };
+
+
   const changeZoom = (delta: number) => {
     const view = mapRef.current?.getView();
     const currentZoom = view?.getZoom();
@@ -78,7 +252,6 @@ export default function App() {
       duration: 200,
     });
   };
-
 
   const toggleFullscreen = async () => {
     const app = appRef.current;
@@ -96,6 +269,28 @@ export default function App() {
     } catch (error) {
       console.error('Unable to toggle fullscreen mode.', error);
     }
+  };
+
+  /**
+   * Enters or leaves route creation. Leaving invalidates the session token and
+   * aborts any request so a late network response cannot modify the route.
+   */
+  const toggleRouteCreation = () => {
+    const nextState = !routeCreationActiveRef.current;
+
+    routeCreationActiveRef.current = nextState;
+    routeCreationSessionRef.current += 1;
+
+    if (!nextState) {
+      routingAbortControllerRef.current?.abort();
+      routingAbortControllerRef.current = null;
+      routeOperationPendingRef.current = false;
+      setIsRouteOperationPending(false);
+      clearRouteMessageTimer();
+      setRouteMessage('');
+    }
+
+    setIsRouteCreationActive(nextState);
   };
 
   const selectSearchResult = (result: LocationSearchResult) => {
@@ -209,6 +404,7 @@ export default function App() {
     const hikingTrailsSource = createHikingTrailsSource();
     const userLocationMarker = createUserLocationMarker();
     const searchResultMarker = createSearchResultMarker();
+    const routeDisplay = createRouteDisplay();
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -256,6 +452,7 @@ export default function App() {
           minZoom: HIKING_TRAILS_MIN_ZOOM,
           zIndex: 10,
         }),
+        routeDisplay.layer,
         searchResultMarker.layer,
         userLocationMarker.layer,
       ],
@@ -295,9 +492,12 @@ export default function App() {
     mapRef.current = map;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
+    routeDisplayRef.current = routeDisplay;
 
     return () => {
       clearLocationMessageTimer();
+      clearRouteMessageTimer();
+      routingAbortControllerRef.current?.abort();
       document.removeEventListener(
         'fullscreenchange',
         handleFullscreenChange,
@@ -308,8 +508,197 @@ export default function App() {
       mapRef.current = null;
       userLocationMarkerRef.current = null;
       searchResultMarkerRef.current = null;
+      routeDisplayRef.current = null;
     };
   }, []);
+
+  // OpenLayers features are a projection of immutable history, never the
+  // source of truth.
+  useEffect(() => {
+    const routeDisplay = routeDisplayRef.current;
+
+    if (!routeDisplay) {
+      return;
+    }
+
+    updateRouteDisplay(routeDisplay, routeHistory.steps);
+  }, [routeHistory.steps]);
+
+  /**
+   * Registers the route-click interaction only while editing is active. Network
+   * operations are serialized because each new segment depends on the endpoint
+   * committed by the previous operation.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!map || !isRouteCreationActive) {
+      return;
+    }
+
+    const handleRouteClick = (event: { coordinate: Coordinate }) => {
+      // Ignore extra clicks while the current endpoint is still being resolved.
+      if (routeOperationPendingRef.current) {
+        return;
+      }
+
+      const clickedCoordinate: Coordinate = [...event.coordinate];
+      const expectedSteps = routeHistoryRef.current.steps;
+      const routeCreationSession = routeCreationSessionRef.current;
+      const previousStep = expectedSteps[expectedSteps.length - 1];
+
+      // Straight mode stays fully local and records the same immutable step
+      // shape as network mode.
+      if (!isRouteSnapEnabled) {
+        appendRouteStep(expectedSteps, {
+          waypoint: clickedCoordinate,
+          segment: previousStep
+            ? [[...previousStep.waypoint], clickedCoordinate]
+            : null,
+          mode: 'straight',
+        });
+        return;
+      }
+
+      // The ref blocks clicks synchronously; React state drives the visible
+      // busy treatment.
+      routeOperationPendingRef.current = true;
+      setIsRouteOperationPending(true);
+
+      // One controller owns all GeoAdmin requests spawned for this click.
+      const abortController = new AbortController();
+      routingAbortControllerRef.current = abortController;
+
+      void (async () => {
+        clearRouteMessageTimer();
+        setRouteMessage('');
+
+        try {
+          const routingLoader = routingLoaderRef.current;
+
+          if (!routingLoader) {
+            throw new Error('The dynamic routing loader is unavailable.');
+          }
+
+          let step: RouteStep;
+
+          if (!previousStep) {
+            const snappedCoordinate = await routingLoader.snap(
+              clickedCoordinate,
+              abortController.signal,
+            );
+
+            if (!snappedCoordinate) {
+              showTemporaryRouteMessage(
+                'Aucun chemin swissTLM3D n’a été trouvé à proximité de ce point.',
+                'error',
+              );
+              return;
+            }
+
+            step = {
+              waypoint: [...snappedCoordinate],
+              segment: null,
+              mode: 'network',
+            };
+          } else {
+            const routedPath = await routingLoader.route(
+              previousStep.waypoint,
+              clickedCoordinate,
+              abortController.signal,
+            );
+
+            if (!routedPath || routedPath.coordinates.length < 2) {
+              showTemporaryRouteMessage(
+                'Aucun chemin connecté n’a été trouvé entre ces deux points.',
+                'error',
+              );
+              return;
+            }
+
+            const segment = routedPath.coordinates.map(
+              (coordinate): Coordinate => [...coordinate],
+            );
+
+            /*
+             * A preceding straight segment can leave its waypoint slightly off
+             * the network. Preserve continuity with a short access connector;
+             * subsequent snapped waypoints already lie on swissTLM3D.
+             */
+            if (
+              coordinateDistanceSquared(
+                previousStep.waypoint,
+                segment[0],
+              ) > ROUTE_CONNECTOR_DISTANCE_SQUARED
+            ) {
+              segment.unshift([...previousStep.waypoint]);
+            }
+
+            step = {
+              waypoint: [...segment[segment.length - 1]],
+              segment,
+              mode: 'network',
+            };
+          }
+
+          // Reject stale results after mode changes, undo/redo, or another history mutation.
+          if (
+            !routeCreationActiveRef.current ||
+            routeCreationSessionRef.current !== routeCreationSession ||
+            routeHistoryRef.current.steps !== expectedSteps
+          ) {
+            return;
+          }
+
+          appendRouteStep(expectedSteps, step);
+        } catch (error) {
+          // Cancellation is an expected control-flow path when the user leaves route mode.
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            return;
+          }
+
+          if (routeCreationSessionRef.current !== routeCreationSession) {
+            return;
+          }
+
+          if (error instanceof RoutingAreaTooLargeError) {
+            showTemporaryRouteMessage(
+              'Ce segment est trop long pour le chargement dynamique actuel. Ajoutez un point intermédiaire.',
+              'error',
+            );
+            return;
+          }
+
+          console.error('Unable to load or route on swissTLM3D.', error);
+          showTemporaryRouteMessage(
+            'Le réseau swissTLM3D de cette zone n’a pas pu être chargé.',
+            'error',
+          );
+        } finally {
+          // Only the operation still registered as current may clear the shared busy state.
+          const ownsCurrentOperation =
+            routingAbortControllerRef.current === abortController;
+
+          if (ownsCurrentOperation) {
+            routingAbortControllerRef.current = null;
+            routeOperationPendingRef.current = false;
+            setIsRouteOperationPending(false);
+          }
+
+          if (routeCreationSessionRef.current !== routeCreationSession) {
+            clearRouteMessageTimer();
+            setRouteMessage('');
+          }
+        }
+      })();
+    };
+
+    map.on('singleclick', handleRouteClick);
+
+    return () => {
+      map.un('singleclick', handleRouteClick);
+    };
+  }, [isRouteCreationActive, isRouteSnapEnabled]);
 
   const locationButtonLabel =
     locationStatus === 'located'
@@ -321,7 +710,16 @@ export default function App() {
     : 'Afficher en plein écran';
 
   return (
-    <main className="app" ref={appRef}>
+    <main
+      className={[
+        'app',
+        isRouteCreationActive ? 'app--route-creation' : '',
+        isRouteOperationPending ? 'app--route-busy' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      ref={appRef}
+    >
       <div
         ref={mapTargetRef}
         className="map"
@@ -331,6 +729,24 @@ export default function App() {
       <LocationSearch onSelect={selectSearchResult} />
 
       <nav className="map-controls" aria-label="Contrôles de la carte">
+        <RouteControls
+          isActive={isRouteCreationActive}
+          isSnapEnabled={isRouteSnapEnabled}
+          isBusy={isRouteOperationPending}
+          canUndo={
+            !isRouteOperationPending && routeHistory.steps.length > 0
+          }
+          canRedo={
+            !isRouteOperationPending && routeHistory.redoSteps.length > 0
+          }
+          onToggle={toggleRouteCreation}
+          onUndo={undoRoutePoint}
+          onRedo={redoRoutePoint}
+          onToggleSnap={() =>
+            setIsRouteSnapEnabled((isSnapEnabled) => !isSnapEnabled)
+          }
+        />
+
         <div className="zoom-controls">
           <button
             type="button"
@@ -431,6 +847,20 @@ export default function App() {
           </div>
         )}
       </nav>
+
+      {routeMessage && (
+        <div
+          className={[
+            'route-message',
+            routeMessageType === 'error' ? 'route-message--error' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          role={routeMessageType === 'error' ? 'alert' : 'status'}
+        >
+          {routeMessage}
+        </div>
+      )}
 
       {status === 'loading' && (
         <div className="status-card" role="status">

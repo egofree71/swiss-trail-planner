@@ -47,6 +47,16 @@ input {
   background: #e7ecef;
 }
 
+.app--route-creation .map,
+.app--route-creation .ol-viewport {
+  cursor: crosshair;
+}
+
+.app--route-busy .map,
+.app--route-busy .ol-viewport {
+  cursor: progress;
+}
+
 .location-search {
   position: absolute;
   z-index: 20;
@@ -214,9 +224,27 @@ input {
   top: 1rem;
   right: 1rem;
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   flex-direction: column;
   gap: 0.85rem;
+}
+
+.route-controls,
+.route-action-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.route-controls {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.route-action-controls {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  max-width: min(29rem, calc(100vw - 5.5rem));
 }
 
 .zoom-controls {
@@ -256,6 +284,11 @@ input {
 }
 
 .map-control-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.map-control-button--location:disabled {
   cursor: wait;
   opacity: 0.65;
 }
@@ -267,7 +300,9 @@ input {
 }
 
 .map-control-button--location svg,
-.map-control-button--fullscreen svg {
+.map-control-button--fullscreen svg,
+.map-control-button--route-action svg,
+.map-control-button--route-toggle svg {
   width: 1.55rem;
   height: 1.55rem;
   fill: none;
@@ -282,14 +317,53 @@ input {
   stroke: none;
 }
 
+.map-control-button--route-active {
+  border-color: #1769e0;
+  color: #ffffff;
+  background: #1769e0;
+}
+
+.map-control-button--route-active:hover {
+  background: #125ac2;
+}
+
+
+.map-control-button--route-toggle {
+  position: relative;
+}
+
+.map-control-button--route-loading::after {
+  position: absolute;
+  right: 0.28rem;
+  bottom: 0.28rem;
+  width: 0.68rem;
+  height: 0.68rem;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: '';
+  animation: route-loading-spin 700ms linear infinite;
+}
+
+@keyframes route-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.map-control-button--route-action:disabled:hover {
+  background: rgb(255 255 255 / 94%);
+}
+
 .map-control-button--active {
   color: #1769e0;
   border-color: rgb(23 105 224 / 55%);
+  background: rgb(23 105 224 / 8%);
 }
 
 .location-message {
   position: absolute;
-  top: 7.55rem;
+  top: 11.15rem;
   right: 3.7rem;
   width: max-content;
   max-width: min(280px, calc(100vw - 5.5rem));
@@ -305,6 +379,30 @@ input {
 
 .location-message--error {
   border-color: rgb(185 55 55 / 55%);
+}
+
+.route-message {
+  position: absolute;
+  z-index: 22;
+  top: 4.75rem;
+  left: 50%;
+  width: max-content;
+  max-width: min(34rem, calc(100vw - 2rem));
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgb(32 47 60 / 20%);
+  border-radius: 8px;
+  color: #26333d;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.route-message--error {
+  border-color: rgb(185 55 55 / 55%);
+  color: #8f2e2e;
 }
 
 .status-card {
@@ -342,15 +440,15 @@ input {
   bottom: 0.5rem;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 700px) {
   .location-search {
     top: 0.75rem;
     left: 0.75rem;
-    width: calc(100vw - 5.35rem);
+    width: calc(100vw - 1.5rem);
   }
 
   .map-controls {
-    top: 0.75rem;
+    top: 4.25rem;
     right: 0.75rem;
   }
 
@@ -360,7 +458,11 @@ input {
   }
 
   .location-message {
-    top: 7.25rem;
+    top: 10.7rem;
     right: 3.55rem;
+  }
+
+  .route-message {
+    top: 8rem;
   }
 }

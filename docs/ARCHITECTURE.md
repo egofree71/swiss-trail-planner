@@ -1,6 +1,8 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: raster map, hiking overlay, search, geolocation, and fullscreen controls.
+> Documented state: raster map, hiking overlay, search, geolocation,
+> fullscreen, manual route creation, and experimental on-demand swissTLM3D
+> routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -35,18 +37,27 @@ It can:
 - display a selected search result as a vector marker;
 - request and display the user's current position;
 - enter and leave browser fullscreen mode;
+- enter a visual route-creation mode with a crosshair map cursor;
+- add ordered route waypoints by clicking or tapping the map;
+- create straight segments when snapping is disabled;
+- load swissTLM3D road and hiking geometries dynamically around selected waypoints;
+- build a regional walkable graph and calculate snapped sections with A*;
+- prefer official hiking-trail sections through routing costs;
+- undo and redo exact straight or routed route steps;
+- reveal a compact route action strip for snap mode, reverse, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
 - display a metric scale and swisstopo attribution;
-- report map, search, and geolocation failures.
+- report map, search, geolocation, and routing failures.
 
 It does not yet include:
 
 - continuous user tracking or route recording;
-- raw swissTLM3D vector geometries;
-- feature inspection or attribute queries;
-- route drawing;
-- routing;
+- a validated production-grade national routing service;
+- direct feature inspection or a visible raw-network debug layer;
+- validated topology for all junction, bridge, and tunnel cases;
+- waypoint movement, insertion, or individual deletion;
+- functional route reversal, route deletion, or export actions;
 - distance or elevation calculations;
 - GPX export;
 - local or remote persistence;
@@ -66,21 +77,26 @@ The project evolves through independent functional layers:
 1. raster background;
 2. rendered hiking-trail overlay;
 3. basic map controls, geolocation, and location search;
-4. raw swissTLM3D vector display and inspection;
-5. manual route drawing and GPX export;
-6. routable graph preparation;
-7. hiking routing.
+4. route-creation interface shell;
+5. straight-line route creation with undo and redo;
+6. dynamic cell-based swissTLM3D routing around selected waypoints;
+7. waypoint editing and GPX export;
+8. repeatable routing-data preparation;
+9. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
 ### 3.3 Avoid premature abstraction
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
-creation is isolated in small map modules, and the location-search UI and API
-client are separated from `App.tsx`.
+creation is isolated in small map modules, while location search and route
+controls are separate presentational components. The current route display is
+kept in `src/map/route.ts` rather than adding a broader map-controller
+abstraction before drag and selection interactions require one.
 
 OpenLayers map ownership remains in `App.tsx` because there is still only one
-map view. More extensive drawing and routing interactions may later justify a
+map view. Network fetching and graph algorithms are isolated under
+`src/routing/`; more extensive drawing interactions may later justify a
 dedicated hook or map-controller module.
 
 ### 3.4 Comments explain decisions
@@ -88,6 +104,12 @@ dedicated hook or map-controller module.
 Comments should not restate obvious code. They should document architecture
 decisions, external constraints, non-obvious behavior, lifecycle precautions,
 and geographic values chosen by the project.
+
+Non-trivial routing modules begin with a short business-context header. Numeric
+tuning constants state their units and trade-offs. Data contracts and complex
+public functions use JSDoc, including `@throws` when callers must handle a
+failure. Algorithmic blocks such as A*, heaps, adaptive subdivision, caching,
+and stale-result guards explain why the safeguard or heuristic exists.
 
 ## 4. Technical overview
 
@@ -98,19 +120,28 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── floating zoom, geolocation, and fullscreen controls
+   │      ├── RouteControls component
+   │      ├── route history and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      │ creates and destroys
-   │      ▼
+   │      ├── owns OpenLayers lifecycle and route-editing state
+   │      └── requests dynamic routing cells for snapped clicks
+   │
    ├── OpenLayers Map / View
-   │      │
    │      ├── TileLayer: national map (JPEG)
    │      ├── TileLayer: hiking trails (transparent PNG)
+   │      ├── VectorLayer: route geometry and waypoints
    │      ├── VectorLayer: selected search result
    │      └── VectorLayer: user location
+   │
+   ├── Dynamic routing prototype
+   │      ├── GeoAdmin identify requests for regular swissTLM3D cells
+   │      ├── in-memory cell and graph caches
+   │      ├── corridor-based in-browser graph construction
+   │      ├── spatial indexes for trail matching and waypoint snapping
+   │      └── A* route calculation
    │
    └── HTTPS requests
           ├── wmts.geo.admin.ch
@@ -126,7 +157,9 @@ Deployment
 ```
 
 No project-owned service runs on the server. Vite only compiles and serves
-frontend assets during development.
+frontend assets during development. The routing prototype also runs entirely
+in the browser and bounds each operation to a finite set of cells around the
+selected route section.
 
 ## 5. Technologies
 
@@ -137,6 +170,8 @@ frontend assets during development.
 | OpenLayers 10 | Map, view, layers, projections, markers, and controls |
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
+| GeoAdmin identify API | On-demand prototype access to swissTLM3D line geometries |
+| Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
 | Browser Fullscreen API | Distraction-free map display |
 | HTML/CSS | Full-screen layout, floating controls, and result panel |
@@ -154,8 +189,20 @@ and has `minZoom` set to 12. Because OpenLayers treats this boundary as
 exclusive, the overlay normally appears at integer zoom level 13.
 
 The hiking overlay is already rendered and therefore cannot expose individual
-trail geometries or attributes. Raw vector data will still be required for
-selection, snapping, and routing.
+trail geometries or attributes.
+
+For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
+`MapServer/identify` endpoint for two technical layers:
+
+- `ch.swisstopo.swisstlm3d-strassen` for roads and paths;
+- `ch.swisstopo.swisstlm3d-wanderwege` for official hiking routes.
+
+The dynamic loader uses regular 2.4 km routing cells. Each cell is internally
+split into smaller identify requests, and a request that reaches the API's
+200-feature limit is recursively subdivided rather than silently accepting a
+truncated result. Empty cells are valid near borders, lakes, and areas outside
+swissTLM3D coverage. This remains a bounded on-demand experiment rather than a
+national bulk-data architecture.
 
 ## 7. Coordinate reference systems
 
@@ -165,8 +212,12 @@ Human-readable centers and bounds, browser geolocation, and SearchServer
 results use WGS 84 longitude/latitude (`EPSG:4326`). OpenLayers transforms those
 coordinates with `fromLonLat()` before displaying them.
 
-Raw swissTLM3D data is distributed in LV95 (`EPSG:2056`) and will require
-explicit conversion when introduced.
+Downloaded swissTLM3D data is distributed in LV95 (`EPSG:2056`). The current
+dynamic routing prototype asks GeoAdmin to return geometries directly in
+`EPSG:3857` so
+they can be displayed and routed without a second client-side reprojection.
+When Z coordinates are returned, they are preserved in graph-node identity to
+avoid connecting vertically separated crossings.
 
 ## 8. Location search
 
@@ -229,8 +280,68 @@ Entering or leaving fullscreen changes the viewport dimensions. The listener
 therefore schedules `map.updateSize()` on the next animation frame so
 OpenLayers recalculates its canvas and visible tile area.
 
+## 11. Manual route creation and dynamic regional routing
 
-## 11. GitHub Pages deployment
+`App.tsx` owns the route-creation mode because that state affects the map cursor,
+the visible controls, and whether the OpenLayers `singleclick` listener is
+attached.
+
+Route history is immutable and consists of ordered `RouteStep` objects. A step
+contains:
+
+- the displayed waypoint;
+- the exact section geometry created from the preceding waypoint;
+- the creation mode (`straight` or `network`).
+
+Undo moves the last complete step to a redo stack. Redo restores the stored
+step without recalculating it or issuing another network request. Adding a new
+step clears the redo stack.
+
+When snapping is disabled, the new section is the direct line between the two
+waypoints. When snapping is enabled, the first click loads a 3 × 3 group of
+regular cells around the selected position and snaps to the resulting network.
+Later clicks load a narrow cell corridor between the previous waypoint and the
+new position. Completed cells remain cached in memory and are not requested
+again during the browser session.
+
+`src/routing/swissTlmApi.ts` owns the GeoAdmin request contract, response
+validation, geometry normalization, recursive request subdivision, result
+deduplication, cancellation, and optional empty-cell handling.
+
+`src/routing/networkRouter.ts` converts every pair of consecutive swissTLM3D
+vertices into graph edges. Endpoints are quantized to absorb tiny coordinate
+differences, while available elevation is included in the node key so a bridge
+and a road below it are not connected merely because their XY coordinates
+cross. Clearly non-walkable road types are excluded. Other road types receive
+cost factors based on width, surface, traffic importance, access restrictions,
+and proximity to official hiking geometry.
+
+Hiking geometry is matched with a spatial grid plus distance and direction
+checks. The graph uses a second spatial grid to find nearby snapping candidates.
+A* then calculates a section between the snapped start and end positions. The
+heuristic uses a lower bound below every configured cost factor so it remains
+admissible.
+
+`src/map/route.ts` owns the OpenLayers representation. It concatenates stored
+section geometries into one red `LineString` with a white casing and creates one
+red-outlined `Point` feature per waypoint. Red is used deliberately so planned
+routes do not resemble blue hydrographic features. Rebuilding remains
+intentionally simple while routes are small and waypoints are not draggable.
+
+`src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
+are enabled from history state. The snap button selects network or straight
+creation and is temporarily disabled while cells are loading or a route is
+being calculated. The route toggle displays a small animated spinner during
+asynchronous network work. Reverse, delete, and export remain disabled
+placeholders.
+
+Routine loading and graph-construction details are intentionally not shown to
+the user. Temporary route messages are reserved for actionable problems such as
+missing nearby segments, disconnected paths, excessive section length, and
+request failures. Leaving route mode aborts the active operation without
+discarding cells that completed successfully.
+
+## 12. GitHub Pages deployment
 
 The repository is deployed as a GitHub Pages project site:
 
@@ -264,7 +375,7 @@ newer push cancels an obsolete deployment.
 GitHub Pages serves the application over HTTPS. This is important because
 browser geolocation requires a secure context outside `localhost`.
 
-## 12. Geographic constraint
+## 13. Geographic constraint
 
 The application uses a rectangular extent covering Switzerland with a small
 border margin. It keeps nearby cross-border access visible while preventing
@@ -273,7 +384,13 @@ navigation to distant empty areas.
 The constraint applies to the full viewport, not only its center, and the
 smooth boundary effect is disabled.
 
-## 13. Repository structure
+Routing no longer has a fixed geographic extent. Each snapped operation derives
+a bounded cell set from the selected positions. A maximum cell count prevents a
+single very long section from starting an excessive request burst; the user can
+add intermediate waypoints instead. Straight route creation remains available
+without this constraint.
+
+## 14. Repository structure
 
 ```text
 swiss-trail-planner/
@@ -284,11 +401,17 @@ swiss-trail-planner/
 │   └── ARCHITECTURE.md
 ├── src/
 │   ├── components/
-│   │   └── LocationSearch.tsx
+│   │   ├── LocationSearch.tsx
+│   │   └── RouteControls.tsx
 │   ├── map/
 │   │   ├── config.ts
+│   │   ├── route.ts
 │   │   ├── searchResult.ts
 │   │   └── userLocation.ts
+│   ├── routing/
+│   │   ├── networkRouter.ts
+│   │   ├── swissTlmApi.ts
+│   │   └── dynamicRoutingNetwork.ts
 │   ├── search/
 │   │   └── locationSearch.ts
 │   ├── App.tsx
@@ -301,19 +424,21 @@ swiss-trail-planner/
 ├── package-lock.json
 ├── package.json
 ├── README.md
+├── ROADMAP.md
 ├── tsconfig.json
 └── vite.config.ts
 ```
 
-## 14. File responsibilities
+## 15. File responsibilities
 
 ### `src/App.tsx`
 
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
-It creates the tile layers and marker layers, handles map, geolocation, and
-fullscreen state, reacts to a selected search result, and cleans up imperative
-resources when React unmounts the component.
+It creates the tile and vector layers, handles map, geolocation, fullscreen,
+route-creation mode, immutable route history, dynamic graph loading, and
+temporary routing status. It reacts to selected search results and cleans up
+imperative resources and pending requests when React unmounts.
 
 ### `src/components/LocationSearch.tsx`
 
@@ -328,6 +453,39 @@ Owns the search-field interface:
 
 It does not know about OpenLayers. It reports a typed result through its
 `onSelect` callback.
+
+### `src/components/RouteControls.tsx`
+
+Renders the route-mode toggle and the contextual route action buttons. It is a
+controlled component: `App.tsx` supplies active, snap, undo, and redo state plus
+the corresponding callbacks. Reverse, delete, and export remain disabled until
+those operations are implemented.
+
+### `src/map/route.ts`
+
+Defines the immutable route-step shape, creates the route vector layer, and
+rebuilds its line and waypoint features from stored section geometries. It owns
+route styling but not route history or UI state.
+
+### `src/routing/swissTlmApi.ts`
+
+Fetches bounded road and hiking geometries from the GeoAdmin identify endpoint.
+It owns request tiling, recursive subdivision at result limits, response
+normalization, attribute extraction, deduplication, cancellation, and empty-cell
+handling.
+
+### `src/routing/networkRouter.ts`
+
+Builds the walkable regional graph, indexes line segments, matches official
+hiking geometry, snaps waypoints, applies routing costs, and calculates A*
+paths. It contains no React or OpenLayers map lifecycle state.
+
+### `src/routing/dynamicRoutingNetwork.ts`
+
+Owns the dynamic routing-cell strategy. It derives local or corridor cell sets
+from selected positions, limits cell request concurrency, caches completed cell
+data and recent graphs, retries disconnected sections with a wider corridor,
+and protects the API from excessively large single operations.
 
 ### `src/search/locationSearch.ts`
 
@@ -363,27 +521,41 @@ controls, result panel, status messages, and OpenLayers control placement.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
+- `ROADMAP.md` tracks milestones, priorities, and open technical decisions.
 - `LICENSE` contains the MIT license.
 
-## 15. Runtime flow
+## 16. Runtime flow
 
 1. The browser loads the React application.
-2. `App` creates the OpenLayers map, tile layers, and vector markers.
+2. `App` creates the OpenLayers map, tile layers, marker layers, and route layer.
 3. The base map begins loading from `wmts.geo.admin.ch`.
-4. The hiking overlay starts loading when zoom moves beyond level 12.
-5. The fullscreen button requests fullscreen for the root application element.
-6. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-7. Typing two characters schedules a SearchServer request after 300 ms.
-8. A changed query aborts the previous request.
-9. Selecting a result updates the red search marker and recenters the map.
-10. Clicking geolocation requests permission and updates the blue user marker.
-11. Pressing `Escape` exits fullscreen through the browser.
-12. On unmount, listeners, timers, requests, references, and the map target are
-    cleaned up by their owning components.
-13. A push to `main` triggers the Pages workflow.
-14. GitHub Actions runs `npm ci`, builds `dist/`, and deploys the artifact.
+4. The rendered hiking overlay starts loading when zoom moves beyond level 12.
+5. The route button toggles route-creation mode and the crosshair cursor.
+6. Entering route mode attaches a map `singleclick` listener and reveals the
+   route toolbar.
+7. With snapping disabled, a click stores a direct section immediately.
+8. The first snapped click derives and loads a local 3 × 3 cell group while
+   the route toggle shows a compact spinner.
+9. Dense identify requests are subdivided when either layer reaches 200 results.
+10. Returned road vertices become graph nodes and edges; hiking geometry marks
+    preferred edges through spatial matching.
+11. The first clicked point is snapped to the nearest walkable segment.
+12. Later clicks derive a corridor of cells between waypoints, load only missing
+    cells, and run A* on the resulting graph.
+13. A disconnected corridor is retried once with a wider cell radius.
+14. Updating route history rebuilds the route line and waypoint features.
+15. Undo moves the last complete step to redo; redo restores it without routing.
+16. Leaving route mode removes the click listener and aborts active network work
+    while keeping completed cells and the route available.
+17. The fullscreen button requests fullscreen for the root application element.
+18. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+19. Location search and browser geolocation continue to operate independently.
+20. On unmount, map listeners, timers, requests, references, and the map target
+    are cleaned up by their owning components.
+21. A push to `main` triggers the Pages workflow, which builds and deploys
+    `dist/`.
 
-## 16. Error handling
+## 17. Error handling
 
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
@@ -396,9 +568,14 @@ retry through another query. Aborted searches are ignored.
 Geolocation failures display a temporary message beside the controls and can be
 retried by clicking the button again.
 
-There is no persistent logging or automatic retry mechanism yet.
+Routing reports points without a nearby walkable segment, disconnected graph
+requests, overly large single sections, GeoAdmin failures, and result-limit
+overflow with temporary French messages. The existing route is unchanged after
+any failure. An active operation is aborted when route mode is left or the
+application unmounts. Disconnected sections receive one automatic wider-corridor
+retry; there is no persistent logging or general retry mechanism yet.
 
-## 17. Code conventions
+## 18. Code conventions
 
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
@@ -409,28 +586,45 @@ There is no persistent logging or automatic retry mechanism yet.
 - Request privacy-sensitive capabilities only after explicit user input.
 - Keep fullscreen state synchronized through `fullscreenchange` rather than
   assuming a button click always succeeds.
+- Keep route controls compact and expose active modes through both color and
+  cursor changes.
+- Keep route history immutable so undo and redo remain predictable.
+- Store generated section geometry instead of recalculating it during redo.
+- Keep experimental identify requests geographically bounded and abortable.
+- Preserve available swissTLM3D elevation when identifying graph nodes.
 - Recalculate the OpenLayers size after viewport mode changes.
 - Remove listeners and clear timers during cleanup.
 - Comments should explain why, not restate obvious code.
+- Give non-trivial modules a business-context header.
+- Document units and trade-offs for numeric tuning constants.
+- Use JSDoc for data contracts and complex public functions, including
+  `@throws` for expected failures.
+- Explain sensitive algorithmic blocks such as A*, heaps, adaptive subdivision,
+  concurrency limits, caches, and stale-result guards.
 - `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
-## 18. Planned evolution
+## 19. Planned evolution
 
-### Phase 2B — Display raw swissTLM3D vectors
+### Phase 2B — Validate dynamic swissTLM3D routing
 
-Load a limited vector sample and validate reprojection, alignment, attributes,
-selection, styling, and rendering performance.
+Test known routes in several contrasting Swiss regions, compare generated
+geometry with the official map, measure request and graph performance, and
+inspect failures for missing endpoints, false connections, bridges, tunnels,
+or incomplete attributes.
 
-Loading all of Switzerland as one GeoJSON file is not viable. Production-scale
-display will probably require preprocessing or vector tiles.
+The identify-based cell loader now removes the fixed test region and provides
+useful evidence about whether browser-only on-demand routing is sufficient. A
+preprocessed graph or backend should be selected only if measured limits justify
+it.
 
 ### Phase 3 — Route editing
 
-Add waypoints, an editable line, point deletion and movement, distance
-calculation, and GPX export.
+Straight and dynamically routed waypoint creation with undo and redo is
+implemented. The next steps are route clearing and reversal, waypoint movement
+and insertion, distance calculation, and GPX export.
 
-### Phase 4 — Routing
+### Phase 4 — Production routing
 
 Introduce a separate data-preparation pipeline:
 
@@ -450,9 +644,11 @@ local engine or API
 GeoJSON / GPX route
 ```
 
-The final backend and graph engine have not been selected yet.
+The dynamic browser prototype demonstrates that a custom graph and A* can be
+used with swissTLM3D. The final preprocessing pipeline, national graph delivery,
+and possible backend have not been selected yet.
 
-## 19. When to evolve the architecture
+## 20. When to evolve the architecture
 
 Create a new abstraction when several components reuse the same map logic,
 OpenLayers interactions become numerous, shared state outgrows `App`, additional

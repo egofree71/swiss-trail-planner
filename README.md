@@ -4,7 +4,9 @@ Open-source web application for planning hiking routes on official swisstopo
 maps and geodata.
 
 The current version displays the Swiss national raster map, the official
-swissTLM3D hiking-trail overlay, and lightweight map navigation tools.
+swissTLM3D hiking-trail overlay, lightweight map navigation tools, manual
+route creation, and experimental on-demand swissTLM3D routing around the
+positions selected by the user.
 
 ## Current features
 
@@ -15,6 +17,14 @@ swissTLM3D hiking-trail overlay, and lightweight map navigation tools.
 - large, separated zoom controls;
 - one-click browser geolocation with a map marker;
 - fullscreen map mode with automatic exit through the Escape key;
+- route-creation mode with a dedicated cursor and inverted active button;
+- ordered waypoints and a clearly visible red route added by map clicks or
+  taps;
+- experimental snapping and A* routing on swissTLM3D roads and paths loaded
+  on demand;
+- straight-line segments when snapping is disabled;
+- functional undo and redo that restore the exact generated segment geometry;
+- contextual reverse, delete, and export controls for future steps;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
@@ -26,6 +36,12 @@ The current architecture, file responsibilities, technical choices, and
 planned evolution are documented in:
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
+## Roadmap
+
+Completed milestones, current priorities, and future work are tracked in:
+
+[`ROADMAP.md`](ROADMAP.md)
 
 ## Requirements
 
@@ -95,6 +111,37 @@ application without the browser chrome. The button changes state while
 fullscreen is active, and the browser exits fullscreen when the user presses
 `Escape`.
 
+## Route creation
+
+The route button at the top right toggles route-creation mode. While the mode is
+active, the map uses a crosshair cursor. Each click or tap adds an ordered
+waypoint.
+
+With snapping enabled, the application loads swissTLM3D road and path
+geometries around the selected positions through the official GeoAdmin identify
+API. The first point loads a small group of regular cells around the click. Each
+following section loads only the missing cells in a corridor between the
+previous waypoint and the new click, then builds a graph and calculates the
+route with A*. Completed cells remain cached in browser memory for the session.
+
+Official hiking-trail geometries are matched to road segments and receive a
+lower routing cost. If the initial corridor is disconnected, the application
+retries once with a wider corridor. Very long sections are rejected before an
+excessive number of API requests is started; adding an intermediate waypoint
+keeps loading regional and predictable. During network work, the route button
+shows a compact activity spinner instead of exposing internal loading and
+graph-construction messages.
+
+This remains an experimental browser-only delivery strategy rather than a
+validated national routing service. When snapping is disabled, the editor adds
+straight segments without loading swissTLM3D data.
+
+Undo removes the most recently added waypoint and its segment. Redo restores
+the exact stored geometry without repeating the network request. Adding a new
+waypoint after an undo clears the redo history. The route remains visible when
+route-creation mode is left and can be continued by entering the mode again.
+Reverse, delete, and export are still disabled placeholders.
+
 ## Production build
 
 ```bash
@@ -154,12 +201,14 @@ Shared settings:
 
 The hiking-trail layer is currently a rendered transparent tile overlay. It is
 hidden at overview scales and appears when the view zooms beyond level 12. Raw
-vector geometries will be required later for inspection, editing, and routing.
+vector geometries are loaded on demand for routing, but they are not yet shown
+as an inspectable development layer.
 
 ## Next milestone
 
-Load and inspect a small raw swissTLM3D vector sample, including its geometry
-and useful trail attributes.
+Test dynamic routing in several contrasting Swiss regions, inspect missing or
+false connections, and measure API and graph performance before deciding whether
+a preprocessed graph or backend is actually necessary.
 
 ## License
 
