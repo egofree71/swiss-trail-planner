@@ -947,13 +947,7 @@ export default function App() {
         {document.fullscreenEnabled && (
           <button
             type="button"
-            className={[
-              'map-control-button',
-              'map-control-button--fullscreen',
-              isFullscreen ? 'map-control-button--active' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className="map-control-button map-control-button--fullscreen"
             aria-label={fullscreenButtonLabel}
             aria-pressed={isFullscreen}
             title={fullscreenButtonLabel}
@@ -997,6 +991,7 @@ export default function App() {
           ascentMeters={routeElevation?.ascentMeters ?? null}
           descentMeters={routeElevation?.descentMeters ?? null}
           durationMinutes={routeDurationMinutes}
+          elevationPoints={routeElevation?.points ?? []}
         />
       )}
 

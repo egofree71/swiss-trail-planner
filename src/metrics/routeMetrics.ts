@@ -41,12 +41,22 @@ const MINUTES_PER_100_METERS_ASCENT = 15;
 /** Minutes added by the Swiss rule of thumb for 200 metres of descent. */
 const MINUTES_PER_200_METERS_DESCENT = 15;
 
-/** Elevation values used by the route summary. */
+/** One ordered elevation sample along the route. */
+export interface RouteElevationPoint {
+  /** Cumulative distance from the start of the route in metres. */
+  distanceMeters: number;
+  /** Smoothed terrain elevation in metres. */
+  elevationMeters: number;
+}
+
+/** Elevation values used by the route summary and optional profile chart. */
 export interface RouteElevationSummary {
   /** Accumulated positive elevation change in metres. */
   ascentMeters: number;
   /** Accumulated negative elevation change in metres, expressed positively. */
   descentMeters: number;
+  /** Ordered samples returned by the profile service. */
+  points: RouteElevationPoint[];
 }
 
 /** Untrusted altitude container returned by the profile service. */
@@ -59,6 +69,8 @@ interface ElevationProfileAltitudes {
 interface ElevationProfilePoint {
   /** Available terrain-model altitudes for the sample. */
   alts?: ElevationProfileAltitudes;
+  /** Cumulative distance from the start of the requested profile. */
+  dist?: unknown;
 }
 
 /** Returns a finite number from an external numeric value or numeric string. */
@@ -227,26 +239,37 @@ export async function fetchRouteElevationSummary(
     throw new Error('Elevation profile response is not an array.');
   }
 
-  const elevations = payload
-    .map((point) => {
+  const points = payload
+    .map((point): RouteElevationPoint | null => {
       if (!point || typeof point !== 'object') {
         return null;
       }
 
       const profilePoint = point as ElevationProfilePoint;
-      return readFiniteNumber(profilePoint.alts?.COMB);
-    })
-    .filter((elevation): elevation is number => elevation !== null);
+      const elevationMeters = readFiniteNumber(profilePoint.alts?.COMB);
+      const distanceMeters = readFiniteNumber(profilePoint.dist);
 
-  if (elevations.length < PROFILE_MIN_SAMPLE_POINTS) {
+      if (elevationMeters === null || distanceMeters === null) {
+        return null;
+      }
+
+      return {
+        distanceMeters,
+        elevationMeters,
+      };
+    })
+    .filter((point): point is RouteElevationPoint => point !== null);
+
+  if (points.length < PROFILE_MIN_SAMPLE_POINTS) {
     throw new Error('Elevation profile contains too few valid samples.');
   }
 
   let ascentMeters = 0;
   let descentMeters = 0;
 
-  for (let index = 1; index < elevations.length; index += 1) {
-    const difference = elevations[index] - elevations[index - 1];
+  for (let index = 1; index < points.length; index += 1) {
+    const difference =
+      points[index].elevationMeters - points[index - 1].elevationMeters;
 
     if (difference > 0) {
       ascentMeters += difference;
@@ -258,6 +281,7 @@ export async function fetchRouteElevationSummary(
   return {
     ascentMeters,
     descentMeters,
+    points,
   };
 }
 

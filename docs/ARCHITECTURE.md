@@ -1,7 +1,8 @@
 # Swiss Trail Planner Architecture
 
 > Documented state: raster map, hiking overlay, search, geolocation,
-> fullscreen, manual route creation, route statistics, GPX export, and
+> fullscreen, manual route creation, route statistics, elevation profile, GPX
+> export, and
 > experimental on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
@@ -48,6 +49,7 @@ It can:
 - clear the complete route;
 - export the displayed route geometry as a GPX 1.1 track;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
+- reveal or hide a compact elevation profile from the summary bar;
 - reveal a compact route action strip for snap mode, reversal, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
@@ -83,8 +85,8 @@ The project evolves through independent functional layers:
 5. straight-line route creation with undo and redo;
 6. dynamic cell-based swissTLM3D routing around selected waypoints;
 7. route reversal, deletion, and GPX export;
-8. distance, elevation summary, and walking-time estimate;
-9. waypoint editing and elevation-profile visualization;
+8. distance, elevation summary, walking-time estimate, and elevation profile;
+9. waypoint editing and elevation-aware GPX export;
 10. repeatable routing-data preparation;
 11. reliable national hiking routing.
 
@@ -350,11 +352,17 @@ swisstopo approximation is sufficiently precise for terrain samples spaced at
 about 20 metres. The service applies a small moving-average offset before the
 client accumulates positive and negative elevation changes.
 
-`src/components/RouteStatistics.tsx` renders the floating bottom summary. It
-shows distance immediately, uses an ellipsis while elevations are loading, and
-keeps distance visible with dashes for the remaining values if the external
-profile request fails. Walking time follows the Swiss rule of thumb and is
-rounded to five minutes because it is an estimate excluding breaks.
+`src/components/RouteStatistics.tsx` renders the floating bottom summary and
+owns the show/hide state of the profile panel. It shows distance immediately,
+uses an ellipsis while elevations are loading, and keeps distance visible with
+dashes for the remaining values if the external profile request fails. Walking
+time follows the Swiss rule of thumb and is rounded to five minutes because it
+is an estimate excluding breaks.
+
+`src/components/RouteElevationProfile.tsx` draws the ordered GeoAdmin samples
+as a lightweight responsive SVG above the summary bar. It scales cumulative
+distance horizontally and elevation vertically, uses the route red for the
+profile line, and performs no extra network request.
 
 Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
 stored section geometry without issuing another routing request. The redo stack
@@ -431,6 +439,7 @@ swiss-trail-planner/
 │   ├── components/
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
+│   │   ├── RouteElevationProfile.tsx
 │   │   └── RouteStatistics.tsx
 │   ├── export/
 │   │   └── gpx.ts
@@ -496,15 +505,21 @@ snap, undo, redo, reversal, deletion, and GPX export.
 ### `src/components/RouteStatistics.tsx`
 
 Formats and renders the compact distance, ascent, descent, and duration bar. It
-owns presentation and responsive layout semantics but performs no network
-requests or geographic calculations.
+owns the local profile visibility state and the accessible toggle, but performs
+no network requests or geographic calculations.
+
+### `src/components/RouteElevationProfile.tsx`
+
+Projects ordered distance/elevation samples into a compact responsive SVG with
+axis guides, minimum and maximum altitude, and a route-coloured profile line.
 
 ### `src/metrics/routeMetrics.ts`
 
 Calculates geodesic distance, converts route coordinates to LV95 for the
-official elevation-profile service, validates external profile samples,
-accumulates ascent and descent, and applies the standard Swiss walking-time
-estimate. Requests are abortable so stale route histories cannot update the UI.
+official elevation-profile service, validates ordered distance/elevation
+samples, accumulates ascent and descent, and applies the standard Swiss
+walking-time estimate. The same samples feed the profile chart. Requests are
+abortable so stale route histories cannot update the UI.
 
 ### `src/export/gpx.ts`
 
@@ -600,19 +615,20 @@ control placement.
 14. Updating route history rebuilds the route line and waypoint features.
 15. Distance is recalculated locally from the flattened route geometry.
 16. After a short debounce, an abortable profile request refreshes ascent,
-    descent, and estimated walking time.
-17. Undo moves the last complete step to redo; redo restores it without routing.
-18. Reversal rebuilds immutable steps in the opposite order and clears redo.
-19. Deletion clears both applied and redo histories and hides the summary.
-20. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
-21. Leaving route mode removes the click listener and aborts active network work
+    descent, estimated walking time, and the reusable chart samples.
+17. The profile button reveals or hides the SVG chart without another request.
+18. Undo moves the last complete step to redo; redo restores it without routing.
+19. Reversal rebuilds immutable steps in the opposite order and clears redo.
+20. Deletion clears both applied and redo histories and hides the summary.
+21. GPX export converts the flattened route to WGS 84 and downloads a GPX track.
+22. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-22. The fullscreen button requests fullscreen for the root application element.
-23. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-24. Location search and browser geolocation continue to operate independently.
-25. On unmount, map listeners, timers, requests, references, and the map target
+23. The fullscreen button requests fullscreen for the root application element.
+24. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+25. Location search and browser geolocation continue to operate independently.
+26. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-26. A push to `main` triggers the Pages workflow, which builds and deploys
+27. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
@@ -687,8 +703,8 @@ it.
 
 Straight and dynamically routed waypoint creation, undo/redo, route reversal,
 route clearing, and GPX track export are implemented. The next steps are
-waypoint movement and insertion, elevation values in GPX export, and a compact
-elevation-profile visualization.
+waypoint movement and insertion and elevation values in GPX export. The compact
+elevation-profile visualization is implemented.
 
 ### Phase 4 — Production routing
 

@@ -197,7 +197,7 @@ input {
 
 .location-search-result-text strong {
   overflow: hidden;
-  font-size: 0.94rem;
+  font-size: 1.05rem;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -390,48 +390,160 @@ input {
   border-color: rgb(185 55 55 / 55%);
 }
 
-.route-statistics {
+.route-summary {
   position: absolute;
   z-index: 20;
   bottom: 1rem;
   left: 50%;
+  display: flex;
+  width: min(50rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  flex-direction: column;
+  gap: 0.45rem;
+  transform: translateX(-50%);
+}
+
+.route-statistics {
   display: grid;
-  grid-template-columns: repeat(4, max-content);
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 3.5rem;
   overflow: hidden;
   border: 1px solid rgb(32 47 60 / 20%);
   border-radius: 10px;
   background: rgb(255 255 255 / 96%);
   box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
   backdrop-filter: blur(8px);
-  transform: translateX(-50%);
 }
 
 .route-statistics-item {
   display: flex;
-  min-width: 7.5rem;
+  min-width: 0;
   align-items: baseline;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.72rem 0.85rem;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
   border-right: 1px solid rgb(32 47 60 / 12%);
   white-space: nowrap;
 }
 
-.route-statistics-item:last-child {
-  border-right: 0;
-}
-
 .route-statistics-item span {
   color: #65717b;
-  font-size: 0.76rem;
+  font-size: 0.84rem;
 }
 
 .route-statistics-item strong {
   min-width: 2.5rem;
   color: #17212b;
-  font-size: 0.94rem;
+  font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.route-profile-toggle {
+  display: grid;
+  width: 3.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  color: #17212b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.route-profile-toggle:hover {
+  background: rgb(23 105 224 / 8%);
+}
+
+.route-profile-toggle:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 45%);
+  outline-offset: -3px;
+}
+
+.route-profile-toggle:disabled {
+  color: #9b9b96;
+  background: #ecece8;
+  cursor: default;
+}
+
+.route-profile-toggle--active {
+  color: #ffffff;
+  background: #1769e0;
+}
+
+.route-profile-toggle--active:hover {
+  background: #125ac2;
+}
+
+.route-profile-toggle svg {
+  width: 1.8rem;
+  height: 1.8rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.route-elevation-profile {
+  width: 100%;
+  padding: 0.9rem 1rem 0.65rem;
+  border: 1px solid rgb(32 47 60 / 20%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(8px);
+}
+
+.route-elevation-profile-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 0.35rem 0.4rem;
+}
+
+.route-elevation-profile-header strong {
+  color: #17212b;
+  font-size: 1.05rem;
+}
+
+.route-elevation-profile-header span {
+  color: #65717b;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-elevation-profile-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 8rem;
+}
+
+.route-elevation-profile-grid {
+  stroke: rgb(32 47 60 / 13%);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.route-elevation-profile-axis-label,
+.route-elevation-profile-distance-label {
+  fill: #6a747d;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-elevation-profile-area {
+  fill: rgb(213 43 30 / 14%);
+  stroke: none;
+}
+
+.route-elevation-profile-line {
+  fill: none;
+  stroke: #d52b1e;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
 }
 
 .route-message {
@@ -515,10 +627,14 @@ input {
     right: 3.55rem;
   }
 
-  .route-statistics {
+  .route-summary {
     bottom: 2.35rem;
     width: calc(100vw - 1.5rem);
-    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .route-statistics {
+    width: 100%;
+    grid-template-columns: repeat(4, 1fr) 2.85rem;
   }
 
   .route-statistics-item {
@@ -535,6 +651,14 @@ input {
     text-align: center;
   }
 
+  .route-profile-toggle {
+    width: 2.85rem;
+  }
+
+  .route-elevation-profile-chart {
+    min-height: 8.5rem;
+  }
+
   .route-message {
     top: 8rem;
   }
@@ -543,14 +667,25 @@ input {
 
 @media (max-width: 430px) {
   .route-statistics {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .route-statistics-item:nth-child(2) {
-    border-right: 0;
+    grid-template-columns: repeat(2, 1fr) 2.85rem;
   }
 
   .route-statistics-item:nth-child(-n + 2) {
     border-bottom: 1px solid rgb(32 47 60 / 12%);
+  }
+
+  .route-profile-toggle {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  .route-elevation-profile {
+    padding-right: 0.45rem;
+    padding-left: 0.45rem;
+  }
+
+  .route-elevation-profile-header {
+    padding-right: 0.55rem;
+    padding-left: 0.55rem;
   }
 }

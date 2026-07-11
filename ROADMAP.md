@@ -158,7 +158,7 @@ Tasks:
 - [x] Retrieve a smoothed elevation profile for the route.
 - [x] Calculate total ascent and descent.
 - [x] Display route distance, elevation summary, and estimated walking time.
-- [ ] Add a compact elevation profile.
+- [x] Add a compact, collapsible elevation profile.
 - [x] Handle missing or incomplete elevation data without blocking editing.
 
 Acceptance criteria:

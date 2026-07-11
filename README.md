@@ -25,7 +25,8 @@ positions selected by the user.
 - straight-line segments when snapping is disabled;
 - functional undo and redo that restore the exact generated segment geometry;
 - route reversal, complete route deletion, and GPX track export;
-- compact route summary with distance, ascent, descent, and estimated walking time;
+- compact route summary with distance, ascent, descent, estimated walking time,
+  and a collapsible elevation profile;
 - navigation restricted to Switzerland and a small border margin;
 - metric scale bar;
 - swisstopo attribution;
@@ -156,7 +157,9 @@ GeoAdmin profile service and displays total ascent, total descent, and an
 estimated walking time. The estimate follows the Swiss rule of thumb: 15 minutes
 per kilometre, 15 minutes per 100 metres of ascent, and 15 minutes per 200 metres
 of descent. Breaks are not included. If elevation lookup fails, distance remains
-available while the altitude-dependent values display a dash.
+available while the altitude-dependent values display a dash. A button on the
+right side of the summary toggles a compact elevation chart built from the same
+ordered samples, so opening the profile does not trigger another network request.
 
 ## Production build
 
@@ -223,7 +226,7 @@ as an inspectable development layer.
 ## Next milestone
 
 Validate dynamic routing and elevation summaries in several contrasting Swiss
-regions, then add elevation values to GPX export and a compact elevation profile.
+regions, then add elevation values to GPX export and continue route-editing work.
 
 ## License
 
