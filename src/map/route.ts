@@ -51,20 +51,20 @@ const ROUTE_COLOR = '#d52b1e';
 const DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 
 /**
- * Route line styles in screen pixels. The 7 px white casing keeps the 4 px red
- * centre line legible over dense national-map symbology.
+ * Route line styles in screen pixels. The 11 px white casing separates the
+ * 7 px red centre line from red hiking-trail symbology and dense map details.
  */
 const ROUTE_LINE_STYLE = [
   new Style({
     stroke: new Stroke({
       color: 'rgba(255, 255, 255, 0.95)',
-      width: 7,
+      width: 11,
     }),
   }),
   new Style({
     stroke: new Stroke({
       color: ROUTE_COLOR,
-      width: 4,
+      width: 7,
     }),
   }),
 ];

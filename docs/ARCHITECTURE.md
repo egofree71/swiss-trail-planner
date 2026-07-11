@@ -330,10 +330,12 @@ intentionally simple while routes are small and waypoints are not draggable.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from history state. The snap button selects network or straight
-creation and is temporarily disabled while cells are loading or a route is
-being calculated. The route toggle displays a small animated spinner during
-asynchronous network work. Reverse, delete, and export remain disabled
-placeholders.
+creation; it becomes available after the first waypoint and is temporarily
+disabled while cells are loading or a route is being calculated. Disabled
+route actions keep an opaque background while muting their icons so map details
+do not visually bleed through the toolbar. The route toggle displays a small
+animated spinner during asynchronous network work. Reverse, delete, and export
+remain disabled placeholders.
 
 Routine loading and graph-construction details are intentionally not shown to
 the user. Temporary route messages are reserved for actionable problems such as

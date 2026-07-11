@@ -11,6 +11,8 @@ interface RouteControlsProps {
   isSnapEnabled: boolean;
   /** Whether a snap or route request is currently in progress. */
   isBusy: boolean;
+  /** Whether the route already contains at least one waypoint. */
+  hasRoute: boolean;
   /** Whether at least one applied route step can be undone. */
   canUndo: boolean;
   /** Whether at least one previously undone step can be restored. */
@@ -33,6 +35,7 @@ export default function RouteControls({
   isActive,
   isSnapEnabled,
   isBusy,
+  hasRoute,
   canUndo,
   canRedo,
   onToggle,
@@ -44,9 +47,11 @@ export default function RouteControls({
     ? 'Quitter le mode création d’itinéraire'
     : 'Créer un itinéraire';
 
-  const snapLabel = isSnapEnabled
-    ? 'Suivre les chemins de randonnée'
-    : 'Ajouter des segments linéaires';
+  const snapLabel = !hasRoute
+    ? 'Ajoutez un premier point pour choisir le type de tracé'
+    : isSnapEnabled
+      ? 'Suivre les chemins de randonnée'
+      : 'Ajouter des segments linéaires';
 
   return (
     <div
@@ -90,20 +95,22 @@ export default function RouteControls({
             className={[
               'map-control-button',
               'map-control-button--route-action',
-              isSnapEnabled ? 'map-control-button--active' : '',
+              hasRoute && isSnapEnabled ? 'map-control-button--route-active' : '',
             ]
               .filter(Boolean)
               .join(' ')}
             aria-label={snapLabel}
-            aria-pressed={isSnapEnabled}
+            aria-pressed={hasRoute && isSnapEnabled}
             title={snapLabel}
-            disabled={isBusy}
+            disabled={isBusy || !hasRoute}
             onClick={onToggleSnap}
           >
-            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-              <path d="M6 3.75v4.75" />
-              <path d="M14 3.75v4.75" />
-              <path d="M6 8.5a4 4 0 1 0 8 0" />
+            <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <path
+                fill="currentColor"
+                stroke="none"
+                d="M21.345 2.672v14.914c0 2.952-2.393 5.345-5.345 5.345-2.953 0-5.345-2.393-5.345-5.345v-14.914h-6.384v14.928c0 6.478 5.251 11.729 11.729 11.729s11.729-5.251 11.729-11.729v-14.928h-6.384zM26.663 3.738v3.199h-4.251v-3.199h4.251zM9.589 3.738v3.199h-4.251v-3.199h4.251z"
+              />
             </svg>
           </button>
 

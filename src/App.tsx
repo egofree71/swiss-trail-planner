@@ -733,6 +733,7 @@ export default function App() {
           isActive={isRouteCreationActive}
           isSnapEnabled={isRouteSnapEnabled}
           isBusy={isRouteOperationPending}
+          hasRoute={routeHistory.steps.length > 0}
           canUndo={
             !isRouteOperationPending && routeHistory.steps.length > 0
           }
