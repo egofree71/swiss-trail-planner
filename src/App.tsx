@@ -100,6 +100,25 @@ function coordinateDistanceSquared(
   return deltaX * deltaX + deltaY * deltaY;
 }
 
+/**
+ * Creates a freely placed waypoint and, when possible, a direct segment from
+ * the previous route endpoint.
+ */
+function createStraightRouteStep(
+  previousStep: RouteStep | undefined,
+  coordinate: Coordinate,
+): RouteStep {
+  const waypoint: Coordinate = [...coordinate];
+
+  return {
+    waypoint,
+    segment: previousStep
+      ? [[...previousStep.waypoint], waypoint]
+      : null,
+    mode: 'straight',
+  };
+}
+
 /** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
   const { t } = useI18n();
@@ -736,13 +755,10 @@ export default function App() {
       // Straight mode stays fully local and records the same immutable step
       // shape as network mode.
       if (!isRouteSnapEnabled) {
-        appendRouteStep(expectedSteps, {
-          waypoint: clickedCoordinate,
-          segment: previousStep
-            ? [[...previousStep.waypoint], clickedCoordinate]
-            : null,
-          mode: 'straight',
-        });
+        appendRouteStep(
+          expectedSteps,
+          createStraightRouteStep(previousStep, clickedCoordinate),
+        );
         return;
       }
 
@@ -774,19 +790,17 @@ export default function App() {
               abortController.signal,
             );
 
-            if (!snappedCoordinate) {
-              showTemporaryRouteMessage(
-                t('route.noNearbyPath'),
-                'error',
-              );
-              return;
+            if (snappedCoordinate) {
+              step = {
+                waypoint: [...snappedCoordinate],
+                segment: null,
+                mode: 'network',
+              };
+            } else {
+              // A route may begin just outside swissTLM3D coverage. Preserve
+              // the user's click so cross-border planning can continue.
+              step = createStraightRouteStep(undefined, clickedCoordinate);
             }
-
-            step = {
-              waypoint: [...snappedCoordinate],
-              segment: null,
-              mode: 'network',
-            };
           } else {
             const routedPath = await routingLoader.route(
               previousStep.waypoint,
@@ -795,36 +809,37 @@ export default function App() {
             );
 
             if (!routedPath || routedPath.coordinates.length < 2) {
-              showTemporaryRouteMessage(
-                t('route.noConnectedPath'),
-                'error',
+              // Snap remains enabled for later clicks; only this section falls
+              // back to a direct line when no usable network route exists.
+              step = createStraightRouteStep(
+                previousStep,
+                clickedCoordinate,
               );
-              return;
+            } else {
+              const segment = routedPath.coordinates.map(
+                (coordinate): Coordinate => [...coordinate],
+              );
+
+              /*
+               * A preceding straight segment can leave its waypoint slightly off
+               * the network. Preserve continuity with a short access connector;
+               * subsequent snapped waypoints already lie on swissTLM3D.
+               */
+              if (
+                coordinateDistanceSquared(
+                  previousStep.waypoint,
+                  segment[0],
+                ) > ROUTE_CONNECTOR_DISTANCE_SQUARED
+              ) {
+                segment.unshift([...previousStep.waypoint]);
+              }
+
+              step = {
+                waypoint: [...segment[segment.length - 1]],
+                segment,
+                mode: 'network',
+              };
             }
-
-            const segment = routedPath.coordinates.map(
-              (coordinate): Coordinate => [...coordinate],
-            );
-
-            /*
-             * A preceding straight segment can leave its waypoint slightly off
-             * the network. Preserve continuity with a short access connector;
-             * subsequent snapped waypoints already lie on swissTLM3D.
-             */
-            if (
-              coordinateDistanceSquared(
-                previousStep.waypoint,
-                segment[0],
-              ) > ROUTE_CONNECTOR_DISTANCE_SQUARED
-            ) {
-              segment.unshift([...previousStep.waypoint]);
-            }
-
-            step = {
-              waypoint: [...segment[segment.length - 1]],
-              segment,
-              mode: 'network',
-            };
           }
 
           // Reject stale results after mode changes, undo/redo, or another history mutation.

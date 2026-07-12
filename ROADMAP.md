@@ -64,7 +64,8 @@ The route editor now creates ordered waypoints with immutable segment geometry,
 and undo and redo are functional. Browser-only routing loads swissTLM3D cells
 around the positions selected by the user, snaps waypoints to walkable segments,
 and calculates paths with A*. Straight segments remain available when snapping
-is disabled.
+is disabled, and individual sections fall back to straight geometry when no
+routable swissTLM3D path is available.
 
 The loader caches completed cells and expands along each new route section. It
 is still an experimental regional strategy intended to reveal topology,
@@ -142,6 +143,8 @@ Acceptance criteria:
 - [x] Snap clicked waypoints to nearby network segments.
 - [x] Calculate multi-waypoint route sections with A*.
 - [x] Keep straight-line creation available when snapping is disabled.
+- [x] Fall back to free points or straight sections when swissTLM3D coverage or
+      connectivity is unavailable, while keeping snap mode enabled.
 - [x] Store routed section geometry so undo and redo require no new API call.
 - [x] Validate the initial Vandoeuvres prototype against the official map.
 - [ ] Validate known routes in several contrasting Swiss regions.

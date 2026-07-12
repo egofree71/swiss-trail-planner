@@ -24,7 +24,7 @@ positions selected by the user.
   taps;
 - experimental snapping and A* routing on swissTLM3D roads and paths loaded
   on demand;
-- straight-line segments when snapping is disabled;
+- straight-line segments when snapping is disabled or no routable swissTLM3D path is available;
 - functional undo and redo that restore the exact generated segment geometry;
 - route reversal, complete route deletion, and GPX track export;
 - compact route summary with distance, ascent, descent, estimated walking time,
@@ -150,7 +150,11 @@ graph-construction messages.
 
 This remains an experimental browser-only delivery strategy rather than a
 validated national routing service. When snapping is disabled, the editor adds
-straight segments without loading swissTLM3D data.
+straight segments without loading swissTLM3D data. When snapping stays enabled
+but no nearby or connected swissTLM3D route can be found, only that waypoint or
+section falls back to free placement and a straight segment. Snap mode remains
+enabled for subsequent clicks, which allows a route to cross briefly into areas
+without swissTLM3D coverage, such as neighbouring countries.
 
 Undo removes the most recently added waypoint and its segment. Redo restores
 the exact stored geometry without repeating the network request. Adding a new

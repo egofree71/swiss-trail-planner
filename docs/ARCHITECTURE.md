@@ -41,7 +41,7 @@ It can:
 - enter and leave browser fullscreen mode;
 - enter a visual route-creation mode with a crosshair map cursor;
 - add ordered route waypoints by clicking or tapping the map;
-- create straight segments when snapping is disabled;
+- create straight segments when snapping is disabled or a snapped section cannot be resolved;
 - load swissTLM3D road and hiking geometries dynamically around selected waypoints;
 - build a regional walkable graph and calculate snapped sections with A*;
 - prefer official hiking-trail sections through routing costs;
@@ -342,6 +342,13 @@ regular cells around the selected position and snaps to the resulting network.
 Later clicks load a narrow cell corridor between the previous waypoint and the
 new position. Completed cells remain cached in memory and are not requested
 again during the browser session.
+
+Missing routing coverage is treated differently from an API failure. If the
+loaded cells contain no walkable graph, the first waypoint is placed freely. If
+no nearby or connected path exists for a later click, that single incoming
+section is stored as a straight segment. The global snap option remains enabled,
+so the next click still attempts swissTLM3D routing. This keeps cross-border
+routes continuous without hiding genuine request, parsing, or size-limit errors.
 
 `src/routing/swissTlmApi.ts` owns the GeoAdmin request contract, response
 validation, geometry normalization, recursive request subdivision, result
@@ -679,27 +686,29 @@ control placement.
 13. The first clicked point is snapped to the nearest walkable segment.
 14. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-15. A disconnected corridor is retried once with a wider cell radius.
-16. Updating route history rebuilds the route line and waypoint features.
-17. Distance is recalculated locally from the flattened route geometry.
-18. After a short debounce, an abortable profile request refreshes ascent,
+15. A disconnected or empty corridor is retried once with a wider cell radius.
+16. If no routable path remains, the current click becomes a free point or a
+    straight fallback section while snap mode stays enabled.
+17. Updating route history rebuilds the route line and waypoint features.
+18. Distance is recalculated locally from the flattened route geometry.
+19. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-19. The profile button reveals or hides the SVG chart without another request.
-20. Undo moves the last complete step to redo; redo restores it without routing.
-21. Reversal rebuilds immutable steps in the opposite order and clears redo.
-22. Deletion clears both applied and redo histories and hides the summary.
-23. GPX export converts the flattened route to WGS 84 and downloads a localized
+20. The profile button reveals or hides the SVG chart without another request.
+21. Undo moves the last complete step to redo; redo restores it without routing.
+22. Reversal rebuilds immutable steps in the opposite order and clears redo.
+23. Deletion clears both applied and redo histories and hides the summary.
+24. GPX export converts the flattened route to WGS 84 and downloads a localized
     GPX track.
-24. Changing language updates interface text, number formatting, document
+25. Changing language updates interface text, number formatting, document
     metadata, and subsequent SearchServer requests without recreating the map.
-25. Leaving route mode removes the click listener and aborts active network work
+26. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-26. The fullscreen button requests fullscreen for the root application element.
-27. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-28. Location search and browser geolocation continue to operate independently.
-29. On unmount, map listeners, timers, requests, references, and the map target
+27. The fullscreen button requests fullscreen for the root application element.
+28. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+29. Location search and browser geolocation continue to operate independently.
+30. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-30. A push to `main` triggers the Pages workflow, which builds and deploys
+31. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
@@ -715,12 +724,16 @@ retry through another query. Aborted searches are ignored.
 Geolocation failures display a temporary message beside the controls and can be
 retried by clicking the button again.
 
-Routing reports points without a nearby walkable segment, disconnected graph
-requests, overly large single sections, GeoAdmin failures, and result-limit
-overflow with temporary messages in the selected interface language. The existing route is unchanged after
-any failure. An active operation is aborted when route mode is left or the
-application unmounts. Disconnected sections receive one automatic wider-corridor
-retry; there is no persistent logging or general retry mechanism yet.
+Missing nearby segments, empty coverage, and disconnected graphs are normal
+routing outcomes rather than blocking errors. After one wider-corridor retry,
+the editor stores a free first waypoint or a straight incoming section and shows
+a temporary informational message in the selected interface language. Snap mode
+remains enabled for the next click.
+
+Overly large single sections, GeoAdmin transport or parsing failures, and
+result-limit overflow remain errors; they do not modify the existing route. An
+active operation is aborted when route mode is left or the application unmounts.
+There is no persistent logging or general retry mechanism yet.
 
 Elevation-profile failures are non-blocking. The distance remains visible,
 altitude-dependent values become dashes, and route editing continues normally.

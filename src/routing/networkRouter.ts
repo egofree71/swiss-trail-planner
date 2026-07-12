@@ -618,6 +618,18 @@ function appendCoordinate(
 }
 
 /**
+ * Signals that the loaded cells contain no swissTLM3D segment usable by the
+ * pedestrian graph. Callers may treat this as missing coverage rather than a
+ * transport or parsing failure.
+ */
+export class NoWalkableNetworkError extends Error {
+  constructor() {
+    super('No walkable swissTLM3D segments could be built.');
+    this.name = 'NoWalkableNetworkError';
+  }
+}
+
+/**
  * Immutable pedestrian routing graph built from swissTLM3D data.
  *
  * Instances must be created with `RoutingNetwork.fromSwissTlm()` so node
@@ -652,7 +664,7 @@ export class RoutingNetwork {
    * @param extent - Loaded network extent in EPSG:3857 map coordinates.
    * @param data - Normalized swissTLM3D road and hiking features.
    * @returns A fully indexed immutable routing network.
-   * @throws {Error} When no walkable segment can be produced from the supplied data.
+   * @throws {NoWalkableNetworkError} When no walkable segment can be produced from the supplied data.
    */
   static fromSwissTlm(
     extent: Extent,
@@ -753,7 +765,7 @@ export class RoutingNetwork {
     }
 
     if (segments.length === 0) {
-      throw new Error('No walkable swissTLM3D segments could be built.');
+      throw new NoWalkableNetworkError();
     }
 
     return new RoutingNetwork(extent, nodes, segments, {

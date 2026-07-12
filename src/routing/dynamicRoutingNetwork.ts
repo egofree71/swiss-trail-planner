@@ -6,7 +6,11 @@
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
-import { RoutingNetwork, type RoutedNetworkPath } from './networkRouter';
+import {
+  NoWalkableNetworkError,
+  RoutingNetwork,
+  type RoutedNetworkPath,
+} from './networkRouter';
 import {
   fetchSwissTlmNetworkData,
   type SwissTlmLineFeature,
@@ -277,7 +281,7 @@ export class DynamicRoutingNetworkLoader {
    * Loads a neighbourhood around a point and snaps it to the local network.
    * @param coordinate - User-selected coordinate in EPSG:3857.
    * @param signal - Abort signal owned by the route-creation session.
-   * @returns The snapped network coordinate, or `null` when no segment is close enough.
+   * @returns The snapped coordinate, or `null` when coverage is empty or no segment is close enough.
    * @throws {RoutingAreaTooLargeError} If the generated neighbourhood exceeds the safety limit.
    * @throws {Error} When GeoAdmin loading or graph construction fails.
    */
@@ -286,8 +290,20 @@ export class DynamicRoutingNetworkLoader {
     signal: AbortSignal,
   ): Promise<Coordinate | null> {
     const cellKeys = createLocalCellKeys(coordinate);
-    const network = await this.getNetwork(cellKeys, signal);
-    return network.snap(coordinate);
+
+    try {
+      const network = await this.getNetwork(cellKeys, signal);
+      return network.snap(coordinate);
+    } catch (error) {
+      // Empty cells are expected outside swissTLM3D coverage. Returning null
+      // lets the editor place the point freely instead of treating it as an
+      // API failure.
+      if (error instanceof NoWalkableNetworkError) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   /**
@@ -295,7 +311,7 @@ export class DynamicRoutingNetworkLoader {
    * @param startCoordinate - Existing route endpoint in EPSG:3857.
    * @param endCoordinate - Newly selected destination in EPSG:3857.
    * @param signal - Abort signal owned by the route-creation session.
-   * @returns A routed path, or `null` after both corridor widths remain disconnected.
+   * @returns A routed path, or `null` when both corridor widths lack usable coverage or connectivity.
    * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
    * @throws {Error} When GeoAdmin loading or graph construction fails.
    */
@@ -309,8 +325,18 @@ export class DynamicRoutingNetworkLoader {
       endCoordinate,
       ROUTE_CELL_RADIUS,
     );
-    const initialNetwork = await this.getNetwork(initialCellKeys, signal);
-    const initialPath = initialNetwork.route(startCoordinate, endCoordinate);
+    let initialPath: RoutedNetworkPath | null = null;
+
+    try {
+      const initialNetwork = await this.getNetwork(initialCellKeys, signal);
+      initialPath = initialNetwork.route(startCoordinate, endCoordinate);
+    } catch (error) {
+      // A narrow corridor can be entirely outside swissTLM3D coverage. The
+      // wider retry may still reach a usable network near a national border.
+      if (!(error instanceof NoWalkableNetworkError)) {
+        throw error;
+      }
+    }
 
     if (initialPath) {
       return initialPath;
@@ -323,8 +349,19 @@ export class DynamicRoutingNetworkLoader {
       endCoordinate,
       ROUTE_RETRY_CELL_RADIUS,
     );
-    const retryNetwork = await this.getNetwork(retryCellKeys, signal);
-    return retryNetwork.route(startCoordinate, endCoordinate);
+
+    try {
+      const retryNetwork = await this.getNetwork(retryCellKeys, signal);
+      return retryNetwork.route(startCoordinate, endCoordinate);
+    } catch (error) {
+      // No walkable data after both attempts is a normal coverage miss. The
+      // route editor can preserve continuity with a straight fallback segment.
+      if (error instanceof NoWalkableNetworkError) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   /**
