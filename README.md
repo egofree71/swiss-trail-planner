@@ -14,6 +14,7 @@ positions selected by the user.
 - selectable official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
 - official hiking trails displayed above every background at detailed zoom levels;
 - official hiking-trail closures and detours shown by default, with click details;
+- optional passenger-relevant public-transport stops with mode-specific symbols and compact click details;
 - search for Swiss communes, localities, postal codes, and geographic names;
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
@@ -113,6 +114,26 @@ project-owned panel. Turning the layer off closes the panel and stops further
 identify requests. The overlay is intentionally informational only: route
 calculation does not automatically avoid a closed section, matching the
 planning workflow of other hiking applications.
+
+## Public transport stops
+
+The Layers menu can display the official Federal Office of Transport layer:
+
+```text
+ch.bav.haltestellen-oev
+```
+
+It is disabled by default and the browser remembers an explicit choice. At
+detailed zoom levels, the application requests visible stop features through
+the GeoAdmin identify API, removes operational or explicitly out-of-service
+points that do not provide passenger transport, and renders the remaining stops
+as client-side vectors with distinct symbols for train, tram, bus, boat, and
+cable transport.
+
+Clicking a visible stop while route creation is inactive opens a compact panel.
+Its header shows the localized means of transport and its body shows only the
+official stop name. Administrative fields and live departure times are not
+included in this first integration.
 
 ## Location search
 
@@ -285,6 +306,12 @@ Closures and detours:
 - Layer: `ch.astra.wanderland-sperrungen_umleitungen`;
 - feature details: GeoAdmin `identify` and `htmlPopup` endpoints.
 
+Public transport stops:
+
+- feature layer: `ch.bav.haltestellen-oev`;
+- viewport loading: GeoAdmin `identify` endpoint with GeoJSON geometry;
+- rendering: filtered client-side OpenLayers vectors with mode-specific symbols.
+
 Shared settings:
 
 - display projection:
@@ -299,9 +326,9 @@ as an inspectable development layer.
 
 ## Next milestone
 
-Validate dynamic routing and the closure overlay in several contrasting
-regions, then continue waypoint-editing work and add public-transport stops as
-another optional information layer.
+Validate dynamic routing and the information overlays in several contrasting
+regions, then continue waypoint-editing work. Public-transport timetable
+departures remain a possible later extension.
 
 ## License
 

@@ -1,18 +1,16 @@
 /**
- * Business context: presents official closure metadata in a temporary,
- * localized map panel. The panel is non-modal so users can continue exploring
- * the map and close it without losing route or overlay state.
+ * Business context: supplies closure-specific translations to the shared map
+ * information panel used for official GeoAdmin feature metadata.
  */
-import { useEffect } from 'react';
 import { useI18n } from '../i18n/I18nContext';
+import MapInformationPopup, {
+  type MapInformationPopupStatus,
+} from './MapInformationPopup';
 
-/** Async popup content produced after a map click on the overlay. */
-export type TrailClosurePopupStatus =
-  | { state: 'loading'; html: null }
-  | { state: 'ready'; html: string }
-  | { state: 'error'; html: null };
+/** Async popup content produced after a map click on the closure overlay. */
+export type TrailClosurePopupStatus = MapInformationPopupStatus;
 
-/** Display state and close callback for the temporary information panel. */
+/** Display state and close callback for the temporary closure panel. */
 interface TrailClosurePopupProps {
   /** Current loading, ready, or error state. */
   status: TrailClosurePopupStatus;
@@ -20,61 +18,21 @@ interface TrailClosurePopupProps {
   onClose: () => void;
 }
 
-/** Renders sanitized GeoAdmin popup markup with project-owned styling. */
+/** Renders official closure metadata with translated project labels. */
 export default function TrailClosurePopup({
   status,
   onClose,
 }: TrailClosurePopupProps) {
   const { t } = useI18n();
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [onClose]);
-
   return (
-    <aside
-      className="trail-closure-popup"
-      role="dialog"
-      aria-label={t('closures.title')}
-    >
-      <header className="trail-closure-popup-header">
-        <strong>{t('closures.title')}</strong>
-        <button
-          type="button"
-          className="trail-closure-popup-close"
-          aria-label={t('closures.close')}
-          title={t('closures.close')}
-          onClick={onClose}
-        >
-          ×
-        </button>
-      </header>
-
-      <div className="trail-closure-popup-body">
-        {status.state === 'loading' && (
-          <p role="status">{t('closures.loading')}</p>
-        )}
-
-        {status.state === 'error' && (
-          <p className="trail-closure-popup-error" role="alert">
-            {t('closures.loadError')}
-          </p>
-        )}
-
-        {status.state === 'ready' && (
-          <div
-            className="trail-closure-popup-content"
-            dangerouslySetInnerHTML={{ __html: status.html }}
-          />
-        )}
-      </div>
-    </aside>
+    <MapInformationPopup
+      title={t('closures.title')}
+      closeLabel={t('closures.close')}
+      loadingLabel={t('closures.loading')}
+      errorLabel={t('closures.loadError')}
+      status={status}
+      onClose={onClose}
+    />
   );
 }

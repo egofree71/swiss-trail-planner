@@ -56,6 +56,8 @@ The application should remain lightweight and map-centered:
 - [x] Add a unified Layers menu for base maps and optional information overlays.
 - [x] Show closures by default and remember the user's visibility choice.
 - [x] Add localized click information for visible closures.
+- [x] Add optional official public-transport stops to the Layers menu.
+- [x] Filter passenger-relevant stops, preserve mode-specific symbols, and show compact localized stop details.
 
 ## Current focus
 
@@ -75,6 +77,12 @@ The loader caches completed cells and expands along each new route section. It
 is still an experimental regional strategy intended to reveal topology,
 attribute, API-volume, and route-quality problems before a national data
 pipeline or backend is selected.
+
+The public-transport stop layer is geographic and informational only. It
+filters out operating-only and explicitly out-of-service points, then shows the
+transport mode and official stop name. Live arrival and departure times are
+deliberately deferred until an appropriate official or openly licensed
+timetable service is selected.
 
 ## Planned milestones
 

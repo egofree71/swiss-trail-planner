@@ -1,6 +1,7 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: selectable raster backgrounds, hiking and closure overlays,
+> Documented state: selectable raster backgrounds, hiking, closure, and
+> public-transport overlays,
 > search, geolocation, fullscreen, manual route creation, route statistics,
 > elevation profile, GPX export, and experimental on-demand swissTLM3D routing
 > around user-selected positions.
@@ -36,6 +37,7 @@ It can:
 - display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
 - show the official ASTRA hiking-trail closures and detours WMS overlay;
 - identify a visible closure and display its localized official metadata;
+- optionally show official public-transport stops and inspect localized stop metadata;
 - search official Swiss location indexes;
 - display a selected search result as a vector marker;
 - request and display the user's current position;
@@ -68,6 +70,7 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - automatic avoidance of officially closed sections during routing;
+- live public-transport timetable departures;
 - waypoint movement, insertion, or individual deletion;
 - local or remote persistence;
 - an application server.
@@ -94,9 +97,10 @@ The project evolves through independent functional layers:
 9. four-language interface and localized GeoAdmin search;
 10. elevation-aware GPX export and read-only GPX reference loading;
 11. official hiking-closure overlay and localized feature information;
-12. waypoint editing;
-13. repeatable routing-data preparation;
-14. reliable national hiking routing.
+12. optional public-transport stop overlay and localized stop information;
+13. waypoint editing;
+14. repeatable routing-data preparation;
+15. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -134,7 +138,7 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── MapLayersSelector, TrailClosurePopup, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
+   │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
    │      ├── route history, imported-GPX state, statistics, and temporary routing status
    │      ├── browser Geolocation API
@@ -149,6 +153,7 @@ Browser
    │      ├── TileLayer: national map (JPEG)
    │      ├── TileLayer: hiking trails (transparent PNG)
    │      ├── TileLayer: hiking closures and detours (transparent WMS)
+   │      ├── VectorLayer: filtered passenger public-transport stops
    │      ├── VectorLayer: imported read-only GPX geometry
    │      ├── VectorLayer: editable route geometry and waypoints
    │      ├── VectorLayer: selected search result
@@ -162,9 +167,9 @@ Browser
    │      └── A* route calculation
    │
    └── HTTPS requests
-          ├── wmts.geo.admin.ch
+          ├── wmts.geo.admin.ch (base maps and hiking trails)
           ├── wms.geo.admin.ch (closures and detours portrayal)
-          └── api3.geo.admin.ch (search, identify, HTML popup, and elevation profile)
+          └── api3.geo.admin.ch (search, routing and stop identify, closure popup, and elevation profile)
 
 Deployment
    │
@@ -189,9 +194,10 @@ selected route section.
 | OpenLayers 10 | Map, view, layers, projections, markers, and controls |
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
-| GeoAdmin identify API | On-demand swissTLM3D geometries and closure-feature selection |
-| GeoAdmin HTML popup API | Localized official hiking-closure metadata |
+| GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
+| GeoAdmin HTML popup API | Localized official closure metadata |
 | GeoAdmin WMS | Official server-rendered closure and detour symbology |
+| OpenLayers vector styling | Filtered public-transport stop symbols by normalized mode |
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
@@ -237,9 +243,32 @@ the GeoAdmin identify endpoint with the current map extent, canvas size, and
 screen-pixel tolerance. A matching feature ID is then passed to the localized
 `htmlPopup` endpoint. The returned official HTML is reduced to a strict set of
 safe text, table, link, and image elements before React renders it in a
-project-owned panel. This display layer is intentionally informational and does not modify routing
+project-owned panel. This display layer is intentionally informational and
+does not modify routing
 costs or graph connectivity. Users decide whether a visible closure affects
 their planned route.
+
+The optional public-transport stop overlay uses the official feature layer
+`ch.bav.haltestellen-oev`, but does not display its unfiltered raster portrayal.
+The source dataset also contains operational and retired points that are not
+useful when planning passenger access. At detailed zoom levels, an abortable
+viewport loader calls the GeoAdmin identify endpoint, recursively subdivides
+dense requests that reach the 200-result limit, and converts point geometry and
+selected attributes into client-side OpenLayers features.
+
+Entries without a stop name or usable means of transport, and entries whose type
+explicitly indicates an out-of-service stop, are omitted. Remaining means of
+transport are normalized into train, tram, bus, boat, cable-car, funicular, or
+fallback categories and receive distinct blue map symbols. The layer is disabled
+by default and its visibility preference is stored locally.
+
+A click first checks the already loaded stop vectors. A hit opens a compact
+project-owned panel whose header contains the translated transport mode and
+whose body contains only the official stop name. No additional popup request is
+needed, administrative fields remain hidden, and live timetable departures are
+outside the current scope. If no stop is hit, the same map interaction may then
+identify a visible closure; only closure HTML passes through the shared
+sanitizer.
 
 For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
 `MapServer/identify` endpoint for two technical layers:
@@ -530,8 +559,12 @@ swiss-trail-planner/
 ├── src/
 │   ├── closures/
 │   │   └── trailClosures.ts
+│   ├── transport/
+│   │   └── publicTransportStops.ts
 │   ├── components/
+│   │   ├── MapInformationPopup.tsx
 │   │   ├── MapLayersSelector.tsx
+│   │   ├── PublicTransportStopPopup.tsx
 │   │   ├── LanguageSelector.tsx
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
@@ -550,6 +583,7 @@ swiss-trail-planner/
 │   │   ├── I18nContext.tsx
 │   │   └── translations.ts
 │   ├── map/
+│   │   ├── geoAdminPopup.ts
 │   │   ├── config.ts
 │   │   ├── importedRoute.ts
 │   │   ├── route.ts
@@ -583,7 +617,7 @@ swiss-trail-planner/
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the tile and vector layers, replaces the selected base-map source,
-handles map, geolocation, fullscreen, GPX reference loading, closure-overlay
+handles map, geolocation, fullscreen, GPX reference loading, information-layer
 visibility and feature inspection, route-creation mode, immutable route history,
 dynamic graph loading, route statistics, and temporary routing status. It
 reacts to selected search results and cleans up imperative resources and pending
@@ -595,21 +629,45 @@ Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
 switchable. The component does not know about OpenLayers; `App.tsx` owns the
 actual layer sources and visibility. Outside pointer presses and Escape close
-the menu. The structure is ready for future optional layers such as public-
-transport stops without adding another permanent map button.
+the menu. It owns independent switches for closures and public-transport stops without
+adding another permanent map button.
+
+### `src/components/MapInformationPopup.tsx`
+
+Provides the shared non-modal information panel, close behavior, loading and
+error states, and sanitized HTML container used by official information layers.
 
 ### `src/components/TrailClosurePopup.tsx`
 
-Displays loading, error, or sanitized official feature metadata in a temporary
-non-modal panel. Escape and the close button dismiss the panel without changing
-map, route, or layer state.
+Supplies closure-specific translations to the shared information panel. Escape
+and the close button dismiss the panel without changing map, route, or layer
+state.
+
+### `src/components/PublicTransportStopPopup.tsx`
+
+Renders the compact structured stop panel. The translated transport mode is the
+header and the official stop name is the only body content. It intentionally
+hides administrative attributes and timetable departures.
 
 ### `src/closures/trailClosures.ts`
 
 Owns the ASTRA layer identifier, WMS source factory, scale-aware identify
 request, localized HTML-popup request, response validation, cancellation, and
-HTML sanitization. Network contracts remain outside React and executable markup
-is never passed through to the DOM.
+popup retrieval. Network contracts remain outside React; shared HTML
+sanitization lives under `src/map/geoAdminPopup.ts`.
+
+### `src/transport/publicTransportStops.ts`
+
+Owns the BAV layer identifier, abortable viewport identify requests, bounded
+subdivision for dense results, multilingual attribute normalization, filtering
+of operating-only or out-of-service points, mode classification, vector-layer
+creation, and client-side symbol styling.
+
+### `src/map/geoAdminPopup.ts`
+
+Sanitizes official GeoAdmin closure-popup fragments, keeping only safe
+semantic elements, links, and images. Public-transport stop panels use structured
+feature data and do not inject provider HTML.
 
 ### `src/components/LanguageSelector.tsx`
 
@@ -752,7 +810,7 @@ tile-source factories.
 ### `src/styles.css`
 
 Defines the full-screen layout, left-side search control, right-side map
-controls, closure-information panel, route statistics, result panels, status
+controls, shared information panel, route statistics, result panels, status
 messages, and OpenLayers control placement.
 
 ### Remaining root files
@@ -778,47 +836,48 @@ messages, and OpenLayers control placement.
 5. The Layers menu changes the base-map source or toggles information overlays.
 6. The rendered hiking overlay starts loading when zoom moves beyond level 12.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
-8. A map click on a visible closure identifies the feature at the current detailed scale.
-9. The localized official popup is fetched, sanitized, and shown in a temporary panel.
-10. Selecting a GPX parses it locally, replaces the read-only reference layer,
-   and fits the map to the imported geometry.
-11. The route button toggles route-creation mode and the crosshair cursor.
-12. Entering route mode attaches a map `singleclick` listener and reveals the
-   route toolbar.
-13. With snapping disabled, a click stores a direct section immediately.
-14. The first snapped click derives and loads a local 3 × 3 cell group while
+8. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
+9. A map click inspects the loaded stop vectors first and then a visible closure.
+10. A stop opens a compact structured panel immediately; a closure fetches and sanitizes the localized official popup.
+11. Selecting a GPX parses it locally, replaces the read-only reference layer,
+    and fits the map to the imported geometry.
+12. The route button toggles route-creation mode and the crosshair cursor.
+13. Entering route mode attaches a map `singleclick` listener and reveals the
+    route toolbar.
+14. With snapping disabled, a click stores a direct section immediately.
+15. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
-15. Dense identify requests are subdivided when either layer reaches 200 results.
-16. Returned road vertices become graph nodes and edges; hiking geometry marks
+16. Dense identify requests are subdivided when either layer reaches 200 results.
+17. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-17. The first clicked point is snapped to the nearest walkable segment.
-18. Later clicks derive a corridor of cells between waypoints, load only missing
+18. The first clicked point is snapped to the nearest walkable segment.
+19. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-19. A disconnected or empty corridor is retried once with a wider cell radius.
-20. If no routable path remains, the current click becomes a free point or a
+20. A disconnected or empty corridor is retried once with a wider cell radius.
+21. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-21. Updating route history rebuilds the route line and waypoint features.
-22. Distance is recalculated locally from the flattened route geometry.
-23. After a short debounce, an abortable profile request refreshes ascent,
+22. Updating route history rebuilds the route line and waypoint features.
+23. Distance is recalculated locally from the flattened route geometry.
+24. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-24. The profile button reveals or hides the SVG chart without another request.
-25. Undo moves the last complete step to redo; redo restores it without routing.
-26. Reversal rebuilds immutable steps in the opposite order and clears redo.
-27. Deletion clears both applied and redo histories and hides the summary.
-28. GPX export opens a modal naming form before any XML is generated.
-29. Confirming the form converts the flattened route to WGS 84, merges exact
+25. The profile button reveals or hides the SVG chart without another request.
+26. Undo moves the last complete step to redo; redo restores it without routing.
+27. Reversal rebuilds immutable steps in the opposite order and clears redo.
+28. Deletion clears both applied and redo histories and hides the summary.
+29. GPX export opens a modal naming form before any XML is generated.
+30. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-30. Changing language updates interface text, number formatting, document
-    metadata, and subsequent SearchServer requests without recreating the map.
-31. Leaving route mode removes the click listener and aborts active network work
+31. Changing language updates interface text, number formatting, document
+    metadata, and subsequent GeoAdmin requests without recreating the map.
+32. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-32. The fullscreen button requests fullscreen for the root application element.
-33. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-34. Location search and browser geolocation continue to operate independently.
-35. On unmount, map listeners, timers, requests, references, and the map target
+33. The fullscreen button requests fullscreen for the root application element.
+34. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+35. Location search and browser geolocation continue to operate independently.
+36. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-36. A push to `main` triggers the Pages workflow, which builds and deploys
+37. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 
@@ -827,7 +886,7 @@ messages, and OpenLayers control placement.
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
 
-Hiking-overlay and closure-WMS failures remain non-blocking.
+Hiking-overlay, closure-WMS, and public-transport viewport-loading failures remain non-blocking.
 
 Search failures display a temporary result-panel message and allow immediate
 retry through another query. Aborted searches are ignored.
@@ -845,9 +904,10 @@ result-limit overflow remain errors; they do not modify the existing route. An
 active operation is aborted when route mode is left or the application unmounts.
 There is no persistent logging or general retry mechanism yet.
 
-Closure identify and popup failures do not affect map navigation or route
-state. The panel reports a localized error, and turning the layer off aborts any
-pending feature request.
+Information-layer loading, identify, and popup failures do not affect map
+navigation or route state. Closure panels report a localized error, and turning
+an active layer off aborts its pending feature work. A failed stop refresh keeps
+the map usable and does not expose unfiltered operating points.
 
 Elevation-profile failures are non-blocking. The distance remains visible,
 altitude-dependent values become dashes, and route editing continues normally.
@@ -903,6 +963,13 @@ The identify-based cell loader now removes the fixed test region and provides
 useful evidence about whether browser-only on-demand routing is sufficient. A
 preprocessed graph or backend should be selected only if measured limits justify
 it.
+
+### Optional public-transport timetable integration
+
+The stop layer currently provides filtered passenger locations, normalized
+means of transport, and official stop names. Live departures may later use an
+official or openly licensed timetable service, but this should remain separate
+from the geographic overlay.
 
 ### Phase 3 — Route editing
 

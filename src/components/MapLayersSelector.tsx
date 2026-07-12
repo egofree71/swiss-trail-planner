@@ -17,6 +17,10 @@ interface MapLayersSelectorProps {
   areTrailClosuresVisible: boolean;
   /** Shows or hides the official closure overlay. */
   onTrailClosuresChange: (isVisible: boolean) => void;
+  /** Whether official public-transport stops are currently visible. */
+  arePublicTransportStopsVisible: boolean;
+  /** Shows or hides the official stop overlay. */
+  onPublicTransportStopsChange: (isVisible: boolean) => void;
 }
 
 /** One mutually exclusive base-map choice and its translated label. */
@@ -40,6 +44,8 @@ export default function MapLayersSelector({
   onBaseMapChange,
   areTrailClosuresVisible,
   onTrailClosuresChange,
+  arePublicTransportStopsVisible,
+  onPublicTransportStopsChange,
 }: MapLayersSelectorProps) {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -182,6 +188,41 @@ export default function MapLayersSelector({
                 className={[
                   'map-layer-option-toggle',
                   areTrailClosuresVisible
+                    ? 'map-layer-option-toggle--checked'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-hidden="true"
+              >
+                <span />
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className={[
+                'map-layer-option',
+                'map-layer-option--overlay',
+                arePublicTransportStopsVisible
+                  ? 'map-layer-option--selected'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              role="menuitemcheckbox"
+              aria-checked={arePublicTransportStopsVisible}
+              onClick={() =>
+                onPublicTransportStopsChange(
+                  !arePublicTransportStopsVisible,
+                )
+              }
+            >
+              <span>{t('transportStops.layer')}</span>
+              <span
+                className={[
+                  'map-layer-option-toggle',
+                  arePublicTransportStopsVisible
                     ? 'map-layer-option-toggle--checked'
                     : '',
                 ]

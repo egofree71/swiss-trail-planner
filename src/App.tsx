@@ -1,13 +1,14 @@
 /**
  * Business context: coordinates the map-centred application shell and owns the
  * imperative OpenLayers lifecycle. It connects search, geolocation, fullscreen,
- * route history, official closure inspection, dynamic swissTLM3D loading,
- * and route-editing controls while
- * keeping provider/network details in dedicated modules.
+ * route history, official information-layer inspection, dynamic swissTLM3D
+ * loading, and route-editing controls while keeping provider/network details
+ * in dedicated modules.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
 import Map from 'ol/Map.js';
+import MapBrowserEvent from 'ol/MapBrowserEvent.js';
 import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
@@ -21,6 +22,7 @@ import LocationSearch from './components/LocationSearch';
 import RouteImportControl from './components/RouteImportControl';
 import RouteControls from './components/RouteControls';
 import RouteExportDialog from './components/RouteExportDialog';
+import PublicTransportStopPopup from './components/PublicTransportStopPopup';
 import TrailClosurePopup, {
   type TrailClosurePopupStatus,
 } from './components/TrailClosurePopup';
@@ -32,6 +34,15 @@ import {
   identifyTrailClosure,
   createTrailClosuresSource,
 } from './closures/trailClosures';
+import {
+  createPublicTransportStopsDisplay,
+  getPublicTransportStopFromFeature,
+  loadPublicTransportStops,
+  PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
+  type PublicTransportStop,
+  type PublicTransportStopsDisplay,
+  updatePublicTransportStopsDisplay,
+} from './transport/publicTransportStops';
 import { downloadRouteGpx } from './export/gpx';
 import {
   GpxImportError,
@@ -114,6 +125,9 @@ const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 /** Browser preference key for the safety-information overlay. */
 const TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY =
   'swiss-trail-planner.trail-closures-visible';
+/** Browser preference key for the optional public-transport stop overlay. */
+const PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY =
+  'swiss-trail-planner.public-transport-stops-visible';
 
 /**
  * Restores the explicit closure-layer preference. Safety information is shown
@@ -128,6 +142,22 @@ function getInitialTrailClosuresVisibility(): boolean {
     );
   } catch {
     return true;
+  }
+}
+
+/**
+ * Restores the explicit stop-layer preference. Stops remain hidden by default
+ * because their dense point symbols are an optional planning aid.
+ */
+function getInitialPublicTransportStopsVisibility(): boolean {
+  try {
+    return (
+      window.localStorage.getItem(
+        PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY,
+      ) === 'true'
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -182,6 +212,8 @@ export default function App() {
   const baseMapLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const grayDetailLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const trailClosuresLayerRef = useRef<TileLayer<TileWMS> | null>(null);
+  const publicTransportStopsDisplayRef =
+    useRef<PublicTransportStopsDisplay | null>(null);
   const activeBaseMapStyleRef = useRef<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
   );
@@ -201,7 +233,7 @@ export default function App() {
   const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
   const routingAbortControllerRef = useRef<AbortController | null>(null);
   const routeImportSessionRef = useRef(0);
-  const trailClosureRequestRef = useRef<AbortController | null>(null);
+  const mapInformationRequestRef = useRef<AbortController | null>(null);
 
   if (!routingLoaderRef.current) {
     routingLoaderRef.current = new DynamicRoutingNetworkLoader();
@@ -220,8 +252,12 @@ export default function App() {
   );
   const [areTrailClosuresVisible, setAreTrailClosuresVisible] =
     useState(getInitialTrailClosuresVisibility);
+  const [arePublicTransportStopsVisible, setArePublicTransportStopsVisible] =
+    useState(getInitialPublicTransportStopsVisibility);
   const [trailClosurePopup, setTrailClosurePopup] =
     useState<TrailClosurePopupStatus | null>(null);
+  const [publicTransportStopPopup, setPublicTransportStopPopup] =
+    useState<PublicTransportStop | null>(null);
   const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
   const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
   const [isRouteOperationPending, setIsRouteOperationPending] =
@@ -252,11 +288,12 @@ export default function App() {
       )
     : null;
 
-  /** Closes closure metadata and cancels a superseded identify/popup request. */
-  const closeTrailClosurePopup = useCallback(() => {
-    trailClosureRequestRef.current?.abort();
-    trailClosureRequestRef.current = null;
+  /** Closes any information-layer metadata and cancels its active request. */
+  const closeMapInformationPopup = useCallback(() => {
+    mapInformationRequestRef.current?.abort();
+    mapInformationRequestRef.current = null;
     setTrailClosurePopup(null);
+    setPublicTransportStopPopup(null);
   }, []);
 
   /**
@@ -680,6 +717,8 @@ export default function App() {
     const grayDetailSource = createGrayDetailMapSource();
     const hikingTrailsSource = createHikingTrailsSource();
     const trailClosuresSource = createTrailClosuresSource();
+    const publicTransportStopsDisplay =
+      createPublicTransportStopsDisplay();
     const userLocationMarker = createUserLocationMarker();
     const searchResultMarker = createSearchResultMarker();
     const importedRouteDisplay = createImportedRouteDisplay();
@@ -699,6 +738,9 @@ export default function App() {
       visible: areTrailClosuresVisible,
       zIndex: 14,
     });
+    publicTransportStopsDisplay.layer.setVisible(
+      arePublicTransportStopsVisible,
+    );
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -742,6 +784,7 @@ export default function App() {
           zIndex: 10,
         }),
         trailClosuresLayer,
+        publicTransportStopsDisplay.layer,
         importedRouteDisplay.layer,
         routeDisplay.layer,
         searchResultMarker.layer,
@@ -790,6 +833,7 @@ export default function App() {
     baseMapLayerRef.current = baseMapLayer;
     grayDetailLayerRef.current = grayDetailLayer;
     trailClosuresLayerRef.current = trailClosuresLayer;
+    publicTransportStopsDisplayRef.current = publicTransportStopsDisplay;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
     importedRouteDisplayRef.current = importedRouteDisplay;
@@ -800,7 +844,7 @@ export default function App() {
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
       routeImportSessionRef.current += 1;
-      trailClosureRequestRef.current?.abort();
+      mapInformationRequestRef.current?.abort();
       document.removeEventListener(
         'fullscreenchange',
         handleFullscreenChange,
@@ -812,6 +856,7 @@ export default function App() {
       baseMapLayerRef.current = null;
       grayDetailLayerRef.current = null;
       trailClosuresLayerRef.current = null;
+      publicTransportStopsDisplayRef.current = null;
       userLocationMarkerRef.current = null;
       searchResultMarkerRef.current = null;
       importedRouteDisplayRef.current = null;
@@ -854,6 +899,17 @@ export default function App() {
   }, [areTrailClosuresVisible]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY,
+        String(arePublicTransportStopsVisible),
+      );
+    } catch {
+      // Layer visibility remains functional when browser storage is unavailable.
+    }
+  }, [arePublicTransportStopsVisible]);
+
+  useEffect(() => {
     const trailClosuresLayer = trailClosuresLayerRef.current;
 
     if (!trailClosuresLayer) {
@@ -862,47 +918,160 @@ export default function App() {
 
     trailClosuresLayer.setVisible(areTrailClosuresVisible);
 
-    if (!areTrailClosuresVisible) {
-      closeTrailClosurePopup();
+    if (!areTrailClosuresVisible && trailClosurePopup) {
+      closeMapInformationPopup();
     }
-  }, [areTrailClosuresVisible, closeTrailClosurePopup]);
-
-  // Popup templates are localized server-side, so stale-language content is
-  // dismissed instead of remaining visible after an interface language change.
-  useEffect(() => {
-    closeTrailClosurePopup();
-  }, [closeTrailClosurePopup, language]);
+  }, [
+    areTrailClosuresVisible,
+    closeMapInformationPopup,
+    trailClosurePopup,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
+    const display = publicTransportStopsDisplayRef.current;
 
-    if (!map || !areTrailClosuresVisible || isRouteCreationActive) {
+    if (!map || !display) {
+      return;
+    }
+
+    display.layer.setVisible(arePublicTransportStopsVisible);
+
+    if (!arePublicTransportStopsVisible) {
+      display.source.clear();
+      closeMapInformationPopup();
+      return;
+    }
+
+    let abortController: AbortController | null = null;
+
+    const loadVisibleStops = () => {
+      const imageSize = map.getSize();
+      const zoom = map.getView().getZoom();
+
+      if (
+        !imageSize ||
+        zoom === undefined ||
+        zoom <= PUBLIC_TRANSPORT_STOPS_MIN_ZOOM
+      ) {
+        abortController?.abort();
+        display.source.clear();
+        return;
+      }
+
+      abortController?.abort();
+      abortController = new AbortController();
+      const request = abortController;
+
+      void loadPublicTransportStops(
+        {
+          extent: map.getView().calculateExtent(imageSize),
+          imageSize: [imageSize[0], imageSize[1]],
+          language,
+        },
+        request.signal,
+      )
+        .then((stops) => {
+          if (!request.signal.aborted) {
+            updatePublicTransportStopsDisplay(display, stops);
+          }
+        })
+        .catch((error: unknown) => {
+          if (
+            request.signal.aborted ||
+            (error instanceof DOMException && error.name === 'AbortError')
+          ) {
+            return;
+          }
+
+          // Optional stop information must never block route planning.
+          console.error('Unable to load public-transport stops.', error);
+        });
+    };
+
+    map.on('moveend', loadVisibleStops);
+    loadVisibleStops();
+
+    return () => {
+      map.un('moveend', loadVisibleStops);
+      abortController?.abort();
+    };
+  }, [
+    arePublicTransportStopsVisible,
+    closeMapInformationPopup,
+    language,
+  ]);
+
+  // Closure popup templates are localized server-side, while stop names and
+  // modes are reloaded for the selected language. Dismiss stale panel content.
+  useEffect(() => {
+    closeMapInformationPopup();
+  }, [closeMapInformationPopup, language]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const hasVisibleInformationLayer =
+      areTrailClosuresVisible || arePublicTransportStopsVisible;
+
+    if (!map || !hasVisibleInformationLayer || isRouteCreationActive) {
       if (isRouteCreationActive) {
-        closeTrailClosurePopup();
+        closeMapInformationPopup();
       }
       return;
     }
 
-    const handleTrailClosureClick = (event: { coordinate: Coordinate }) => {
+    const handleInformationLayerClick = (
+      event: MapBrowserEvent,
+    ) => {
       const imageSize = map.getSize();
       const zoom = map.getView().getZoom();
 
-      // The official WMS is too dense at national and regional scales. Match
-      // the hiking-trail overlay threshold so closure details are inspected
-      // only while their geometries are actually visible on the map.
-      if (
-        !imageSize ||
-        zoom === undefined ||
-        zoom <= HIKING_TRAILS_MIN_ZOOM
-      ) {
+      if (!imageSize || zoom === undefined) {
         return;
       }
 
-      trailClosureRequestRef.current?.abort();
+      const canInspectStops =
+        arePublicTransportStopsVisible &&
+        zoom > PUBLIC_TRANSPORT_STOPS_MIN_ZOOM;
+      const canInspectClosures =
+        areTrailClosuresVisible && zoom > HIKING_TRAILS_MIN_ZOOM;
+
+      if (!canInspectStops && !canInspectClosures) {
+        return;
+      }
+
+      mapInformationRequestRef.current?.abort();
+      mapInformationRequestRef.current = null;
       setTrailClosurePopup(null);
+      setPublicTransportStopPopup(null);
+
+      if (canInspectStops) {
+        const stopDisplay = publicTransportStopsDisplayRef.current;
+        const stop = stopDisplay
+          ? map.forEachFeatureAtPixel(
+              event.pixel,
+              (feature) => getPublicTransportStopFromFeature(feature),
+              {
+                hitTolerance: 8,
+                layerFilter: (layer) => layer === stopDisplay.layer,
+              },
+            )
+          : undefined;
+
+        // Stops are already filtered and localized during viewport loading, so
+        // opening their compact popup requires no additional network request.
+        if (stop) {
+          setPublicTransportStopPopup(stop);
+          return;
+        }
+      }
+
+      if (!canInspectClosures) {
+        return;
+      }
 
       const abortController = new AbortController();
-      trailClosureRequestRef.current = abortController;
+      mapInformationRequestRef.current = abortController;
       const context = {
         coordinate: [...event.coordinate] as Coordinate,
         mapExtent: map.getView().calculateExtent(imageSize),
@@ -910,23 +1079,25 @@ export default function App() {
         language,
       };
 
-      void identifyTrailClosure(context, abortController.signal)
-        .then(async (closure) => {
-          if (!closure || abortController.signal.aborted) {
-            return;
-          }
-
-          setTrailClosurePopup({ state: 'loading', html: null });
-          const html = await fetchTrailClosurePopup(
-            closure,
+      void (async () => {
+        try {
+          const closure = await identifyTrailClosure(
+            context,
             abortController.signal,
           );
 
-          if (!abortController.signal.aborted) {
-            setTrailClosurePopup({ state: 'ready', html });
+          if (closure && !abortController.signal.aborted) {
+            setTrailClosurePopup({ state: 'loading', html: null });
+            const html = await fetchTrailClosurePopup(
+              closure,
+              abortController.signal,
+            );
+
+            if (!abortController.signal.aborted) {
+              setTrailClosurePopup({ state: 'ready', html });
+            }
           }
-        })
-        .catch((error: unknown) => {
+        } catch (error: unknown) {
           if (
             abortController.signal.aborted ||
             (error instanceof DOMException && error.name === 'AbortError')
@@ -934,36 +1105,50 @@ export default function App() {
             return;
           }
 
-          console.error('Unable to load hiking closure details.', error);
+          console.error('Unable to load trail-closure details.', error);
           setTrailClosurePopup({ state: 'error', html: null });
-        })
-        .finally(() => {
-          if (trailClosureRequestRef.current === abortController) {
-            trailClosureRequestRef.current = null;
+        } finally {
+          if (mapInformationRequestRef.current === abortController) {
+            mapInformationRequestRef.current = null;
           }
-        });
+        }
+      })();
     };
 
-    const handleClosureZoomChange = () => {
+    const handleInformationLayerZoomChange = () => {
       const zoom = map.getView().getZoom();
 
-      if (zoom === undefined || zoom <= HIKING_TRAILS_MIN_ZOOM) {
-        closeTrailClosurePopup();
+      if (zoom === undefined) {
+        closeMapInformationPopup();
+        return;
+      }
+
+      const isAnyLayerVisibleAtZoom =
+        (arePublicTransportStopsVisible &&
+          zoom > PUBLIC_TRANSPORT_STOPS_MIN_ZOOM) ||
+        (areTrailClosuresVisible && zoom > HIKING_TRAILS_MIN_ZOOM);
+
+      if (!isAnyLayerVisibleAtZoom) {
+        closeMapInformationPopup();
       }
     };
 
-    map.on('singleclick', handleTrailClosureClick);
-    map.getView().on('change:resolution', handleClosureZoomChange);
+    map.on('singleclick', handleInformationLayerClick);
+    map.getView().on('change:resolution', handleInformationLayerZoomChange);
 
     return () => {
-      map.un('singleclick', handleTrailClosureClick);
-      map.getView().un('change:resolution', handleClosureZoomChange);
-      trailClosureRequestRef.current?.abort();
-      trailClosureRequestRef.current = null;
+      map.un('singleclick', handleInformationLayerClick);
+      map.getView().un(
+        'change:resolution',
+        handleInformationLayerZoomChange,
+      );
+      mapInformationRequestRef.current?.abort();
+      mapInformationRequestRef.current = null;
     };
   }, [
+    arePublicTransportStopsVisible,
     areTrailClosuresVisible,
-    closeTrailClosurePopup,
+    closeMapInformationPopup,
     isRouteCreationActive,
     language,
   ]);
@@ -1263,6 +1448,8 @@ export default function App() {
           onBaseMapChange={setBaseMapStyle}
           areTrailClosuresVisible={areTrailClosuresVisible}
           onTrailClosuresChange={setAreTrailClosuresVisible}
+          arePublicTransportStopsVisible={arePublicTransportStopsVisible}
+          onPublicTransportStopsChange={setArePublicTransportStopsVisible}
         />
 
         <div className="zoom-controls">
@@ -1365,7 +1552,14 @@ export default function App() {
       {trailClosurePopup && (
         <TrailClosurePopup
           status={trailClosurePopup}
-          onClose={closeTrailClosurePopup}
+          onClose={closeMapInformationPopup}
+        />
+      )}
+
+      {publicTransportStopPopup && (
+        <PublicTransportStopPopup
+          stop={publicTransportStopPopup}
+          onClose={closeMapInformationPopup}
         />
       )}
 

@@ -576,7 +576,7 @@ select {
   border-color: rgb(185 55 55 / 55%);
 }
 
-.trail-closure-popup {
+.map-information-popup {
   position: absolute;
   z-index: 30;
   top: 5rem;
@@ -592,7 +592,7 @@ select {
   backdrop-filter: blur(10px);
 }
 
-.trail-closure-popup-header {
+.map-information-popup-header {
   display: flex;
   min-height: 3rem;
   align-items: center;
@@ -603,7 +603,7 @@ select {
   font-size: 1rem;
 }
 
-.trail-closure-popup-close {
+.map-information-popup-close {
   display: grid;
   width: 2.15rem;
   height: 2.15rem;
@@ -620,16 +620,16 @@ select {
   line-height: 1;
 }
 
-.trail-closure-popup-close:hover {
+.map-information-popup-close:hover {
   background: rgb(183 25 25 / 9%);
 }
 
-.trail-closure-popup-close:focus-visible {
+.map-information-popup-close:focus-visible {
   outline: 3px solid rgb(23 105 224 / 40%);
   outline-offset: 1px;
 }
 
-.trail-closure-popup-body {
+.map-information-popup-body {
   max-height: calc(100vh - 9rem);
   padding: 1rem;
   overflow-y: auto;
@@ -637,60 +637,67 @@ select {
   line-height: 1.45;
 }
 
-.trail-closure-popup-body > p {
+.map-information-popup-body > p {
   margin: 0;
   color: #5c6872;
 }
 
-.trail-closure-popup-error {
+.public-transport-stop-name {
+  color: #17212b !important;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.map-information-popup-error {
   color: #a33636 !important;
 }
 
-.trail-closure-popup-content .htmlpopup-header {
+.map-information-popup-content .htmlpopup-header {
   margin-bottom: 0.85rem;
   font-size: 1.05rem;
   font-weight: 700;
   line-height: 1.35;
 }
 
-.trail-closure-popup-content table {
+.map-information-popup-content table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.trail-closure-popup-content td,
-.trail-closure-popup-content th {
+.map-information-popup-content td,
+.map-information-popup-content th {
   padding: 0.45rem 0;
   vertical-align: top;
   border-bottom: 1px solid rgb(32 47 60 / 10%);
   text-align: left;
 }
 
-.trail-closure-popup-content .cell-left,
-.trail-closure-popup-content th {
+.map-information-popup-content .cell-left,
+.map-information-popup-content th {
   width: 38%;
   padding-right: 0.8rem;
   color: #3f4c56;
   font-weight: 650;
 }
 
-.trail-closure-popup-content p:first-child,
-.trail-closure-popup-content div:first-child {
+.map-information-popup-content p:first-child,
+.map-information-popup-content div:first-child {
   margin-top: 0;
 }
 
-.trail-closure-popup-content p:last-child,
-.trail-closure-popup-content div:last-child {
+.map-information-popup-content p:last-child,
+.map-information-popup-content div:last-child {
   margin-bottom: 0;
 }
 
-.trail-closure-popup-content a {
+.map-information-popup-content a {
   color: #1769e0;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
 
-.trail-closure-popup-content img {
+.map-information-popup-content img {
   max-width: 100%;
   height: auto;
 }
@@ -1031,14 +1038,14 @@ select {
     right: 0.75rem;
   }
 
-  .trail-closure-popup {
+  .map-information-popup {
     top: 4.25rem;
     left: 0.75rem;
     width: calc(100vw - 5.25rem);
     max-height: calc(100vh - 5rem);
   }
 
-  .trail-closure-popup-body {
+  .map-information-popup-body {
     max-height: calc(100vh - 8rem);
   }
 
