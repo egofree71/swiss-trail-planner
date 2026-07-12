@@ -1,6 +1,6 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: raster map, hiking overlay, search, geolocation,
+> Documented state: selectable raster backgrounds, hiking overlay, search, geolocation,
 > fullscreen, manual route creation, route statistics, elevation profile, GPX
 > export, and
 > experimental on-demand swissTLM3D routing around user-selected positions.
@@ -32,7 +32,7 @@ The current version is a frontend-only application with no backend.
 
 It can:
 
-- display the swisstopo color raster map;
+- switch between official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
 - display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
 - search official Swiss location indexes;
 - display a selected search result as a vector marker;
@@ -81,16 +81,16 @@ The project evolves through independent functional layers:
 
 1. raster background;
 2. rendered hiking-trail overlay;
-4. basic map controls, geolocation, and location search;
-5. route-creation interface shell;
-6. straight-line route creation with undo and redo;
-7. dynamic cell-based swissTLM3D routing around selected waypoints;
-8. route reversal, deletion, and GPX export;
-9. distance, elevation summary, walking-time estimate, and elevation profile;
-10. four-language interface and localized GeoAdmin search;
-11. waypoint editing and elevation-aware GPX export;
-12. repeatable routing-data preparation;
-14. reliable national hiking routing.
+3. basic map controls, selectable backgrounds, geolocation, and location search;
+4. route-creation interface shell;
+5. straight-line route creation with undo and redo;
+6. dynamic cell-based swissTLM3D routing around selected waypoints;
+7. route reversal, deletion, and GPX export;
+8. distance, elevation summary, walking-time estimate, and elevation profile;
+9. four-language interface and localized GeoAdmin search;
+10. waypoint editing and elevation-aware GPX export;
+11. repeatable routing-data preparation;
+12. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -128,7 +128,7 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── RouteControls, RouteStatistics, and LanguageSelector components
+   │      ├── BaseMapSelector, RouteControls, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
    │      ├── route history, statistics, and temporary routing status
    │      ├── browser Geolocation API
@@ -193,12 +193,20 @@ selected route section.
 
 ## 6. Map services
 
-The national map and hiking overlay use direct XYZ-compatible WMTS URLs in
-`EPSG:3857`.
+The selectable backgrounds and hiking overlay use direct XYZ-compatible WMTS
+URLs in `EPSG:3857`.
 
-The national map uses JPEG tiles. The hiking overlay uses transparent PNG tiles
-and has `minZoom` set to 14. Because OpenLayers treats this boundary as
-exclusive, the overlay normally appears at integer zoom level 13.
+The single OpenLayers base layer swaps between three official JPEG sources:
+
+- `ch.swisstopo.pixelkarte-farbe` for the color national map;
+- `ch.swisstopo.pixelkarte-grau` for the mixed-scale grey national map;
+- `ch.swisstopo.landeskarte-grau-10` for detailed grey rendering at close zooms;
+- `ch.swisstopo.swissimage` for the current SWISSIMAGE aerial orthophoto mosaic.
+
+Changing the source preserves the view and every overlay. The hiking overlay
+uses transparent PNG tiles and has `minZoom` set to 12. Because OpenLayers
+treats this boundary as exclusive, it normally appears at integer zoom level
+13. The overlay remains visible above all three backgrounds.
 
 The hiking overlay is already rendered and therefore cannot expose individual
 trail geometries or attributes.
@@ -423,9 +431,9 @@ also be started manually. It:
 
 1. checks out the repository;
 2. installs the exact dependencies from `package-lock.json` with `npm ci`;
-4. runs the TypeScript check and Vite build through `npm run build`;
-5. uploads `dist/` as a GitHub Pages artifact;
-6. deploys that artifact to the `github-pages` environment.
+3. runs the TypeScript check and Vite build through `npm run build`;
+4. uploads `dist/` as a GitHub Pages artifact;
+5. deploys that artifact to the `github-pages` environment.
 
 The workflow receives only the permissions required to read the repository and
 deploy Pages. Deployment concurrency is limited to one active Pages run, and a
@@ -463,6 +471,7 @@ swiss-trail-planner/
 │   └── ARCHITECTURE.md
 ├── src/
 │   ├── components/
+│   │   ├── BaseMapSelector.tsx
 │   │   ├── LanguageSelector.tsx
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
@@ -507,10 +516,18 @@ swiss-trail-planner/
 
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
-It creates the tile and vector layers, handles map, geolocation, fullscreen,
+It creates the tile and vector layers, replaces the selected base-map source,
+handles map, geolocation, fullscreen,
 route-creation mode, immutable route history, dynamic graph loading, route
 statistics, and temporary routing status. It reacts to selected search results
 and cleans up imperative resources and pending requests when React unmounts.
+
+### `src/components/BaseMapSelector.tsx`
+
+Renders a single floating layer button and a temporary three-choice menu. It is
+a controlled component and does not know about OpenLayers; `App.tsx` replaces
+the base-layer source after a selection. Outside pointer presses and Escape
+close the menu.
 
 ### `src/components/LanguageSelector.tsx`
 
@@ -647,41 +664,42 @@ control placement.
 1. The browser loads the React application and resolves a stored or browser language.
 2. The language provider updates document metadata and exposes localized strings.
 3. `App` creates the OpenLayers map, tile layers, marker layers, and route layer.
-4. The base map begins loading from `wmts.geo.admin.ch`.
-5. The rendered hiking overlay starts loading when zoom moves beyond level 12.
-6. The route button toggles route-creation mode and the crosshair cursor.
-7. Entering route mode attaches a map `singleclick` listener and reveals the
+4. The default color base map begins loading from `wmts.geo.admin.ch`.
+5. Choosing another background replaces only the base-layer source.
+6. The rendered hiking overlay starts loading when zoom moves beyond level 12.
+7. The route button toggles route-creation mode and the crosshair cursor.
+8. Entering route mode attaches a map `singleclick` listener and reveals the
    route toolbar.
-8. With snapping disabled, a click stores a direct section immediately.
-9. The first snapped click derives and loads a local 3 × 3 cell group while
-   the route toggle shows a compact spinner.
-10. Dense identify requests are subdivided when either layer reaches 200 results.
-11. Returned road vertices become graph nodes and edges; hiking geometry marks
+9. With snapping disabled, a click stores a direct section immediately.
+10. The first snapped click derives and loads a local 3 × 3 cell group while
+    the route toggle shows a compact spinner.
+11. Dense identify requests are subdivided when either layer reaches 200 results.
+12. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-12. The first clicked point is snapped to the nearest walkable segment.
-13. Later clicks derive a corridor of cells between waypoints, load only missing
+13. The first clicked point is snapped to the nearest walkable segment.
+14. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-14. A disconnected corridor is retried once with a wider cell radius.
-15. Updating route history rebuilds the route line and waypoint features.
-16. Distance is recalculated locally from the flattened route geometry.
-17. After a short debounce, an abortable profile request refreshes ascent,
+15. A disconnected corridor is retried once with a wider cell radius.
+16. Updating route history rebuilds the route line and waypoint features.
+17. Distance is recalculated locally from the flattened route geometry.
+18. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-18. The profile button reveals or hides the SVG chart without another request.
-19. Undo moves the last complete step to redo; redo restores it without routing.
-20. Reversal rebuilds immutable steps in the opposite order and clears redo.
-21. Deletion clears both applied and redo histories and hides the summary.
-22. GPX export converts the flattened route to WGS 84 and downloads a localized
+19. The profile button reveals or hides the SVG chart without another request.
+20. Undo moves the last complete step to redo; redo restores it without routing.
+21. Reversal rebuilds immutable steps in the opposite order and clears redo.
+22. Deletion clears both applied and redo histories and hides the summary.
+23. GPX export converts the flattened route to WGS 84 and downloads a localized
     GPX track.
-23. Changing language updates interface text, number formatting, document
+24. Changing language updates interface text, number formatting, document
     metadata, and subsequent SearchServer requests without recreating the map.
-24. Leaving route mode removes the click listener and aborts active network work
+25. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-25. The fullscreen button requests fullscreen for the root application element.
-26. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-27. Location search and browser geolocation continue to operate independently.
-28. On unmount, map listeners, timers, requests, references, and the map target
+26. The fullscreen button requests fullscreen for the root application element.
+27. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+28. Location search and browser geolocation continue to operate independently.
+29. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-29. A push to `main` triggers the Pages workflow, which builds and deploys
+30. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling

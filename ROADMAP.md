@@ -41,6 +41,7 @@ The application should remain lightweight and map-centered:
 ### Milestone 2 — Hiking overlay and map navigation
 
 - [x] Display the official swissTLM3D hiking-trail overlay.
+- [x] Switch between color, grey, and SWISSIMAGE aerial backgrounds.
 - [x] Show the overlay only at detailed zoom levels.
 - [x] Add large custom zoom controls.
 - [x] Add one-click browser geolocation.

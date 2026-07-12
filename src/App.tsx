@@ -11,7 +11,9 @@ import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
+import type XYZ from 'ol/source/XYZ.js';
 import { fromLonLat } from 'ol/proj.js';
+import BaseMapSelector from './components/BaseMapSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
 import RouteControls from './components/RouteControls';
@@ -21,14 +23,18 @@ import RouteStatistics, {
 import { downloadRouteGpx } from './export/gpx';
 import { useI18n } from './i18n/I18nContext';
 import {
+  createBaseMapSource,
+  createGrayDetailMapSource,
   createHikingTrailsSource,
-  createSwissTopoRasterSource,
+  DEFAULT_BASE_MAP_STYLE,
   DEFAULT_MAP_CENTER,
+  GRAY_DETAIL_MIN_ZOOM,
   HIKING_TRAILS_MIN_ZOOM,
   LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
   MAP_ZOOM,
   USER_LOCATION_ZOOM,
+  type BaseMapStyle,
 } from './map/config';
 import {
   collectRouteCoordinates,
@@ -100,6 +106,11 @@ export default function App() {
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
+  const baseMapLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const grayDetailLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const activeBaseMapStyleRef = useRef<BaseMapStyle>(
+    DEFAULT_BASE_MAP_STYLE,
+  );
   const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
   const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
   const routeDisplayRef = useRef<RouteDisplay | null>(null);
@@ -124,6 +135,9 @@ export default function App() {
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
+    DEFAULT_BASE_MAP_STYLE,
+  );
   const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
   const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
   const [isRouteOperationPending, setIsRouteOperationPending] =
@@ -490,11 +504,21 @@ export default function App() {
       return;
     }
 
-    const rasterSource = createSwissTopoRasterSource();
+    const rasterSource = createBaseMapSource(DEFAULT_BASE_MAP_STYLE);
+    const grayDetailSource = createGrayDetailMapSource();
     const hikingTrailsSource = createHikingTrailsSource();
     const userLocationMarker = createUserLocationMarker();
     const searchResultMarker = createSearchResultMarker();
     const routeDisplay = createRouteDisplay();
+    const baseMapLayer = new TileLayer<XYZ>({
+      source: rasterSource,
+    });
+    const grayDetailLayer = new TileLayer<XYZ>({
+      source: grayDetailSource,
+      minZoom: GRAY_DETAIL_MIN_ZOOM,
+      visible: false,
+      zIndex: 1,
+    });
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -530,9 +554,8 @@ export default function App() {
     const map = new Map({
       target,
       layers: [
-        new TileLayer({
-          source: rasterSource,
-        }),
+        baseMapLayer,
+        grayDetailLayer,
         new TileLayer({
           source: hikingTrailsSource,
           minZoom: HIKING_TRAILS_MIN_ZOOM,
@@ -582,6 +605,8 @@ export default function App() {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     mapRef.current = map;
+    baseMapLayerRef.current = baseMapLayer;
+    grayDetailLayerRef.current = grayDetailLayer;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
     routeDisplayRef.current = routeDisplay;
@@ -598,11 +623,36 @@ export default function App() {
       rasterSource.un('tileloaderror', handleTileError);
       map.setTarget(undefined);
       mapRef.current = null;
+      baseMapLayerRef.current = null;
+      grayDetailLayerRef.current = null;
       userLocationMarkerRef.current = null;
       searchResultMarkerRef.current = null;
       routeDisplayRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const baseMapLayer = baseMapLayerRef.current;
+    const grayDetailLayer = grayDetailLayerRef.current;
+
+    if (!baseMapLayer || !grayDetailLayer) {
+      return;
+    }
+
+    // The 1:10,000 detail layer only complements the grey background.
+    grayDetailLayer.setVisible(baseMapStyle === 'gray');
+
+    if (activeBaseMapStyleRef.current === baseMapStyle) {
+      return;
+    }
+
+    /*
+     * Replacing only the source keeps the current view, route, markers, and
+     * overlays untouched while the selected WMTS background loads.
+     */
+    baseMapLayer.setSource(createBaseMapSource(baseMapStyle));
+    activeBaseMapStyleRef.current = baseMapStyle;
+  }, [baseMapStyle]);
 
   // OpenLayers features are a projection of immutable history, never the
   // source of truth.
@@ -894,6 +944,11 @@ export default function App() {
           onReverse={reverseRoute}
           onDelete={deleteRoute}
           onExport={exportRoute}
+        />
+
+        <BaseMapSelector
+          value={baseMapStyle}
+          onChange={setBaseMapStyle}
         />
 
         <div className="zoom-controls">

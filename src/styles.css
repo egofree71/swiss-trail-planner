@@ -248,6 +248,85 @@ select {
   max-width: min(29rem, calc(100vw - 5.5rem));
 }
 
+.base-map-selector {
+  position: relative;
+}
+
+.base-map-menu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 0.5rem);
+  display: flex;
+  width: 11.5rem;
+  overflow: hidden;
+  flex-direction: column;
+  padding: 0.3rem;
+  border: 1px solid rgb(32 47 60 / 22%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 97%);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+  backdrop-filter: blur(8px);
+}
+
+.base-map-option {
+  display: grid;
+  width: 100%;
+  min-height: 2.75rem;
+  grid-template-columns: 2.15rem 1fr 1.25rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 7px;
+  color: #17212b;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.base-map-option:hover,
+.base-map-option--selected {
+  background: rgb(23 105 224 / 10%);
+}
+
+.base-map-option:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 40%);
+  outline-offset: -3px;
+}
+
+.base-map-option-preview {
+  width: 2.15rem;
+  height: 1.65rem;
+  border: 1px solid rgb(32 47 60 / 25%);
+  border-radius: 4px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%);
+}
+
+.base-map-option-preview--color {
+  background-image: url('/base-map-previews/color.png');
+}
+
+.base-map-option-preview--gray {
+  background-image: url('/base-map-previews/gray.png');
+}
+
+.base-map-option-preview--aerial {
+  background-image: url('/base-map-previews/aerial.png');
+}
+
+.base-map-option-check {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: #1769e0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
 .zoom-controls {
   display: flex;
   flex-direction: column;
@@ -332,6 +411,7 @@ select {
 
 .map-control-button--location svg,
 .map-control-button--fullscreen svg,
+.map-control-button--base-map svg,
 .map-control-button--route-action svg,
 .map-control-button--route-toggle svg {
   width: 1.55rem;
@@ -348,13 +428,15 @@ select {
   stroke: none;
 }
 
-.map-control-button--route-active {
+.map-control-button--route-active,
+.map-control-button--menu-open {
   border-color: #1769e0;
   color: #ffffff;
   background: #1769e0;
 }
 
-.map-control-button--route-active:hover {
+.map-control-button--route-active:hover,
+.map-control-button--menu-open:hover {
   background: #125ac2;
 }
 

@@ -11,7 +11,8 @@ positions selected by the user.
 ## Current features
 
 - full-screen interactive Swiss national map;
-- official hiking trails displayed above the base map at detailed zoom levels;
+- selectable official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
+- official hiking trails displayed above every background at detailed zoom levels;
 - search for Swiss communes, localities, postal codes, and geographic names;
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
@@ -210,12 +211,18 @@ GitHub Pages must be enabled once in the repository settings by selecting
 
 ## Map sources
 
-Base map:
+Selectable base maps:
 
 - XYZ URL template:
   `https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{x}/{y}.jpeg`
-- Layer:
-  `ch.swisstopo.pixelkarte-farbe`
+- color national map: `ch.swisstopo.pixelkarte-farbe`;
+- grey national map: `ch.swisstopo.pixelkarte-grau`;
+- detailed grey map at close zooms: `ch.swisstopo.landeskarte-grau-10`;
+- current aerial orthophoto mosaic: `ch.swisstopo.swissimage`.
+
+The compact layer button opens a temporary menu and replaces only the base-map
+source. Search markers, the route, the hiking overlay, and the current view stay
+unchanged.
 
 Hiking trails:
 

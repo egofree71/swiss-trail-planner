@@ -82,6 +82,10 @@ const frenchTranslations = {
 
   'map.aria': 'Carte nationale suisse interactive',
   'map.controls': 'Contrôles de la carte',
+  'map.baseMap.select': 'Choisir le fond de carte',
+  'map.baseMap.color': 'Carte couleur',
+  'map.baseMap.gray': 'Carte grise',
+  'map.baseMap.aerial': 'Photo aérienne',
   'map.zoomIn': 'Zoomer',
   'map.zoomOut': 'Dézoomer',
   'map.fullscreenEnter': 'Afficher en plein écran',
@@ -178,6 +182,10 @@ const germanTranslations: Record<TranslationKey, string> = {
 
   'map.aria': 'Interaktive Schweizer Landeskarte',
   'map.controls': 'Kartensteuerung',
+  'map.baseMap.select': 'Kartenhintergrund wählen',
+  'map.baseMap.color': 'Farbkarte',
+  'map.baseMap.gray': 'Graue Karte',
+  'map.baseMap.aerial': 'Luftbild',
   'map.zoomIn': 'Vergrössern',
   'map.zoomOut': 'Verkleinern',
   'map.fullscreenEnter': 'Im Vollbild anzeigen',
@@ -272,6 +280,10 @@ const italianTranslations: Record<TranslationKey, string> = {
 
   'map.aria': 'Carta nazionale svizzera interattiva',
   'map.controls': 'Controlli della carta',
+  'map.baseMap.select': 'Scegli lo sfondo della carta',
+  'map.baseMap.color': 'Carta a colori',
+  'map.baseMap.gray': 'Carta grigia',
+  'map.baseMap.aerial': 'Foto aerea',
   'map.zoomIn': 'Ingrandisci',
   'map.zoomOut': 'Riduci',
   'map.fullscreenEnter': 'Mostra a schermo intero',
@@ -365,6 +377,10 @@ const englishTranslations: Record<TranslationKey, string> = {
 
   'map.aria': 'Interactive Swiss national map',
   'map.controls': 'Map controls',
+  'map.baseMap.select': 'Choose base map',
+  'map.baseMap.color': 'Colour map',
+  'map.baseMap.gray': 'Grey map',
+  'map.baseMap.aerial': 'Aerial imagery',
   'map.zoomIn': 'Zoom in',
   'map.zoomOut': 'Zoom out',
   'map.fullscreenEnter': 'Enter fullscreen',

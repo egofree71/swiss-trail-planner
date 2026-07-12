@@ -1,7 +1,22 @@
 import { fromLonLat, transformExtent } from 'ol/proj.js';
 import XYZ from 'ol/source/XYZ.js';
 
-const SWISSTOPO_BASE_MAP_LAYER_ID = 'ch.swisstopo.pixelkarte-farbe';
+/** Backgrounds available through the official swisstopo WMTS service. */
+export type BaseMapStyle = 'color' | 'gray' | 'aerial';
+
+/** Default background used when the application starts. */
+export const DEFAULT_BASE_MAP_STYLE: BaseMapStyle = 'color';
+
+/** Provider layer identifiers for each selectable background. */
+const SWISSTOPO_BASE_MAP_LAYER_IDS: Record<BaseMapStyle, string> = {
+  color: 'ch.swisstopo.pixelkarte-farbe',
+  gray: 'ch.swisstopo.pixelkarte-grau',
+  aerial: 'ch.swisstopo.swissimage',
+};
+
+const SWISSTOPO_GRAY_DETAIL_LAYER_ID =
+  'ch.swisstopo.landeskarte-grau-10';
+
 const SWISSTOPO_HIKING_TRAILS_LAYER_ID =
   'ch.swisstopo.swisstlm3d-wanderwege';
 
@@ -43,6 +58,13 @@ export const MAP_ZOOM = {
 export const HIKING_TRAILS_MIN_ZOOM = 12;
 
 /*
+ * The 1:10,000 grey map is intended for the four most detailed map levels.
+ * OpenLayers treats minZoom as exclusive, so 16 enables it at integer zoom
+ * levels 17 through 20 while the mixed-scale grey map remains underneath.
+ */
+export const GRAY_DETAIL_MIN_ZOOM = 16;
+
+/*
  * Locating the user should reveal nearby streets and trails without zooming
  * all the way to the most detailed tile level.
  */
@@ -71,10 +93,35 @@ function createSwissTopoXyzSource(
 }
 
 /**
- * Creates the official national-map raster source used as the background.
+ * Creates one official swisstopo background as JPEG WMTS tiles.
+ *
+ * The color and grey options use the national map. The aerial option uses the
+ * current SWISSIMAGE orthophoto mosaic. All overlays remain independent of the
+ * chosen background.
+ *
+ * @param style - Background selected by the user.
+ * @returns A new XYZ source suitable for the single OpenLayers base layer.
  */
-export function createSwissTopoRasterSource(): XYZ {
-  return createSwissTopoXyzSource(SWISSTOPO_BASE_MAP_LAYER_ID, 'jpeg');
+export function createBaseMapSource(style: BaseMapStyle): XYZ {
+  return createSwissTopoXyzSource(
+    SWISSTOPO_BASE_MAP_LAYER_IDS[style],
+    'jpeg',
+  );
+}
+
+
+/**
+ * Creates the detailed 1:10,000 grey map used at close zoom levels.
+ *
+ * The mixed-scale `pixelkarte-grau` background becomes visibly enlarged at
+ * close zooms. Swisstopo's own viewers supplement it with this PNG layer so
+ * labels and linework retain their native cartographic resolution.
+ */
+export function createGrayDetailMapSource(): XYZ {
+  return createSwissTopoXyzSource(
+    SWISSTOPO_GRAY_DETAIL_LAYER_ID,
+    'png',
+  );
 }
 
 /**
