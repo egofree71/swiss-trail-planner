@@ -168,6 +168,8 @@ Tasks:
 - [x] Display route distance, elevation summary, and estimated walking time.
 - [x] Add a compact, collapsible elevation profile.
 - [x] Handle missing or incomplete elevation data without blocking editing.
+- [x] Load one external GPX itinerary as a read-only reference layer.
+- [x] Fit the map to the imported GPX without replacing the editable route.
 
 Acceptance criteria:
 

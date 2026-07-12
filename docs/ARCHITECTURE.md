@@ -49,6 +49,8 @@ It can:
 - reverse the complete route without recalculating sections;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
+- load one external GPX track or route as an independent read-only reference;
+- fit the map to imported GPX geometry without changing editable route history;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal or hide a compact elevation profile from the summary bar;
 - reveal a compact route action strip for snap mode, reversal, deletion, and export;
@@ -87,9 +89,10 @@ The project evolves through independent functional layers:
 7. route reversal, deletion, and GPX export;
 8. distance, elevation summary, walking-time estimate, and elevation profile;
 9. four-language interface and localized GeoAdmin search;
-10. waypoint editing and elevation-aware GPX export;
-11. repeatable routing-data preparation;
-12. reliable national hiking routing.
+10. elevation-aware GPX export and read-only GPX reference loading;
+11. waypoint editing;
+12. repeatable routing-data preparation;
+13. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -97,9 +100,9 @@ Each milestone should remain testable and usable before the next one begins.
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
-controls are separate presentational components. The current route display is
-kept in `src/map/route.ts` rather than adding a broader map-controller
-abstraction before drag and selection interactions require one.
+controls are separate presentational components. Editable and imported route
+displays stay in dedicated map modules instead of adding a broader
+map-controller abstraction before drag and selection interactions require one.
 
 OpenLayers map ownership remains in `App.tsx` because there is still only one
 map view. Network fetching and graph algorithms are isolated under
@@ -127,9 +130,9 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── BaseMapSelector, RouteControls, RouteExportDialog, RouteStatistics, and LanguageSelector
+   │      ├── BaseMapSelector, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
-   │      ├── route history, statistics, and temporary routing status
+   │      ├── route history, imported-GPX state, statistics, and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
@@ -141,7 +144,8 @@ Browser
    ├── OpenLayers Map / View
    │      ├── TileLayer: national map (JPEG)
    │      ├── TileLayer: hiking trails (transparent PNG)
-   │      ├── VectorLayer: route geometry and waypoints
+   │      ├── VectorLayer: imported read-only GPX geometry
+   │      ├── VectorLayer: editable route geometry and waypoints
    │      ├── VectorLayer: selected search result
    │      └── VectorLayer: user location
    │
@@ -183,6 +187,7 @@ selected route section.
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
+| Browser File API and DOMParser | Local GPX selection and validation |
 | Browser Fullscreen API | Distraction-free map display |
 | Typed in-project i18n dictionaries | Four-language UI without an additional runtime dependency |
 | HTML/CSS | Full-screen layout, floating controls, and result panel |
@@ -417,7 +422,25 @@ missing nearby segments, disconnected paths, excessive section length, and
 request failures. Leaving route mode aborts the active operation without
 discarding cells that completed successfully.
 
-## 12. GitHub Pages deployment
+## 12. Read-only GPX import
+
+`RouteImportControl` owns only the hidden file input and compact import button.
+It returns the selected `File` to `App.tsx`; no imported data enters React route
+history.
+
+`src/import/gpx.ts` parses common GPX tracks and routes locally with
+`DOMParser`. Each `trkseg` remains an independent line, and coordinate values
+are validated before they are transformed from WGS 84 to the map projection.
+Waypoint-only GPX documents are rejected because they do not define an
+itinerary. A size limit protects the browser from accidental oversized files.
+
+`src/map/importedRoute.ts` owns a separate purple read-only vector layer below
+the red editable route. Loading a new GPX clears and replaces only that layer.
+After display, `App.tsx` fits the OpenLayers view to the imported extent; normal
+WMTS tile loading then retrieves the map for that location. Route-creation mode,
+undo/redo history, statistics, and export remain independent.
+
+## 13. GitHub Pages deployment
 
 The repository is deployed as a GitHub Pages project site:
 
@@ -451,7 +474,7 @@ newer push cancels an obsolete deployment.
 GitHub Pages serves the application over HTTPS. This is important because
 browser geolocation requires a secure context outside `localhost`.
 
-## 13. Geographic constraint
+## 14. Geographic constraint
 
 The application uses a rectangular extent covering Switzerland with a small
 border margin. It keeps nearby cross-border access visible while preventing
@@ -469,7 +492,7 @@ single very long section from starting an excessive request burst; the user can
 add intermediate waypoints instead. Straight route creation remains available
 without this constraint.
 
-## 14. Repository structure
+## 15. Repository structure
 
 ```text
 swiss-trail-planner/
@@ -486,8 +509,11 @@ swiss-trail-planner/
 │   │   ├── RouteControls.tsx
 │   │   ├── RouteElevationProfile.tsx
 │   │   ├── RouteExportDialog.tsx
+│   │   ├── RouteImportControl.tsx
 │   │   └── RouteStatistics.tsx
 │   ├── export/
+│   │   └── gpx.ts
+│   ├── import/
 │   │   └── gpx.ts
 │   ├── metrics/
 │   │   └── routeMetrics.ts
@@ -496,6 +522,7 @@ swiss-trail-planner/
 │   │   └── translations.ts
 │   ├── map/
 │   │   ├── config.ts
+│   │   ├── importedRoute.ts
 │   │   ├── route.ts
 │   │   ├── searchResult.ts
 │   │   └── userLocation.ts
@@ -520,14 +547,14 @@ swiss-trail-planner/
 └── vite.config.ts
 ```
 
-## 15. File responsibilities
+## 16. File responsibilities
 
 ### `src/App.tsx`
 
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the tile and vector layers, replaces the selected base-map source,
-handles map, geolocation, fullscreen,
+handles map, geolocation, fullscreen, GPX reference loading,
 route-creation mode, immutable route history, dynamic graph loading, route
 statistics, and temporary routing status. It reacts to selected search results
 and cleans up imperative resources and pending requests when React unmounts.
@@ -565,6 +592,12 @@ Renders the route-mode toggle and the contextual route action buttons. It is a
 controlled component: `App.tsx` supplies availability state and callbacks for
 snap, undo, redo, reversal, deletion, and GPX export.
 
+### `src/components/RouteImportControl.tsx`
+
+Renders the compact GPX import button and a hidden native file input. It resets
+the input before opening so the same filename can be selected again, then
+forwards the chosen file without parsing or map knowledge.
+
 ### `src/components/RouteExportDialog.tsx`
 
 Displays a temporary native modal dialog before GPX generation. It proposes a
@@ -600,6 +633,18 @@ module keeps routed intermediate vertices to preserve sharp bends, merges in
 the regularly spaced profile distances, and interpolates the smoothed terrain
 altitude into `<ele>` values. If no valid profile is available, it falls back to
 the previous geometry-only export.
+
+### `src/import/gpx.ts`
+
+Validates file size policy, parses GPX XML, extracts named tracks and routes,
+keeps disconnected track segments separate, rejects invalid coordinates, and
+returns WGS 84 geometry without touching OpenLayers state.
+
+### `src/map/importedRoute.ts`
+
+Creates and updates the independent read-only GPX vector layer. Its purple
+casing style distinguishes imported references from the red editable route and
+blue hydrography.
 
 ### `src/map/route.ts`
 
@@ -679,54 +724,56 @@ control placement.
 - `ROADMAP.md` tracks milestones, priorities, and open technical decisions.
 - `LICENSE` contains the MIT license.
 
-## 16. Runtime flow
+## 17. Runtime flow
 
 1. The browser loads the React application and resolves a stored or browser language.
 2. The language provider updates document metadata and exposes localized strings.
-3. `App` creates the OpenLayers map, tile layers, marker layers, and route layer.
+3. `App` creates the OpenLayers map, tile layers, marker layers, editable route layer, and imported-route layer.
 4. The default color base map begins loading from `wmts.geo.admin.ch`.
 5. Choosing another background replaces only the base-layer source.
 6. The rendered hiking overlay starts loading when zoom moves beyond level 12.
-7. The route button toggles route-creation mode and the crosshair cursor.
-8. Entering route mode attaches a map `singleclick` listener and reveals the
+7. Selecting a GPX parses it locally, replaces the read-only reference layer,
+   and fits the map to the imported geometry.
+8. The route button toggles route-creation mode and the crosshair cursor.
+9. Entering route mode attaches a map `singleclick` listener and reveals the
    route toolbar.
-9. With snapping disabled, a click stores a direct section immediately.
-10. The first snapped click derives and loads a local 3 × 3 cell group while
+10. With snapping disabled, a click stores a direct section immediately.
+11. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
-11. Dense identify requests are subdivided when either layer reaches 200 results.
-12. Returned road vertices become graph nodes and edges; hiking geometry marks
+12. Dense identify requests are subdivided when either layer reaches 200 results.
+13. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-13. The first clicked point is snapped to the nearest walkable segment.
-14. Later clicks derive a corridor of cells between waypoints, load only missing
+14. The first clicked point is snapped to the nearest walkable segment.
+15. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-15. A disconnected or empty corridor is retried once with a wider cell radius.
-16. If no routable path remains, the current click becomes a free point or a
+16. A disconnected or empty corridor is retried once with a wider cell radius.
+17. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-17. Updating route history rebuilds the route line and waypoint features.
-18. Distance is recalculated locally from the flattened route geometry.
-19. After a short debounce, an abortable profile request refreshes ascent,
+18. Updating route history rebuilds the route line and waypoint features.
+19. Distance is recalculated locally from the flattened route geometry.
+20. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-20. The profile button reveals or hides the SVG chart without another request.
-21. Undo moves the last complete step to redo; redo restores it without routing.
-22. Reversal rebuilds immutable steps in the opposite order and clears redo.
-23. Deletion clears both applied and redo histories and hides the summary.
-24. GPX export opens a modal naming form before any XML is generated.
-25. Confirming the form converts the flattened route to WGS 84, merges exact
+21. The profile button reveals or hides the SVG chart without another request.
+22. Undo moves the last complete step to redo; redo restores it without routing.
+23. Reversal rebuilds immutable steps in the opposite order and clears redo.
+24. Deletion clears both applied and redo histories and hides the summary.
+25. GPX export opens a modal naming form before any XML is generated.
+26. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-26. Changing language updates interface text, number formatting, document
+27. Changing language updates interface text, number formatting, document
     metadata, and subsequent SearchServer requests without recreating the map.
-27. Leaving route mode removes the click listener and aborts active network work
+28. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-28. The fullscreen button requests fullscreen for the root application element.
-29. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-30. Location search and browser geolocation continue to operate independently.
-31. On unmount, map listeners, timers, requests, references, and the map target
+29. The fullscreen button requests fullscreen for the root application element.
+30. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+31. Location search and browser geolocation continue to operate independently.
+32. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-32. A push to `main` triggers the Pages workflow, which builds and deploys
+33. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
-## 17. Error handling
+## 18. Error handling
 
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
@@ -741,9 +788,8 @@ retried by clicking the button again.
 
 Missing nearby segments, empty coverage, and disconnected graphs are normal
 routing outcomes rather than blocking errors. After one wider-corridor retry,
-the editor stores a free first waypoint or a straight incoming section and shows
-a temporary informational message in the selected interface language. Snap mode
-remains enabled for the next click.
+the editor silently stores a free first waypoint or a straight incoming
+section. Snap mode remains enabled for the next click.
 
 Overly large single sections, GeoAdmin transport or parsing failures, and
 result-limit overflow remain errors; they do not modify the existing route. An
@@ -754,7 +800,11 @@ Elevation-profile failures are non-blocking. The distance remains visible,
 altitude-dependent values become dashes, and route editing continues normally.
 Superseded profile requests are aborted after route mutations.
 
-## 18. Code conventions
+Invalid, empty, or oversized GPX files leave both the existing imported layer
+and editable route untouched and produce a translated temporary error. Imported
+GPX handling performs no network request.
+
+## 19. Code conventions
 
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
@@ -786,7 +836,7 @@ Superseded profile requests are aborted after route mutations.
 - `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
-## 19. Planned evolution
+## 20. Planned evolution
 
 ### Phase 2B — Validate dynamic swissTLM3D routing
 
@@ -831,7 +881,7 @@ The dynamic browser prototype demonstrates that a custom graph and A* can be
 used with swissTLM3D. The final preprocessing pipeline, national graph delivery,
 and possible backend have not been selected yet.
 
-## 20. When to evolve the architecture
+## 21. When to evolve the architecture
 
 Create a new abstraction when several components reuse the same map logic,
 OpenLayers interactions become numerous, shared state outgrows `App`, additional

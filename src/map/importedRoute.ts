@@ -1,0 +1,72 @@
+/**
+ * Business context: renders one externally loaded GPX itinerary as a read-only
+ * reference layer. It stays independent from the red editable route so users
+ * can compare or trace a new itinerary without mutating the imported geometry.
+ */
+import type { Coordinate } from 'ol/coordinate.js';
+import Feature from 'ol/Feature.js';
+import LineString from 'ol/geom/LineString.js';
+import VectorLayer from 'ol/layer/Vector.js';
+import VectorSource from 'ol/source/Vector.js';
+import { Stroke, Style } from 'ol/style.js';
+
+/** OpenLayers resources owned by the root application for the loaded GPX. */
+export interface ImportedRouteDisplay {
+  /** Read-only vector layer inserted below the editable route. */
+  layer: VectorLayer<VectorSource>;
+  /** Mutable source replaced whenever another GPX is loaded. */
+  source: VectorSource;
+}
+
+/** Purple distinguishes imported references from red editable routes and blue hydrography. */
+const IMPORTED_ROUTE_COLOR = '#7a3db8';
+
+/** White casing keeps the reference route visible over aerial and raster backgrounds. */
+const IMPORTED_ROUTE_STYLE = [
+  new Style({
+    stroke: new Stroke({
+      color: 'rgba(255, 255, 255, 0.92)',
+      width: 9,
+    }),
+  }),
+  new Style({
+    stroke: new Stroke({
+      color: IMPORTED_ROUTE_COLOR,
+      width: 5,
+    }),
+  }),
+];
+
+/** Creates the persistent layer used for one imported read-only itinerary. */
+export function createImportedRouteDisplay(): ImportedRouteDisplay {
+  const source = new VectorSource();
+  const layer = new VectorLayer({
+    source,
+    zIndex: 17,
+  });
+
+  return { layer, source };
+}
+
+/**
+ * Replaces the displayed imported route without affecting editable route state.
+ * @param display - OpenLayers resources to update in place.
+ * @param segments - Independent EPSG:3857 line segments.
+ */
+export function updateImportedRouteDisplay(
+  display: ImportedRouteDisplay,
+  segments: Coordinate[][],
+): void {
+  const features = segments
+    .filter((segment) => segment.length >= 2)
+    .map((segment) => {
+      const feature = new Feature({
+        geometry: new LineString(segment),
+      });
+      feature.setStyle(IMPORTED_ROUTE_STYLE);
+      return feature;
+    });
+
+  display.source.clear();
+  display.source.addFeatures(features);
+}

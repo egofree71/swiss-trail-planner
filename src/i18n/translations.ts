@@ -55,6 +55,10 @@ const frenchTranslations = {
   'route.reverse': 'Inverser l’itinéraire',
   'route.delete': 'Supprimer l’itinéraire',
   'route.export': 'Exporter l’itinéraire',
+  'route.import': 'Charger un itinéraire GPX',
+  'route.importError':
+    'Ce fichier GPX ne contient pas d’itinéraire valide.',
+  'route.importTooLarge': 'Ce fichier GPX est trop volumineux.',
   'route.exportError':
     'L’itinéraire doit contenir au moins deux points pour être exporté.',
   'route.noNearbyPath':
@@ -158,6 +162,10 @@ const germanTranslations: Record<TranslationKey, string> = {
   'route.reverse': 'Route umkehren',
   'route.delete': 'Route löschen',
   'route.export': 'Route exportieren',
+  'route.import': 'GPX-Route laden',
+  'route.importError':
+    'Diese GPX-Datei enthält keine gültige Route.',
+  'route.importTooLarge': 'Diese GPX-Datei ist zu gross.',
   'route.exportError':
     'Die Route muss mindestens zwei Punkte enthalten, damit sie exportiert werden kann.',
   'route.noNearbyPath':
@@ -260,6 +268,10 @@ const italianTranslations: Record<TranslationKey, string> = {
   'route.reverse': 'Inverti l’itinerario',
   'route.delete': 'Elimina l’itinerario',
   'route.export': 'Esporta l’itinerario',
+  'route.import': 'Carica un itinerario GPX',
+  'route.importError':
+    'Questo file GPX non contiene un itinerario valido.',
+  'route.importTooLarge': 'Questo file GPX è troppo grande.',
   'route.exportError':
     'L’itinerario deve contenere almeno due punti per poter essere esportato.',
   'route.noNearbyPath':
@@ -362,6 +374,10 @@ const englishTranslations: Record<TranslationKey, string> = {
   'route.reverse': 'Reverse the route',
   'route.delete': 'Delete the route',
   'route.export': 'Export the route',
+  'route.import': 'Load a GPX route',
+  'route.importError':
+    'This GPX file does not contain a valid route.',
+  'route.importTooLarge': 'This GPX file is too large.',
   'route.exportError':
     'The route must contain at least two points before it can be exported.',
   'route.noNearbyPath':

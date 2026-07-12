@@ -27,6 +27,7 @@ positions selected by the user.
 - straight-line segments when snapping is disabled or no routable swissTLM3D path is available;
 - functional undo and redo that restore the exact generated segment geometry;
 - route reversal, complete route deletion, and named elevation-aware GPX track export;
+- read-only GPX route loading that frames the map without replacing the editable route;
 - compact route summary with distance, ascent, descent, estimated walking time,
   and a collapsible elevation profile;
 - navigation restricted to Switzerland and a small border margin;
@@ -173,6 +174,20 @@ values. This preserves sharp route bends while giving compatible applications
 enough altitude samples to reproduce a profile close to the one shown here. If
 elevation lookup failed or is still pending, geometry-only GPX export remains
 available.
+
+## Read-only GPX route loading
+
+The import button below the route-creation control opens a local `.gpx` file.
+Tracks (`trk/trkseg/trkpt`) and routes (`rte/rtept`) are displayed as a separate
+purple reference layer, and the map automatically frames the loaded geometry.
+Disconnected GPX track segments remain disconnected instead of being joined by
+an invented line.
+
+The imported itinerary is read-only: it does not enter route history, does not
+change route statistics, and cannot be exported as the editable route. Route
+creation remains fully available at the same time, so a new red route can be
+planned over the loaded reference. Loading another GPX replaces only the
+previous imported reference.
 
 Once the route contains a complete section, a compact bar appears at the bottom
 of the map. Distance is calculated immediately from the displayed geometry. The

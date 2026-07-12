@@ -16,12 +16,18 @@ import { fromLonLat } from 'ol/proj.js';
 import BaseMapSelector from './components/BaseMapSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
+import RouteImportControl from './components/RouteImportControl';
 import RouteControls from './components/RouteControls';
 import RouteExportDialog from './components/RouteExportDialog';
 import RouteStatistics, {
   type RouteElevationStatus,
 } from './components/RouteStatistics';
 import { downloadRouteGpx } from './export/gpx';
+import {
+  GpxImportError,
+  MAX_GPX_FILE_SIZE_BYTES,
+  parseGpxRoute,
+} from './import/gpx';
 import { useI18n } from './i18n/I18nContext';
 import {
   createBaseMapSource,
@@ -37,6 +43,11 @@ import {
   USER_LOCATION_ZOOM,
   type BaseMapStyle,
 } from './map/config';
+import {
+  createImportedRouteDisplay,
+  type ImportedRouteDisplay,
+  updateImportedRouteDisplay,
+} from './map/importedRoute';
 import {
   collectRouteCoordinates,
   createRouteDisplay,
@@ -147,6 +158,7 @@ export default function App() {
   const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
   const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
   const routeDisplayRef = useRef<RouteDisplay | null>(null);
+  const importedRouteDisplayRef = useRef<ImportedRouteDisplay | null>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
   const routeMessageTimerRef = useRef<number | null>(null);
   const routeHistoryRef = useRef<RouteHistory>({
@@ -158,6 +170,7 @@ export default function App() {
   const routeOperationPendingRef = useRef(false);
   const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
   const routingAbortControllerRef = useRef<AbortController | null>(null);
+  const routeImportSessionRef = useRef(0);
 
   if (!routingLoaderRef.current) {
     routingLoaderRef.current = new DynamicRoutingNetworkLoader();
@@ -353,6 +366,65 @@ export default function App() {
         t('route.exportError'),
         'error',
       );
+    }
+  };
+
+  /**
+   * Loads one GPX as an independent read-only layer and frames its full extent.
+   * The editable route and its undo/redo history remain untouched.
+   */
+  const importRouteFile = async (file: File) => {
+    const map = mapRef.current;
+    const display = importedRouteDisplayRef.current;
+
+    if (!map || !display) {
+      return;
+    }
+
+    const importSession = ++routeImportSessionRef.current;
+
+    if (file.size > MAX_GPX_FILE_SIZE_BYTES) {
+      showTemporaryRouteMessage(t('route.importTooLarge'), 'error');
+      return;
+    }
+
+    try {
+      const importedRoute = parseGpxRoute(await file.text(), file.name);
+
+      // A slower previous file read must not replace a newer user selection.
+      if (importSession !== routeImportSessionRef.current) {
+        return;
+      }
+
+      const projectedSegments = importedRoute.segments.map((segment) =>
+        segment.map((coordinate) => fromLonLat(coordinate)),
+      );
+
+      updateImportedRouteDisplay(display, projectedSegments);
+      clearRouteMessageTimer();
+      setRouteMessage('');
+
+      /*
+       * Fitting the loaded geometry triggers the normal WMTS tile requests for
+       * that location. A bottom margin leaves room for editable-route statistics
+       * when a separate route is already being created.
+       */
+      const importedExtent = display.source.getExtent();
+
+      if (importedExtent) {
+        map.getView().fit(importedExtent, {
+          duration: 600,
+          maxZoom: 16,
+          padding: [80, 80, routeCoordinates.length >= 2 ? 180 : 80, 80],
+        });
+      }
+    } catch (error) {
+      if (importSession !== routeImportSessionRef.current) {
+        return;
+      }
+
+      console.error('Unable to import the GPX route.', error);
+      showTemporaryRouteMessage(t('route.importError'), 'error');
     }
   };
 
@@ -567,6 +639,7 @@ export default function App() {
     const hikingTrailsSource = createHikingTrailsSource();
     const userLocationMarker = createUserLocationMarker();
     const searchResultMarker = createSearchResultMarker();
+    const importedRouteDisplay = createImportedRouteDisplay();
     const routeDisplay = createRouteDisplay();
     const baseMapLayer = new TileLayer<XYZ>({
       source: rasterSource,
@@ -619,6 +692,7 @@ export default function App() {
           minZoom: HIKING_TRAILS_MIN_ZOOM,
           zIndex: 10,
         }),
+        importedRouteDisplay.layer,
         routeDisplay.layer,
         searchResultMarker.layer,
         userLocationMarker.layer,
@@ -667,12 +741,14 @@ export default function App() {
     grayDetailLayerRef.current = grayDetailLayer;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
+    importedRouteDisplayRef.current = importedRouteDisplay;
     routeDisplayRef.current = routeDisplay;
 
     return () => {
       clearLocationMessageTimer();
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
+      routeImportSessionRef.current += 1;
       document.removeEventListener(
         'fullscreenchange',
         handleFullscreenChange,
@@ -685,6 +761,7 @@ export default function App() {
       grayDetailLayerRef.current = null;
       userLocationMarkerRef.current = null;
       searchResultMarkerRef.current = null;
+      importedRouteDisplayRef.current = null;
       routeDisplayRef.current = null;
     };
   }, []);
@@ -999,6 +1076,8 @@ export default function App() {
           onDelete={deleteRoute}
           onExport={requestRouteExport}
         />
+
+        <RouteImportControl onSelectFile={importRouteFile} />
 
         <BaseMapSelector
           value={baseMapStyle}
