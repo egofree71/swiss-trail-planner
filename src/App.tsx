@@ -549,6 +549,12 @@ export default function App() {
         maxZoom: MAP_ZOOM.maximum,
         extent: MAP_EXTENT,
         constrainOnlyCenter: false,
+        /*
+         * The map extent is narrower than a typical desktop viewport. Allowing
+         * one viewport dimension to exceed it lets OpenLayers show the whole
+         * country without relaxing the geographic navigation boundary.
+         */
+        showFullExtent: true,
         smoothExtentConstraint: false,
       }),
       controls: defaultControls({

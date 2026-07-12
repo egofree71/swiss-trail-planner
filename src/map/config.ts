@@ -25,8 +25,12 @@ export const MAP_EXTENT = transformExtent(
   'EPSG:3857',
 );
 
+/*
+ * The fractional initial zoom keeps the whole country visible on typical
+ * desktop viewports, including high-density displays with fewer CSS pixels.
+ */
 export const MAP_ZOOM = {
-  initial: 8,
+  initial: 6,
   minimum: 5,
   maximum: 20,
 } as const;

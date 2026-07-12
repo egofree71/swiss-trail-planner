@@ -440,8 +440,11 @@ The application uses a rectangular extent covering Switzerland with a small
 border margin. It keeps nearby cross-border access visible while preventing
 navigation to distant empty areas.
 
-The constraint applies to the full viewport, not only its center, and the
-smooth boundary effect is disabled.
+The constraint still applies to the full viewport rather than only its center.
+OpenLayers `showFullExtent` is enabled because the Swiss extent is narrower than
+a typical desktop viewport: the view may exceed the extent in one dimension so
+the complete country remains visible, but it cannot exceed it in both
+dimensions. The smooth boundary effect is disabled.
 
 Routing no longer has a fixed geographic extent. Each snapped operation derives
 a bounded cell set from the selected positions. A maximum cell count prevents a
