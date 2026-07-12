@@ -52,6 +52,10 @@ The application should remain lightweight and map-centered:
 - [x] Display the selected search result as a map marker.
 - [x] Support French, German, Italian, and English interface languages.
 - [x] Detect the browser language and persist an explicit language choice.
+- [x] Display the official hiking-trail closures and detours WMS overlay.
+- [x] Add a unified Layers menu for base maps and optional information overlays.
+- [x] Show closures by default and remember the user's visibility choice.
+- [x] Add localized click information for visible closures.
 
 ## Current focus
 

@@ -13,6 +13,7 @@ positions selected by the user.
 - full-screen interactive Swiss national map;
 - selectable official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
 - official hiking trails displayed above every background at detailed zoom levels;
+- official hiking-trail closures and detours shown by default, with click details;
 - search for Swiss communes, localities, postal codes, and geographic names;
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
@@ -90,6 +91,28 @@ Location search requests use the selected language when calling GeoAdmin, and
 number formatting follows the corresponding Swiss locale. All user-facing
 labels, messages, accessibility text, route statistics, and elevation-profile
 text come from typed translation dictionaries under `src/i18n/`.
+
+## Hiking-trail closures and detours
+
+The unified Layers menu controls the official ASTRA closures and detours layer:
+
+```text
+ch.astra.wanderland-sperrungen_umleitungen
+```
+
+The transparent WMS overlay keeps the official server-side symbology for closed
+sections, end markers, and proposed detours. It is enabled by default because
+closures are important planning information, but it is rendered only at the
+same detailed zoom levels as the hiking-trail overlay to avoid cluttering the
+national overview. The Layers menu can hide it, and the browser remembers that
+choice locally.
+
+Clicking a visible feature while route-creation mode is inactive identifies it
+through GeoAdmin and opens the official localized metadata in a sanitized
+project-owned panel. Turning the layer off closes the panel and stops further
+identify requests. The overlay is intentionally informational only: route
+calculation does not automatically avoid a closed section, matching the
+planning workflow of other hiking applications.
 
 ## Location search
 
@@ -245,9 +268,9 @@ Selectable base maps:
 - detailed grey map at close zooms: `ch.swisstopo.landeskarte-grau-10`;
 - current aerial orthophoto mosaic: `ch.swisstopo.swissimage`.
 
-The compact layer button opens a temporary menu and replaces only the base-map
-source. Search markers, the route, the hiking overlay, and the current view stay
-unchanged.
+The compact Layers button opens one temporary menu with mutually exclusive base
+maps and independently switchable information overlays. Changing the background
+preserves search markers, routes, overlays, and the current view.
 
 Hiking trails:
 
@@ -255,6 +278,12 @@ Hiking trails:
   `https://wmts.geo.admin.ch/1.0.0/{layer}/default/current/3857/{z}/{x}/{y}.png`
 - Layer:
   `ch.swisstopo.swisstlm3d-wanderwege`
+
+Closures and detours:
+
+- WMS endpoint: `https://wms.geo.admin.ch/`;
+- Layer: `ch.astra.wanderland-sperrungen_umleitungen`;
+- feature details: GeoAdmin `identify` and `htmlPopup` endpoints.
 
 Shared settings:
 
@@ -270,8 +299,9 @@ as an inspectable development layer.
 
 ## Next milestone
 
-Validate dynamic routing, elevation summaries, and elevation-aware GPX imports
-in several contrasting regions, then continue waypoint-editing work.
+Validate dynamic routing and the closure overlay in several contrasting
+regions, then continue waypoint-editing work and add public-transport stops as
+another optional information layer.
 
 ## License
 

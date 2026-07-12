@@ -1,27 +1,37 @@
 /**
  * Business context: coordinates the map-centred application shell and owns the
  * imperative OpenLayers lifecycle. It connects search, geolocation, fullscreen,
- * route history, dynamic swissTLM3D loading, and route-editing controls while
+ * route history, official closure inspection, dynamic swissTLM3D loading,
+ * and route-editing controls while
  * keeping provider/network details in dedicated modules.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
+import type TileWMS from 'ol/source/TileWMS.js';
 import type XYZ from 'ol/source/XYZ.js';
 import { fromLonLat } from 'ol/proj.js';
-import BaseMapSelector from './components/BaseMapSelector';
+import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
 import RouteImportControl from './components/RouteImportControl';
 import RouteControls from './components/RouteControls';
 import RouteExportDialog from './components/RouteExportDialog';
+import TrailClosurePopup, {
+  type TrailClosurePopupStatus,
+} from './components/TrailClosurePopup';
 import RouteStatistics, {
   type RouteElevationStatus,
 } from './components/RouteStatistics';
+import {
+  fetchTrailClosurePopup,
+  identifyTrailClosure,
+  createTrailClosuresSource,
+} from './closures/trailClosures';
 import { downloadRouteGpx } from './export/gpx';
 import {
   GpxImportError,
@@ -101,6 +111,25 @@ const ROUTE_MESSAGE_DURATION_MS = 7_000;
 const ROUTE_CONNECTOR_DISTANCE_SQUARED = 0.01;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
+/** Browser preference key for the safety-information overlay. */
+const TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY =
+  'swiss-trail-planner.trail-closures-visible';
+
+/**
+ * Restores the explicit closure-layer preference. Safety information is shown
+ * by default when no choice has been stored yet.
+ */
+function getInitialTrailClosuresVisibility(): boolean {
+  try {
+    return (
+      window.localStorage.getItem(
+        TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY,
+      ) !== 'false'
+    );
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Builds an unambiguous local timestamp for the proposed GPX name. The ISO-like
@@ -146,12 +175,13 @@ function createStraightRouteStep(
 
 /** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const baseMapLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const grayDetailLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const trailClosuresLayerRef = useRef<TileLayer<TileWMS> | null>(null);
   const activeBaseMapStyleRef = useRef<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
   );
@@ -171,6 +201,7 @@ export default function App() {
   const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
   const routingAbortControllerRef = useRef<AbortController | null>(null);
   const routeImportSessionRef = useRef(0);
+  const trailClosureRequestRef = useRef<AbortController | null>(null);
 
   if (!routingLoaderRef.current) {
     routingLoaderRef.current = new DynamicRoutingNetworkLoader();
@@ -187,6 +218,10 @@ export default function App() {
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
   );
+  const [areTrailClosuresVisible, setAreTrailClosuresVisible] =
+    useState(getInitialTrailClosuresVisibility);
+  const [trailClosurePopup, setTrailClosurePopup] =
+    useState<TrailClosurePopupStatus | null>(null);
   const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
   const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
   const [isRouteOperationPending, setIsRouteOperationPending] =
@@ -216,6 +251,13 @@ export default function App() {
         routeElevation.descentMeters,
       )
     : null;
+
+  /** Closes closure metadata and cancels a superseded identify/popup request. */
+  const closeTrailClosurePopup = useCallback(() => {
+    trailClosureRequestRef.current?.abort();
+    trailClosureRequestRef.current = null;
+    setTrailClosurePopup(null);
+  }, []);
 
   /**
    * Keeps the synchronous ref and React render state on the same immutable
@@ -637,6 +679,7 @@ export default function App() {
     const rasterSource = createBaseMapSource(DEFAULT_BASE_MAP_STYLE);
     const grayDetailSource = createGrayDetailMapSource();
     const hikingTrailsSource = createHikingTrailsSource();
+    const trailClosuresSource = createTrailClosuresSource();
     const userLocationMarker = createUserLocationMarker();
     const searchResultMarker = createSearchResultMarker();
     const importedRouteDisplay = createImportedRouteDisplay();
@@ -649,6 +692,12 @@ export default function App() {
       minZoom: GRAY_DETAIL_MIN_ZOOM,
       visible: false,
       zIndex: 1,
+    });
+    const trailClosuresLayer = new TileLayer<TileWMS>({
+      source: trailClosuresSource,
+      minZoom: HIKING_TRAILS_MIN_ZOOM,
+      visible: areTrailClosuresVisible,
+      zIndex: 14,
     });
 
     /*
@@ -692,6 +741,7 @@ export default function App() {
           minZoom: HIKING_TRAILS_MIN_ZOOM,
           zIndex: 10,
         }),
+        trailClosuresLayer,
         importedRouteDisplay.layer,
         routeDisplay.layer,
         searchResultMarker.layer,
@@ -739,6 +789,7 @@ export default function App() {
     mapRef.current = map;
     baseMapLayerRef.current = baseMapLayer;
     grayDetailLayerRef.current = grayDetailLayer;
+    trailClosuresLayerRef.current = trailClosuresLayer;
     userLocationMarkerRef.current = userLocationMarker;
     searchResultMarkerRef.current = searchResultMarker;
     importedRouteDisplayRef.current = importedRouteDisplay;
@@ -749,6 +800,7 @@ export default function App() {
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
       routeImportSessionRef.current += 1;
+      trailClosureRequestRef.current?.abort();
       document.removeEventListener(
         'fullscreenchange',
         handleFullscreenChange,
@@ -759,6 +811,7 @@ export default function App() {
       mapRef.current = null;
       baseMapLayerRef.current = null;
       grayDetailLayerRef.current = null;
+      trailClosuresLayerRef.current = null;
       userLocationMarkerRef.current = null;
       searchResultMarkerRef.current = null;
       importedRouteDisplayRef.current = null;
@@ -788,6 +841,132 @@ export default function App() {
     baseMapLayer.setSource(createBaseMapSource(baseMapStyle));
     activeBaseMapStyleRef.current = baseMapStyle;
   }, [baseMapStyle]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY,
+        String(areTrailClosuresVisible),
+      );
+    } catch {
+      // Layer visibility remains functional when browser storage is unavailable.
+    }
+  }, [areTrailClosuresVisible]);
+
+  useEffect(() => {
+    const trailClosuresLayer = trailClosuresLayerRef.current;
+
+    if (!trailClosuresLayer) {
+      return;
+    }
+
+    trailClosuresLayer.setVisible(areTrailClosuresVisible);
+
+    if (!areTrailClosuresVisible) {
+      closeTrailClosurePopup();
+    }
+  }, [areTrailClosuresVisible, closeTrailClosurePopup]);
+
+  // Popup templates are localized server-side, so stale-language content is
+  // dismissed instead of remaining visible after an interface language change.
+  useEffect(() => {
+    closeTrailClosurePopup();
+  }, [closeTrailClosurePopup, language]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (!map || !areTrailClosuresVisible || isRouteCreationActive) {
+      if (isRouteCreationActive) {
+        closeTrailClosurePopup();
+      }
+      return;
+    }
+
+    const handleTrailClosureClick = (event: { coordinate: Coordinate }) => {
+      const imageSize = map.getSize();
+      const zoom = map.getView().getZoom();
+
+      // The official WMS is too dense at national and regional scales. Match
+      // the hiking-trail overlay threshold so closure details are inspected
+      // only while their geometries are actually visible on the map.
+      if (
+        !imageSize ||
+        zoom === undefined ||
+        zoom <= HIKING_TRAILS_MIN_ZOOM
+      ) {
+        return;
+      }
+
+      trailClosureRequestRef.current?.abort();
+      setTrailClosurePopup(null);
+
+      const abortController = new AbortController();
+      trailClosureRequestRef.current = abortController;
+      const context = {
+        coordinate: [...event.coordinate] as Coordinate,
+        mapExtent: map.getView().calculateExtent(imageSize),
+        imageSize: [imageSize[0], imageSize[1]] as [number, number],
+        language,
+      };
+
+      void identifyTrailClosure(context, abortController.signal)
+        .then(async (closure) => {
+          if (!closure || abortController.signal.aborted) {
+            return;
+          }
+
+          setTrailClosurePopup({ state: 'loading', html: null });
+          const html = await fetchTrailClosurePopup(
+            closure,
+            abortController.signal,
+          );
+
+          if (!abortController.signal.aborted) {
+            setTrailClosurePopup({ state: 'ready', html });
+          }
+        })
+        .catch((error: unknown) => {
+          if (
+            abortController.signal.aborted ||
+            (error instanceof DOMException && error.name === 'AbortError')
+          ) {
+            return;
+          }
+
+          console.error('Unable to load hiking closure details.', error);
+          setTrailClosurePopup({ state: 'error', html: null });
+        })
+        .finally(() => {
+          if (trailClosureRequestRef.current === abortController) {
+            trailClosureRequestRef.current = null;
+          }
+        });
+    };
+
+    const handleClosureZoomChange = () => {
+      const zoom = map.getView().getZoom();
+
+      if (zoom === undefined || zoom <= HIKING_TRAILS_MIN_ZOOM) {
+        closeTrailClosurePopup();
+      }
+    };
+
+    map.on('singleclick', handleTrailClosureClick);
+    map.getView().on('change:resolution', handleClosureZoomChange);
+
+    return () => {
+      map.un('singleclick', handleTrailClosureClick);
+      map.getView().un('change:resolution', handleClosureZoomChange);
+      trailClosureRequestRef.current?.abort();
+      trailClosureRequestRef.current = null;
+    };
+  }, [
+    areTrailClosuresVisible,
+    closeTrailClosurePopup,
+    isRouteCreationActive,
+    language,
+  ]);
 
   // OpenLayers features are a projection of immutable history, never the
   // source of truth.
@@ -1079,9 +1258,11 @@ export default function App() {
 
         <RouteImportControl onSelectFile={importRouteFile} />
 
-        <BaseMapSelector
-          value={baseMapStyle}
-          onChange={setBaseMapStyle}
+        <MapLayersSelector
+          baseMapStyle={baseMapStyle}
+          onBaseMapChange={setBaseMapStyle}
+          areTrailClosuresVisible={areTrailClosuresVisible}
+          onTrailClosuresChange={setAreTrailClosuresVisible}
         />
 
         <div className="zoom-controls">
@@ -1180,6 +1361,13 @@ export default function App() {
           </div>
         )}
       </nav>
+
+      {trailClosurePopup && (
+        <TrailClosurePopup
+          status={trailClosurePopup}
+          onClose={closeTrailClosurePopup}
+        />
+      )}
 
       {routeCoordinates.length >= 2 && (
         <RouteStatistics

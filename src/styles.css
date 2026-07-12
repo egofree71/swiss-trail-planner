@@ -261,19 +261,17 @@ select {
 }
 
 .route-import-control,
-.base-map-selector {
+.map-layers-selector {
   position: relative;
 }
 
-.base-map-menu {
+.map-layers-menu {
   position: absolute;
   top: 0;
   right: calc(100% + 0.5rem);
-  display: flex;
-  width: 11.5rem;
+  width: 14.5rem;
   overflow: hidden;
-  flex-direction: column;
-  padding: 0.3rem;
+  padding: 0.4rem;
   border: 1px solid rgb(32 47 60 / 22%);
   border-radius: 10px;
   background: rgb(255 255 255 / 97%);
@@ -281,11 +279,32 @@ select {
   backdrop-filter: blur(8px);
 }
 
-.base-map-option {
+.map-layers-section {
+  margin: 0;
+  padding: 0;
+}
+
+.map-layers-section--overlays {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgb(32 47 60 / 12%);
+}
+
+.map-layers-section-title {
+  margin: 0;
+  padding: 0.35rem 0.45rem 0.25rem;
+  color: #66727d;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.map-layer-option {
   display: grid;
   width: 100%;
   min-height: 2.75rem;
-  grid-template-columns: 2.15rem 1fr 1.25rem;
+  grid-template-columns: 2.15rem minmax(0, 1fr) 1.75rem;
   align-items: center;
   gap: 0.65rem;
   padding: 0.35rem 0.45rem;
@@ -297,12 +316,18 @@ select {
   text-align: left;
 }
 
-.base-map-option:hover,
-.base-map-option--selected {
+.map-layer-option:hover,
+.map-layer-option--selected {
   background: rgb(23 105 224 / 10%);
 }
 
-.base-map-option:focus-visible {
+.map-layer-option--overlay {
+  min-height: 3rem;
+  grid-template-columns: minmax(0, 1fr) 1.75rem;
+  padding-left: 0.65rem;
+}
+
+.map-layer-option:focus-visible {
   outline: 3px solid rgb(23 105 224 / 40%);
   outline-offset: -3px;
 }
@@ -312,6 +337,9 @@ select {
   height: 1.65rem;
   border: 1px solid rgb(32 47 60 / 25%);
   border-radius: 4px;
+}
+
+.base-map-option-preview {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -330,14 +358,45 @@ select {
   background-image: url('/base-map-previews/aerial.png');
 }
 
-.base-map-option-check {
+.map-layer-option-check {
   width: 1.2rem;
   height: 1.2rem;
+  justify-self: center;
   fill: none;
   stroke: #1769e0;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.4;
+}
+
+.map-layer-option-toggle {
+  position: relative;
+  width: 1.75rem;
+  height: 1rem;
+  justify-self: center;
+  border-radius: 999px;
+  background: #b7bec4;
+  transition: background 150ms ease;
+}
+
+.map-layer-option-toggle span {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  transition: transform 150ms ease;
+}
+
+.map-layer-option-toggle--checked {
+  background: #1769e0;
+}
+
+.map-layer-option-toggle--checked span {
+  transform: translateX(0.75rem);
 }
 
 .zoom-controls {
@@ -424,7 +483,7 @@ select {
 
 .map-control-button--location svg,
 .map-control-button--fullscreen svg,
-.map-control-button--base-map svg,
+.map-control-button--map-layers svg,
 .map-control-button--route-import svg,
 .map-control-button--route-action svg,
 .map-control-button--route-toggle svg {
@@ -515,6 +574,125 @@ select {
 
 .location-message--error {
   border-color: rgb(185 55 55 / 55%);
+}
+
+.trail-closure-popup {
+  position: absolute;
+  z-index: 30;
+  top: 5rem;
+  left: 1rem;
+  width: min(23rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  overflow: hidden;
+  border: 1px solid rgb(32 47 60 / 22%);
+  border-radius: 10px;
+  color: #17212b;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(10px);
+}
+
+.trail-closure-popup-header {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.75rem 0.6rem 1rem;
+  border-bottom: 1px solid rgb(32 47 60 / 14%);
+  font-size: 1rem;
+}
+
+.trail-closure-popup-close {
+  display: grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: #b71919;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.8rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.trail-closure-popup-close:hover {
+  background: rgb(183 25 25 / 9%);
+}
+
+.trail-closure-popup-close:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 40%);
+  outline-offset: 1px;
+}
+
+.trail-closure-popup-body {
+  max-height: calc(100vh - 9rem);
+  padding: 1rem;
+  overflow-y: auto;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.trail-closure-popup-body > p {
+  margin: 0;
+  color: #5c6872;
+}
+
+.trail-closure-popup-error {
+  color: #a33636 !important;
+}
+
+.trail-closure-popup-content .htmlpopup-header {
+  margin-bottom: 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.trail-closure-popup-content table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.trail-closure-popup-content td,
+.trail-closure-popup-content th {
+  padding: 0.45rem 0;
+  vertical-align: top;
+  border-bottom: 1px solid rgb(32 47 60 / 10%);
+  text-align: left;
+}
+
+.trail-closure-popup-content .cell-left,
+.trail-closure-popup-content th {
+  width: 38%;
+  padding-right: 0.8rem;
+  color: #3f4c56;
+  font-weight: 650;
+}
+
+.trail-closure-popup-content p:first-child,
+.trail-closure-popup-content div:first-child {
+  margin-top: 0;
+}
+
+.trail-closure-popup-content p:last-child,
+.trail-closure-popup-content div:last-child {
+  margin-bottom: 0;
+}
+
+.trail-closure-popup-content a {
+  color: #1769e0;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.trail-closure-popup-content img {
+  max-width: 100%;
+  height: auto;
 }
 
 .route-summary {
@@ -851,6 +1029,17 @@ select {
   .map-controls {
     top: 4.25rem;
     right: 0.75rem;
+  }
+
+  .trail-closure-popup {
+    top: 4.25rem;
+    left: 0.75rem;
+    width: calc(100vw - 5.25rem);
+    max-height: calc(100vh - 5rem);
+  }
+
+  .trail-closure-popup-body {
+    max-height: calc(100vh - 8rem);
   }
 
   .map-control-button,
