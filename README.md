@@ -26,7 +26,7 @@ positions selected by the user.
   on demand;
 - straight-line segments when snapping is disabled or no routable swissTLM3D path is available;
 - functional undo and redo that restore the exact generated segment geometry;
-- route reversal, complete route deletion, and elevation-aware GPX track export;
+- route reversal, complete route deletion, and named elevation-aware GPX track export;
 - compact route summary with distance, ascent, descent, estimated walking time,
   and a collapsible elevation profile;
 - navigation restricted to Switzerland and a small border margin;
@@ -163,9 +163,11 @@ route-creation mode is left and can be continued by entering the mode again.
 
 The route can be reversed without another routing request: waypoint order and
 each stored section geometry are reversed in memory. Deleting clears the
-complete route and its redo history while keeping creation mode active. Export
-creates a GPX 1.1 track containing the complete displayed geometry, including
-all intermediate swissTLM3D vertices. When the elevation profile is available,
+complete route and its redo history while keeping creation mode active. Before
+export, a compact dialog asks for the route name. The same value is written into
+the GPX metadata and track name and is used as the proposed `.gpx` filename.
+Export then creates a GPX 1.1 track containing the complete displayed geometry,
+including all intermediate swissTLM3D vertices. When the elevation profile is available,
 the export also inserts regularly spaced track points with smoothed `<ele>`
 values. This preserves sharp route bends while giving compatible applications
 enough altitude samples to reproduce a profile close to the one shown here. If

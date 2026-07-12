@@ -160,6 +160,7 @@ Tasks:
 
 - [x] Define the internal route data model.
 - [x] Export the current route as a GPX 1.1 track.
+- [x] Ask for a route name and use it in GPX metadata and the filename.
 - [x] Include the complete route geometry in the correct order.
 - [x] Embed smoothed elevation samples in GPX track points when available.
 - [x] Retrieve a smoothed elevation profile for the route.

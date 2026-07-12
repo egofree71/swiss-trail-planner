@@ -659,6 +659,115 @@ select {
   vector-effect: non-scaling-stroke;
 }
 
+.route-export-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: #17212b;
+  background: transparent;
+  overflow: visible;
+}
+
+.route-export-dialog::backdrop {
+  background: rgb(20 29 37 / 42%);
+  backdrop-filter: blur(2px);
+}
+
+.route-export-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.2rem;
+  border: 1px solid rgb(32 47 60 / 22%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 14px 42px rgb(0 0 0 / 28%);
+}
+
+.route-export-dialog-form h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+  line-height: 1.3;
+}
+
+.route-export-dialog-form label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.route-export-dialog-form input {
+  width: 100%;
+  height: 2.9rem;
+  padding: 0 0.8rem;
+  border: 1px solid rgb(32 47 60 / 30%);
+  border-radius: 8px;
+  outline: 0;
+  color: #17212b;
+  background: #ffffff;
+}
+
+.route-export-dialog-form input:focus {
+  border-color: rgb(23 105 224 / 70%);
+  box-shadow: 0 0 0 3px rgb(23 105 224 / 18%);
+}
+
+.route-export-dialog-form p {
+  margin: 0;
+  color: #64717b;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.route-export-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 0.45rem;
+}
+
+.route-export-dialog-button {
+  min-width: 6.5rem;
+  height: 2.65rem;
+  padding: 0 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.route-export-dialog-button:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 38%);
+  outline-offset: 2px;
+}
+
+.route-export-dialog-button--secondary {
+  border: 1px solid rgb(32 47 60 / 26%);
+  color: #27343e;
+  background: #ffffff;
+}
+
+.route-export-dialog-button--secondary:hover {
+  background: #f3f5f6;
+}
+
+.route-export-dialog-button--primary {
+  border: 1px solid #1769e0;
+  color: #ffffff;
+  background: #1769e0;
+}
+
+.route-export-dialog-button--primary:hover {
+  background: #125ac2;
+}
+
+.route-export-dialog-button--primary:disabled {
+  border-color: #c8ccd0;
+  color: #8a9299;
+  background: #e6e8ea;
+  cursor: not-allowed;
+}
+
 .route-message {
   position: absolute;
   z-index: 22;

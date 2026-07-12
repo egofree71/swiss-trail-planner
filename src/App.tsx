@@ -17,6 +17,7 @@ import BaseMapSelector from './components/BaseMapSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
 import RouteControls from './components/RouteControls';
+import RouteExportDialog from './components/RouteExportDialog';
 import RouteStatistics, {
   type RouteElevationStatus,
 } from './components/RouteStatistics';
@@ -90,6 +91,19 @@ const ROUTE_CONNECTOR_DISTANCE_SQUARED = 0.01;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 
+/**
+ * Builds an unambiguous local timestamp for the proposed GPX name. The ISO-like
+ * date order works consistently in every interface language, while the colon
+ * remains readable inside the GPX and is sanitized only for the filename.
+ */
+function createRouteExportDefaultName(baseName: string, date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+  return `${baseName} — ${datePart} ${timePart}`;
+}
+
 /** Returns squared horizontal distance in map units for inexpensive continuity checks. */
 function coordinateDistanceSquared(
   first: Coordinate,
@@ -154,6 +168,9 @@ export default function App() {
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isRouteExportDialogOpen, setIsRouteExportDialogOpen] =
+    useState(false);
+  const [routeExportDefaultName, setRouteExportDefaultName] = useState('');
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
   );
@@ -302,8 +319,23 @@ export default function App() {
     setRouteMessage('');
   };
 
-  /** Downloads the exact displayed route geometry as a GPX 1.1 track. */
-  const exportRoute = () => {
+  /** Opens the route-name dialog before any GPX content is generated. */
+  const requestRouteExport = () => {
+    if (
+      routeOperationPendingRef.current ||
+      routeHistoryRef.current.steps.length < 2
+    ) {
+      return;
+    }
+
+    setRouteExportDefaultName(
+      createRouteExportDefaultName(t('gpx.routeName')),
+    );
+    setIsRouteExportDialogOpen(true);
+  };
+
+  /** Downloads the exact displayed route geometry under the chosen route name. */
+  const exportRoute = (routeName: string) => {
     if (routeOperationPendingRef.current) {
       return;
     }
@@ -311,9 +343,10 @@ export default function App() {
     try {
       downloadRouteGpx(
         routeHistoryRef.current.steps,
-        t('gpx.routeName'),
+        routeName,
         routeElevation?.points ?? [],
       );
+      setIsRouteExportDialogOpen(false);
     } catch (error) {
       console.error('Unable to export the route as GPX.', error);
       showTemporaryRouteMessage(
@@ -964,7 +997,7 @@ export default function App() {
           }
           onReverse={reverseRoute}
           onDelete={deleteRoute}
-          onExport={exportRoute}
+          onExport={requestRouteExport}
         />
 
         <BaseMapSelector
@@ -1093,6 +1126,13 @@ export default function App() {
           {routeMessage}
         </div>
       )}
+
+      <RouteExportDialog
+        isOpen={isRouteExportDialogOpen}
+        defaultName={routeExportDefaultName}
+        onCancel={() => setIsRouteExportDialogOpen(false)}
+        onConfirm={exportRoute}
+      />
 
       {status === 'loading' && (
         <div className="status-card" role="status">

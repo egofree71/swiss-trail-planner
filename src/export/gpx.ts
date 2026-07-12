@@ -14,14 +14,34 @@ import {
 } from '../map/route';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
-/** Language-neutral filename prefix; the ISO date keeps downloads easy to identify. */
-const GPX_FILENAME_PREFIX = 'swiss-trail-planner-route';
+/** Language-neutral fallback used if a route name contains no valid filename characters. */
+const GPX_FILENAME_FALLBACK = 'swiss-trail-planner-route';
 /** Decimal places for WGS 84 coordinates; seven digits provide sub-metre precision. */
 const GPX_COORDINATE_PRECISION = 7;
 /** Decimal places for elevation values supplied by the terrain profile service. */
 const GPX_ELEVATION_PRECISION = 1;
 /** Distance tolerance in metres used to merge route vertices and regular profile samples. */
 const GPX_DISTANCE_MERGE_TOLERANCE_METERS = 0.01;
+
+
+/**
+ * Converts a route name into a portable GPX filename while preserving readable
+ * spaces and Unicode characters. Browser save dialogs may still let the user
+ * rename the file afterwards, but the initial filename and internal GPX name
+ * now originate from the same value.
+ *
+ * @param routeName - Name entered in the export dialog.
+ * @returns Filename ending in `.gpx`.
+ */
+function createGpxFilename(routeName: string): string {
+  const withoutExtension = routeName.trim().replace(/\.gpx$/i, '');
+  const sanitizedName = withoutExtension
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/[. ]+$/g, '')
+    .trim();
+
+  return `${sanitizedName || GPX_FILENAME_FALLBACK}.gpx`;
+}
 
 /** One GPX track point assembled from route geometry and optional terrain elevation. */
 interface GpxTrackPoint {
@@ -394,7 +414,7 @@ export function downloadRouteGpx(
   const link = window.document.createElement('a');
 
   link.href = objectUrl;
-  link.download = `${GPX_FILENAME_PREFIX}-${generatedAt.toISOString().slice(0, 10)}.gpx`;
+  link.download = createGpxFilename(routeName);
   link.style.display = 'none';
   window.document.body.append(link);
   link.click();

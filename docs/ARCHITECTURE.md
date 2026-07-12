@@ -127,7 +127,7 @@ Browser
    │      │
    │      ├── LocationSearch component
    │      │      └── geo.admin.ch SearchServer
-   │      ├── BaseMapSelector, RouteControls, RouteStatistics, and LanguageSelector
+   │      ├── BaseMapSelector, RouteControls, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
    │      ├── route history, statistics, and temporary routing status
    │      ├── browser Geolocation API
@@ -405,9 +405,11 @@ Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
 stored section geometry without issuing another routing request. The redo stack
 is cleared because its entries belong to the previous direction. Deletion clears
 the applied and redo histories while keeping route-creation mode active. GPX
-export is enabled after two waypoints and delegates XML generation and browser
-download to `src/export/gpx.ts`. The latest smoothed elevation samples are passed
-only when they belong to the current immutable route geometry.
+export is enabled after two waypoints and first opens
+`src/components/RouteExportDialog.tsx`. The chosen name is then passed to
+`src/export/gpx.ts` for both GPX metadata and filename generation. The latest
+smoothed elevation samples are passed only when they belong to the current
+immutable route geometry.
 
 Routine loading and graph-construction details are intentionally not shown to
 the user. Temporary route messages are reserved for actionable problems such as
@@ -483,6 +485,7 @@ swiss-trail-planner/
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
 │   │   ├── RouteElevationProfile.tsx
+│   │   ├── RouteExportDialog.tsx
 │   │   └── RouteStatistics.tsx
 │   ├── export/
 │   │   └── gpx.ts
@@ -562,6 +565,12 @@ Renders the route-mode toggle and the contextual route action buttons. It is a
 controlled component: `App.tsx` supplies availability state and callbacks for
 snap, undo, redo, reversal, deletion, and GPX export.
 
+### `src/components/RouteExportDialog.tsx`
+
+Displays a temporary native modal dialog before GPX generation. It proposes a
+localized route name, selects it for quick replacement, supports Enter and
+Escape, and returns only a trimmed non-empty value to `App.tsx`.
+
 ### `src/components/RouteStatistics.tsx`
 
 Formats and renders the compact distance, ascent, descent, and duration bar. It
@@ -585,7 +594,9 @@ abortable so stale route histories cannot update the UI.
 
 Converts the complete displayed route geometry from Web Mercator to WGS 84,
 builds a GPX 1.1 track, and starts a browser download through a temporary object
-URL. It keeps routed intermediate vertices to preserve sharp bends, merges in
+URL. The name entered in the export dialog is XML-escaped for metadata and the
+track node, sanitized for a portable filename, and used for both outputs. The
+module keeps routed intermediate vertices to preserve sharp bends, merges in
 the regularly spaced profile distances, and interpolates the smoothed terrain
 altitude into `<ele>` values. If no valid profile is available, it falls back to
 the previous geometry-only export.
@@ -699,18 +710,20 @@ control placement.
 21. Undo moves the last complete step to redo; redo restores it without routing.
 22. Reversal rebuilds immutable steps in the opposite order and clears redo.
 23. Deletion clears both applied and redo histories and hides the summary.
-24. GPX export converts the flattened route to WGS 84, merges exact route
-    vertices with regular elevation samples, and downloads a localized GPX track.
-25. Changing language updates interface text, number formatting, document
+24. GPX export opens a modal naming form before any XML is generated.
+25. Confirming the form converts the flattened route to WGS 84, merges exact
+    route vertices with regular elevation samples, and downloads a GPX track
+    whose internal name and proposed filename come from the same user value.
+26. Changing language updates interface text, number formatting, document
     metadata, and subsequent SearchServer requests without recreating the map.
-26. Leaving route mode removes the click listener and aborts active network work
+27. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-27. The fullscreen button requests fullscreen for the root application element.
-28. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-29. Location search and browser geolocation continue to operate independently.
-30. On unmount, map listeners, timers, requests, references, and the map target
+28. The fullscreen button requests fullscreen for the root application element.
+29. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+30. Location search and browser geolocation continue to operate independently.
+31. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-31. A push to `main` triggers the Pages workflow, which builds and deploys
+32. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 ## 17. Error handling
