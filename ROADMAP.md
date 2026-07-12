@@ -161,6 +161,7 @@ Tasks:
 - [x] Define the internal route data model.
 - [x] Export the current route as a GPX 1.1 track.
 - [x] Include the complete route geometry in the correct order.
+- [x] Embed smoothed elevation samples in GPX track points when available.
 - [x] Retrieve a smoothed elevation profile for the route.
 - [x] Calculate total ascent and descent.
 - [x] Display route distance, elevation summary, and estimated walking time.
@@ -170,6 +171,7 @@ Tasks:
 Acceptance criteria:
 
 - exported GPX files open correctly in common hiking applications;
+- elevation-aware GPX files retain the displayed route and a usable altitude profile;
 - route distance is accurate enough for planning;
 - total ascent and descent are displayed;
 - the route can still be edited after calculations.

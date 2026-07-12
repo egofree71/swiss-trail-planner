@@ -194,6 +194,11 @@ export default function App() {
   const commitRouteHistory = (history: RouteHistory) => {
     routeHistoryRef.current = history;
     setRouteHistory(history);
+
+    // Elevations belong to the previous immutable geometry until the debounced
+    // profile request completes for this new history state.
+    setRouteElevation(null);
+    setRouteElevationStatus('loading');
   };
 
   /**
@@ -307,6 +312,7 @@ export default function App() {
       downloadRouteGpx(
         routeHistoryRef.current.steps,
         t('gpx.routeName'),
+        routeElevation?.points ?? [],
       );
     } catch (error) {
       console.error('Unable to export the route as GPX.', error);

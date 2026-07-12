@@ -48,7 +48,7 @@ It can:
 - undo and redo exact straight or routed route steps;
 - reverse the complete route without recalculating sections;
 - clear the complete route;
-- export the displayed route geometry as a GPX 1.1 track;
+- export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal or hide a compact elevation profile from the summary bar;
 - reveal a compact route action strip for snap mode, reversal, deletion, and export;
@@ -64,7 +64,6 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - waypoint movement, insertion, or individual deletion;
-- elevation values in GPX export;
 - local or remote persistence;
 - an application server.
 
@@ -407,7 +406,8 @@ stored section geometry without issuing another routing request. The redo stack
 is cleared because its entries belong to the previous direction. Deletion clears
 the applied and redo histories while keeping route-creation mode active. GPX
 export is enabled after two waypoints and delegates XML generation and browser
-download to `src/export/gpx.ts`.
+download to `src/export/gpx.ts`. The latest smoothed elevation samples are passed
+only when they belong to the current immutable route geometry.
 
 Routine loading and graph-construction details are intentionally not shown to
 the user. Temporary route messages are reserved for actionable problems such as
@@ -585,8 +585,10 @@ abortable so stale route histories cannot update the UI.
 
 Converts the complete displayed route geometry from Web Mercator to WGS 84,
 builds a GPX 1.1 track, and starts a browser download through a temporary object
-URL. It exports routed intermediate vertices rather than only user waypoints so
-external applications preserve the exact path.
+URL. It keeps routed intermediate vertices to preserve sharp bends, merges in
+the regularly spaced profile distances, and interpolates the smoothed terrain
+altitude into `<ele>` values. If no valid profile is available, it falls back to
+the previous geometry-only export.
 
 ### `src/map/route.ts`
 
@@ -697,8 +699,8 @@ control placement.
 21. Undo moves the last complete step to redo; redo restores it without routing.
 22. Reversal rebuilds immutable steps in the opposite order and clears redo.
 23. Deletion clears both applied and redo histories and hides the summary.
-24. GPX export converts the flattened route to WGS 84 and downloads a localized
-    GPX track.
+24. GPX export converts the flattened route to WGS 84, merges exact route
+    vertices with regular elevation samples, and downloads a localized GPX track.
 25. Changing language updates interface text, number formatting, document
     metadata, and subsequent SearchServer requests without recreating the map.
 26. Leaving route mode removes the click listener and aborts active network work
@@ -788,9 +790,9 @@ it.
 ### Phase 3 — Route editing
 
 Straight and dynamically routed waypoint creation, undo/redo, route reversal,
-route clearing, and GPX track export are implemented. The next steps are
-waypoint movement and insertion and elevation values in GPX export. The compact
-elevation-profile visualization is implemented.
+route clearing, and elevation-aware GPX track export are implemented. The next
+steps are waypoint movement and insertion. The compact elevation-profile
+visualization is implemented.
 
 ### Phase 4 — Production routing
 
