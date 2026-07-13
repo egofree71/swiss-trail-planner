@@ -656,6 +656,77 @@ select {
   font-weight: 400;
 }
 
+
+.public-transport-departures {
+  margin-bottom: 1rem;
+}
+
+.public-transport-departures h2 {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.public-transport-departures-status {
+  margin: 0;
+  color: #5c6872;
+}
+
+.public-transport-departure-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-transport-departure-list li {
+  display: grid;
+  min-height: 2.65rem;
+  grid-template-columns: minmax(2.6rem, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.55rem;
+  border-bottom: 1px solid rgb(32 47 60 / 11%);
+}
+
+.public-transport-departure-list li:first-child {
+  border-top: 1px solid rgb(32 47 60 / 11%);
+}
+
+.public-transport-departure-line {
+  min-width: 2.6rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 5px;
+  color: #17212b;
+  background: rgb(23 105 224 / 10%);
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.public-transport-departure-destination {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-transport-departure-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.public-transport-departure-delay {
+  min-width: 2.1rem;
+  color: #c22b2b;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .public-transport-stop-links {
   display: flex;
   flex-direction: column;

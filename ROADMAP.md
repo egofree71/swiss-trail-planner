@@ -58,6 +58,7 @@ The application should remain lightweight and map-centered:
 - [x] Add localized click information for visible closures.
 - [x] Add optional official public-transport stops to the Layers menu.
 - [x] Filter passenger-relevant stops, preserve mode-specific symbols, and show compact localized stop details.
+- [x] Load and display the next public-transport departures on demand.
 
 ## Current focus
 
@@ -81,9 +82,10 @@ pipeline or backend is selected.
 The public-transport stop layer is geographic and informational only. It
 filters out operating-only and explicitly out-of-service points, groups nearby
 multimodal records, highlights the selected stop, and shows its official name
-with all detected transport modes. Links can hand the stop to the official
-SBB/CFF/FFS timetable as a departure or destination. Embedded live arrival and
-departure times remain deliberately deferred.
+with all detected transport modes. The compact panel loads the next departures
+from `transport.opendata.ch`, while links can still hand the stop to the official
+SBB/CFF/FFS timetable as a departure or destination. Automatic background
+refresh remains deliberately deferred.
 
 ## Planned milestones
 

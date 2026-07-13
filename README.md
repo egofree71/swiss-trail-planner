@@ -14,7 +14,7 @@ positions selected by the user.
 - selectable official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
 - official hiking trails displayed above every background at detailed zoom levels;
 - official hiking-trail closures and detours shown by default, with click details;
-- optional passenger-relevant public-transport stops with mode-specific symbols and compact click details;
+- optional passenger-relevant public-transport stops with mode-specific symbols, compact click details, and next departures;
 - search for Swiss communes, localities, postal codes, and geographic names;
 - selected search result displayed with a map marker;
 - large, separated zoom controls;
@@ -125,18 +125,30 @@ ch.bav.haltestellen-oev
 
 It is disabled by default and the browser remembers an explicit choice. At
 detailed zoom levels, the application requests visible stop features through
-the GeoAdmin identify API, removes operational or explicitly out-of-service
-points that do not provide passenger transport, and renders the remaining stops
-as client-side vectors with distinct symbols for train, tram, bus, boat, and
-cable transport. Nearby records representing the same named interchange are
-merged, with the train symbol taking priority for train/bus combinations. Metro
-records use the train symbol rather than the ambiguous generic fallback icon.
+the GeoAdmin identify API. Identification is capped at a stable passenger-stop
+portrayal scale because the official layer exposes technical platform objects at
+its closest scales. Numeric-only operating points and explicitly out-of-service
+records are removed before the remaining stops are rendered as client-side
+vectors with distinct symbols for train, tram, bus, boat, gondola/cable-car,
+chairlift, and funicular transport. Nearby records representing the same named
+interchange are merged, with the train symbol taking priority for train/bus
+combinations. Distinct facilities with different official names remain separate;
+when their icons would overlap, the symbols are temporarily fanned apart until a
+closer zoom reveals their real positions. Metro records use the train symbol
+rather than the ambiguous generic fallback icon.
 
 Clicking a visible stop while route creation is inactive highlights its map
 symbol and opens a compact panel. The header shows the official stop name and
-all detected transport modes. Two localized links open the official SBB/CFF/FFS
-timetable with the stop prefilled as either departure or destination.
-Administrative fields and live departure times are not included.
+all detected transport modes. The panel then requests the next departures from
+the documented `transport.opendata.ch` stationboard API, combines the identifiers
+of grouped multimodal stops, and shows line, destination, predicted time, and
+positive delay when available. A short in-memory cache avoids repeating the same
+request when a popup is reopened.
+
+Two localized links still open the official SBB/CFF/FFS timetable with the stop
+prefilled as either departure or destination. Departure loading is non-blocking:
+if the external timetable service is unavailable, the stop details and CFF links
+remain usable.
 
 ## Location search
 
@@ -313,7 +325,8 @@ Public transport stops:
 
 - feature layer: `ch.bav.haltestellen-oev`;
 - viewport loading: GeoAdmin `identify` endpoint with GeoJSON geometry;
-- rendering: filtered client-side OpenLayers vectors with mode-specific symbols.
+- rendering: filtered client-side OpenLayers vectors with mode-specific symbols;
+- next departures: `https://transport.opendata.ch/v1/stationboard`.
 
 Shared settings:
 
@@ -329,9 +342,8 @@ as an inspectable development layer.
 
 ## Next milestone
 
-Validate dynamic routing and the information overlays in several contrasting
-regions, then continue waypoint-editing work. Public-transport timetable
-departures remain a possible later extension.
+Validate dynamic routing, public-transport departures, and the information
+overlays in several contrasting regions, then continue waypoint-editing work.
 
 ## License
 

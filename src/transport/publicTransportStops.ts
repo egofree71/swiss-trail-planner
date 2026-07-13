@@ -21,6 +21,7 @@ import Style from 'ol/style/Style.js';
 import boatIconUrl from '../assets/public-transport-stops/boat.png';
 import busIconUrl from '../assets/public-transport-stops/bus.png';
 import cableCarIconUrl from '../assets/public-transport-stops/cable-car.png';
+import chairliftIconUrl from '../assets/public-transport-stops/chairlift.png';
 import funicularIconUrl from '../assets/public-transport-stops/funicular.png';
 import otherIconUrl from '../assets/public-transport-stops/other.png';
 import trainIconUrl from '../assets/public-transport-stops/train.png';
@@ -52,12 +53,31 @@ const MAX_SUBDIVISION_DEPTH = 5;
 /** Browser display resolution sent to GeoAdmin for scale-aware identification. */
 const IDENTIFY_DPI = 96;
 
+/** Web Mercator ground resolution at zoom level zero, in map units per pixel. */
+const WEB_MERCATOR_INITIAL_RESOLUTION = 156543.03392804097;
+
+/**
+ * GeoAdmin exposes operational sub-points such as platform numbers at the
+ * closest scales. Stop loading is therefore evaluated at no more than zoom 17,
+ * even when the user zooms further in, so the passenger-stop representation
+ * remains stable instead of changing to technical objects.
+ */
+const PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM = 17;
+
+/** Minimum map resolution used only for GeoAdmin stop identification. */
+const PUBLIC_TRANSPORT_IDENTIFY_MIN_RESOLUTION =
+  WEB_MERCATOR_INITIAL_RESOLUTION /
+  2 ** PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM;
+
 /** Attribution attached to the vector source built from the official layer. */
 const PUBLIC_TRANSPORT_STOPS_ATTRIBUTION =
   '<a href="https://www.bav.admin.ch/" target="_blank" rel="noopener noreferrer">© BAV</a>';
 
 /** Internal feature property containing the structured stop metadata. */
 const STOP_PROPERTY_NAME = 'publicTransportStop';
+
+/** Internal feature property describing how a close stop is visually separated. */
+const STOP_OVERLAP_LAYOUT_PROPERTY_NAME = 'publicTransportStopOverlapLayout';
 
 /** Passenger transport categories represented by distinct map symbols. */
 export type PublicTransportMode =
@@ -66,6 +86,7 @@ export type PublicTransportMode =
   | 'bus'
   | 'boat'
   | 'cableCar'
+  | 'chairlift'
   | 'funicular'
   | 'other';
 
@@ -75,6 +96,7 @@ const MODE_PRIORITY: PublicTransportMode[] = [
   'tram',
   'boat',
   'cableCar',
+  'chairlift',
   'funicular',
   'bus',
   'other',
@@ -83,10 +105,28 @@ const MODE_PRIORITY: PublicTransportMode[] = [
 /** Maximum ground distance in metres for merging records of one named stop. */
 const STOP_GROUPING_DISTANCE_METERS = 150;
 
+/**
+ * Distinct stops closer than this ground distance can render on top of each
+ * other at medium zoom levels. They remain separate data objects and are only
+ * fanned apart visually until the map scale reveals their real positions.
+ */
+const STOP_OVERLAP_DISTANCE_METERS = 60;
+
+/** Radius in screen pixels used when close stop symbols must be fanned apart. */
+const STOP_OVERLAP_DISPLAY_RADIUS_PIXELS = 17;
+
+/**
+ * Once the real group radius reaches this many pixels, symbol displacement is
+ * no longer needed and every stop returns to its true map position.
+ */
+const STOP_OVERLAP_RELEASE_RADIUS_PIXELS = 14;
+
 /** Passenger stop displayed on the map and in the compact information popup. */
 export interface PublicTransportStop {
-  /** Stable identifier from the official BAV layer. */
+  /** Stable grouped identifier used by OpenLayers and React. */
   id: string;
+  /** Original BAV stop identifiers used by the timetable API. */
+  stationIds: string[];
   /** Official stop name in the selected GeoAdmin language when available. */
   name: string;
   /** Normalized transport categories used for symbols and translated titles. */
@@ -107,6 +147,16 @@ export interface PublicTransportStopsDisplay {
   selectionLayer: VectorLayer<VectorSource<Feature<Point>>>;
   /** Source containing at most one selected-stop marker. */
   selectionSource: VectorSource<Feature<Point>>;
+}
+
+/** Visual layout for one stop that belongs to a close-symbol group. */
+interface StopOverlapLayout {
+  /** Shared group centre in EPSG:3857 map coordinates. */
+  center: Coordinate;
+  /** Furthest real stop distance from the group centre in map units. */
+  radiusMapUnits: number;
+  /** Desired symbol position relative to the centre, measured in pixels. */
+  targetOffsetPixels: Coordinate;
 }
 
 /** GeoJSON point returned by the identify service. */
@@ -217,17 +267,32 @@ function extractCoordinate(feature: IdentifyFeature): Coordinate | null {
 function detectTransportModes(value: string): PublicTransportMode[] {
   const normalized = normalizeText(value);
   const modes = new Set<PublicTransportMode>();
+  const isFunicular =
+    /standseilbahn|funiculaire|funicolare|funicular/.test(normalized);
+  const isChairlift =
+    /sesselbahn|sessellift|telesiege|seggiovia|chairlift|chair lift/.test(
+      normalized,
+    );
 
+  if (isFunicular) {
+    modes.add('funicular');
+  }
+
+  if (isChairlift) {
+    modes.add('chairlift');
+  }
+
+  // `Standseilbahn` and `Sesselbahn` both contain the generic word `Seilbahn`.
+  // Keeping cable-system categories mutually exclusive prevents funiculars and
+  // chairlifts from inheriting the gondola icon through that shared substring.
   if (
-    /seilbahn|luftseilbahn|gondel|telepherique|telecabine|funivia|cabinovia|cable car/.test(
+    !isFunicular &&
+    !isChairlift &&
+    /kabinenbahn|gondelbahn|pendelbahn|seilbahn|luftseilbahn|gondel|telepherique|telecabine|funivia|cabinovia|cable car/.test(
       normalized,
     )
   ) {
     modes.add('cableCar');
-  }
-
-  if (/standseilbahn|funiculaire|funicolare|funicular/.test(normalized)) {
-    modes.add('funicular');
   }
 
   if (/schiff|bateau|navire|battello|nave|boat|ship|ferry/.test(normalized)) {
@@ -329,18 +394,30 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
     'haltestellentyp',
   ]);
 
-  // Operating points and retired stops have no passenger transport mode. They
-  // are deliberately omitted from the hiking-planning overlay.
-  if (
-    !name ||
-    !meansOfTransport ||
-    meansOfTransport.trim() === '-' ||
-    isOutOfServiceType(stopType)
-  ) {
+  // Explicitly retired stops remain hidden even when their name contains a
+  // transport word. Some active cableway records, however, publish an empty
+  // means-of-transport field while preserving the mode in a suffix such as
+  // `Plan-Francey (téléphérique)`. The name is therefore a safe fallback for
+  // mode detection, but not for overriding an explicit out-of-service status.
+  if (!name || isOutOfServiceType(stopType)) {
     return null;
   }
 
-  const modes = detectTransportModes(meansOfTransport);
+  // Very close zoom levels can expose technical operating points named only
+  // `01`, `02`, and similar platform identifiers. Passenger stop names always
+  // contain at least one letter, so rejecting numeric-only labels removes
+  // those duplicates without hiding legitimate named stations.
+  if (!/\p{L}/u.test(name)) {
+    return null;
+  }
+
+  const usableMeansOfTransport =
+    meansOfTransport && meansOfTransport.trim() !== '-'
+      ? meansOfTransport
+      : '';
+  const modes = detectTransportModes(
+    `${usableMeansOfTransport} ${name}`.trim(),
+  );
 
   if (modes.length === 0) {
     return null;
@@ -348,9 +425,10 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
 
   return {
     id: String(featureId),
+    stationIds: [String(featureId)],
     name,
     modes,
-    rawMeansOfTransport: meansOfTransport,
+    rawMeansOfTransport: usableMeansOfTransport || name,
     coordinate,
   };
 }
@@ -415,8 +493,14 @@ function mergeStops(
     [current.rawMeansOfTransport, incoming.rawMeansOfTransport].filter(Boolean),
   );
 
+  const stationIds = [...new Set([
+    ...current.stationIds,
+    ...incoming.stationIds,
+  ])].sort();
+
   return {
-    id: [current.id, incoming.id].sort().join('|'),
+    id: stationIds.join('|'),
+    stationIds,
     name: preferIncoming ? incoming.name : current.name,
     modes: normalizeModes([...current.modes, ...incoming.modes]),
     rawMeansOfTransport: [...rawMeans].join(' / '),
@@ -455,6 +539,161 @@ function groupPublicTransportStops(
   return [...groupsByName.values()].flat();
 }
 
+
+/** Returns planar map-unit distance between two EPSG:3857 coordinates. */
+function mapCoordinateDistance(
+  first: Coordinate,
+  second: Coordinate,
+): number {
+  return Math.hypot(first[0] - second[0], first[1] - second[1]);
+}
+
+/**
+ * Assigns a deterministic fan layout to distinct stops whose symbols would
+ * otherwise overlap. This does not merge station identifiers or timetables:
+ * nearby facilities such as `Plan-Francey` and `Plan-Francey (téléphérique)`
+ * remain independently selectable.
+ */
+function createStopOverlapLayouts(
+  stops: PublicTransportStop[],
+): Map<string, StopOverlapLayout> {
+  const layouts = new Map<string, StopOverlapLayout>();
+  const remaining = new Set(stops.map((stop) => stop.id));
+  const orderedStops = [...stops].sort((first, second) =>
+    first.id.localeCompare(second.id),
+  );
+
+  for (const anchor of orderedStops) {
+    if (!remaining.has(anchor.id)) {
+      continue;
+    }
+
+    const closeStops = orderedStops.filter(
+      (candidate) =>
+        remaining.has(candidate.id) &&
+        stopDistanceMeters(anchor.coordinate, candidate.coordinate) <=
+          STOP_OVERLAP_DISTANCE_METERS,
+    );
+
+    for (const stop of closeStops) {
+      remaining.delete(stop.id);
+    }
+
+    if (closeStops.length < 2) {
+      continue;
+    }
+
+    const center: Coordinate = [
+      closeStops.reduce((sum, stop) => sum + stop.coordinate[0], 0) /
+        closeStops.length,
+      closeStops.reduce((sum, stop) => sum + stop.coordinate[1], 0) /
+        closeStops.length,
+    ];
+    const radiusMapUnits = Math.max(
+      ...closeStops.map((stop) =>
+        mapCoordinateDistance(stop.coordinate, center),
+      ),
+    );
+
+    closeStops.forEach((stop, index) => {
+      const angle = (2 * Math.PI * index) / closeStops.length;
+      layouts.set(stop.id, {
+        center,
+        radiusMapUnits,
+        targetOffsetPixels: [
+          Math.cos(angle) * STOP_OVERLAP_DISPLAY_RADIUS_PIXELS,
+          Math.sin(angle) * STOP_OVERLAP_DISPLAY_RADIUS_PIXELS,
+        ],
+      });
+    });
+  }
+
+  return layouts;
+}
+
+/** Reads an internal close-symbol layout from one rendered feature. */
+function getStopOverlapLayout(
+  feature: FeatureLike,
+): StopOverlapLayout | null {
+  const value = feature.get(STOP_OVERLAP_LAYOUT_PROPERTY_NAME) as unknown;
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const layout = value as Partial<StopOverlapLayout>;
+  return Array.isArray(layout.center) &&
+    typeof layout.radiusMapUnits === 'number' &&
+    Array.isArray(layout.targetOffsetPixels)
+    ? (layout as StopOverlapLayout)
+    : null;
+}
+
+/**
+ * Converts a close-stop layout into an OpenLayers pixel displacement.
+ * At detailed zoom levels the real coordinates become sufficiently separated,
+ * so the displacement fades out completely rather than distorting the map.
+ */
+function calculateStopDisplacement(
+  coordinate: Coordinate,
+  layout: StopOverlapLayout | null,
+  resolution: number,
+): Coordinate {
+  if (!layout || !Number.isFinite(resolution) || resolution <= 0) {
+    return [0, 0];
+  }
+
+  if (
+    layout.radiusMapUnits / resolution >=
+    STOP_OVERLAP_RELEASE_RADIUS_PIXELS
+  ) {
+    return [0, 0];
+  }
+
+  const naturalOffsetPixels: Coordinate = [
+    (coordinate[0] - layout.center[0]) / resolution,
+    (coordinate[1] - layout.center[1]) / resolution,
+  ];
+
+  return [
+    layout.targetOffsetPixels[0] - naturalOffsetPixels[0],
+    layout.targetOffsetPixels[1] - naturalOffsetPixels[1],
+  ];
+}
+
+/**
+ * Returns the map extent used only to tell GeoAdmin which portrayal scale to
+ * identify. The feature geometry still uses the real viewport extent; only the
+ * scale context is widened when the user zooms beyond the passenger-stop level.
+ */
+function createIdentifyScaleExtent(
+  extent: Extent,
+  imageSize: [number, number],
+): Extent {
+  const currentResolution = Math.max(
+    (extent[2] - extent[0]) / Math.max(imageSize[0], 1),
+    (extent[3] - extent[1]) / Math.max(imageSize[1], 1),
+  );
+
+  if (currentResolution >= PUBLIC_TRANSPORT_IDENTIFY_MIN_RESOLUTION) {
+    return extent;
+  }
+
+  const centerX = (extent[0] + extent[2]) / 2;
+  const centerY = (extent[1] + extent[3]) / 2;
+  const halfWidth =
+    (imageSize[0] * PUBLIC_TRANSPORT_IDENTIFY_MIN_RESOLUTION) / 2;
+  const halfHeight =
+    (imageSize[1] * PUBLIC_TRANSPORT_IDENTIFY_MIN_RESOLUTION) / 2;
+
+  return [
+    centerX - halfWidth,
+    centerY - halfHeight,
+    centerX + halfWidth,
+    centerY + halfHeight,
+  ];
+}
+
 /** Splits an extent into four overlapping-free quadrants. */
 function subdivideExtent(extent: Extent): Extent[] {
   const centerX = (extent[0] + extent[2]) / 2;
@@ -481,7 +720,10 @@ async function fetchStopsForExtent(
     geometryFormat: 'geojson',
     layers: `all:${PUBLIC_TRANSPORT_STOPS_LAYER_ID}`,
     tolerance: '0',
-    mapExtent: context.extent.join(','),
+    mapExtent: createIdentifyScaleExtent(
+      context.extent,
+      context.imageSize,
+    ).join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     returnGeometry: 'true',
     sr: '3857',
@@ -560,11 +802,12 @@ const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
   bus: busIconUrl,
   boat: boatIconUrl,
   cableCar: cableCarIconUrl,
+  chairlift: chairliftIconUrl,
   funicular: funicularIconUrl,
   other: otherIconUrl,
 };
 
-/** Shared immutable OpenLayers styles, one per transport category. */
+/** Shared immutable OpenLayers styles for symbols at their real position. */
 const MODE_STYLES = new Map<PublicTransportMode, Style>(
   MODE_PRIORITY.map((mode) => [
     mode,
@@ -578,17 +821,68 @@ const MODE_STYLES = new Map<PublicTransportMode, Style>(
   ]),
 );
 
-/**
- * Selection halo drawn below the stop icon so the popup remains visually tied
- * to one marker even when several stops are clustered nearby.
- */
-const SELECTED_STOP_STYLE = new Style({
-  image: new CircleStyle({
-    radius: 17,
-    fill: new Fill({ color: 'rgba(255, 255, 255, 0.88)' }),
-    stroke: new Stroke({ color: '#1769e0', width: 3 }),
-  }),
-});
+/** Cached displaced variants used only for the few close-symbol groups. */
+const DISPLACED_MODE_STYLES = new Map<string, Style>();
+
+/** Returns a mode style whose symbol follows one rounded pixel displacement. */
+function getModeStyle(
+  mode: PublicTransportMode,
+  displacement: Coordinate,
+): Style {
+  const roundedDisplacement: Coordinate = [
+    Math.round(displacement[0]),
+    Math.round(displacement[1]),
+  ];
+
+  if (roundedDisplacement[0] === 0 && roundedDisplacement[1] === 0) {
+    return MODE_STYLES.get(mode)!;
+  }
+
+  const key = `${mode}:${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
+  const cached = DISPLACED_MODE_STYLES.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const style = new Style({
+    image: new Icon({
+      src: MODE_ICON_URLS[mode],
+      scale: 25 / 28,
+      displacement: roundedDisplacement,
+    }),
+  });
+  DISPLACED_MODE_STYLES.set(key, style);
+  return style;
+}
+
+/** Cached selection-halo variants aligned with displaced stop symbols. */
+const SELECTED_STOP_STYLES = new Map<string, Style>();
+
+/** Returns the selected-stop halo for one rounded symbol displacement. */
+function getSelectedStopStyle(displacement: Coordinate): Style {
+  const roundedDisplacement: Coordinate = [
+    Math.round(displacement[0]),
+    Math.round(displacement[1]),
+  ];
+  const key = `${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
+  const cached = SELECTED_STOP_STYLES.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const style = new Style({
+    image: new CircleStyle({
+      radius: 17,
+      displacement: roundedDisplacement,
+      fill: new Fill({ color: 'rgba(255, 255, 255, 0.88)' }),
+      stroke: new Stroke({ color: '#1769e0', width: 3 }),
+    }),
+  });
+  SELECTED_STOP_STYLES.set(key, style);
+  return style;
+}
 
 /** Selects the first mode according to the stable visual priority. */
 function getPrimaryMode(modes: PublicTransportMode[]): PublicTransportMode {
@@ -605,15 +899,38 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
     source: selectionSource,
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
     zIndex: 15,
-    style: SELECTED_STOP_STYLE,
+    style: (feature, resolution) => {
+      const geometry = feature.getGeometry();
+      const coordinate = geometry instanceof Point
+        ? geometry.getCoordinates()
+        : null;
+      const displacement = coordinate
+        ? calculateStopDisplacement(
+            coordinate,
+            getStopOverlapLayout(feature),
+            resolution,
+          )
+        : [0, 0];
+      return getSelectedStopStyle(displacement);
+    },
   });
   const layer = new VectorLayer({
     source,
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
     zIndex: 16,
-    style: (feature) => {
+    style: (feature, resolution) => {
       const stop = getPublicTransportStopFromFeature(feature);
-      return stop ? MODE_STYLES.get(getPrimaryMode(stop.modes)) : undefined;
+
+      if (!stop) {
+        return undefined;
+      }
+
+      const displacement = calculateStopDisplacement(
+        stop.coordinate,
+        getStopOverlapLayout(feature),
+        resolution,
+      );
+      return getModeStyle(getPrimaryMode(stop.modes), displacement);
     },
   });
 
@@ -625,12 +942,20 @@ export function updatePublicTransportStopsDisplay(
   display: PublicTransportStopsDisplay,
   stops: PublicTransportStop[],
 ): void {
+  const overlapLayouts = createStopOverlapLayouts(stops);
   const features = stops.map((stop) => {
     const feature = new Feature<Point>({
       geometry: new Point(stop.coordinate),
     });
     feature.setId(stop.id);
     feature.set(STOP_PROPERTY_NAME, stop);
+
+    const overlapLayout = overlapLayouts.get(stop.id);
+
+    if (overlapLayout) {
+      feature.set(STOP_OVERLAP_LAYOUT_PROPERTY_NAME, overlapLayout);
+    }
+
     return feature;
   });
 
@@ -649,11 +974,19 @@ export function updatePublicTransportStopSelection(
     return;
   }
 
-  display.selectionSource.addFeature(
-    new Feature<Point>({
-      geometry: new Point(stop.coordinate),
-    }),
-  );
+  const selectionFeature = new Feature<Point>({
+    geometry: new Point(stop.coordinate),
+  });
+  const sourceFeature = display.source.getFeatureById(stop.id);
+  const overlapLayout = sourceFeature?.get(
+    STOP_OVERLAP_LAYOUT_PROPERTY_NAME,
+  ) as unknown;
+
+  if (overlapLayout) {
+    selectionFeature.set(STOP_OVERLAP_LAYOUT_PROPERTY_NAME, overlapLayout);
+  }
+
+  display.selectionSource.addFeature(selectionFeature);
 }
 
 /** Reads structured stop metadata from one feature hit by OpenLayers. */
@@ -667,7 +1000,9 @@ export function getPublicTransportStopFromFeature(
   }
 
   const stop = value as Partial<PublicTransportStop>;
-  return typeof stop.name === 'string' && Array.isArray(stop.modes)
+  return typeof stop.name === 'string' &&
+    Array.isArray(stop.modes) &&
+    Array.isArray(stop.stationIds)
     ? (stop as PublicTransportStop)
     : null;
 }

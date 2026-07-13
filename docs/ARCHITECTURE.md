@@ -70,7 +70,6 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - automatic avoidance of officially closed sections during routing;
-- live public-transport timetable departures;
 - waypoint movement, insertion, or individual deletion;
 - local or remote persistence;
 - an application server.
@@ -169,7 +168,8 @@ Browser
    └── HTTPS requests
           ├── wmts.geo.admin.ch (base maps and hiking trails)
           ├── wms.geo.admin.ch (closures and detours portrayal)
-          └── api3.geo.admin.ch (search, routing and stop identify, closure popup, and elevation profile)
+          ├── api3.geo.admin.ch (search, routing and stop identify, closure popup, and elevation profile)
+          └── transport.opendata.ch (on-demand public-transport departures)
 
 Deployment
    │
@@ -198,6 +198,7 @@ selected route section.
 | GeoAdmin HTML popup API | Localized official closure metadata |
 | GeoAdmin WMS | Official server-rendered closure and detour symbology |
 | OpenLayers vector styling | Filtered public-transport stop symbols by normalized mode |
+| transport.opendata.ch | Documented JSON stationboard for on-demand next departures |
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
@@ -254,26 +255,39 @@ The source dataset also contains operational and retired points that are not
 useful when planning passenger access. At detailed zoom levels, an abortable
 viewport loader calls the GeoAdmin identify endpoint, recursively subdivides
 dense requests that reach the 200-result limit, and converts point geometry and
-selected attributes into client-side OpenLayers features.
+selected attributes into client-side OpenLayers features. The identify scale is
+capped at the equivalent of Web Mercator zoom 17: closer portrayals expose
+technical sub-points such as platform numbers instead of stable passenger stops.
+The real viewport still determines which geometry is requested.
 
-Entries without a stop name or usable means of transport, and entries whose type
-explicitly indicates an out-of-service stop, are omitted. Remaining means of
-transport are normalized into train, tram, bus, boat, cable-car, funicular, or
-fallback categories and receive distinct blue map symbols. Metro descriptions
-are normalized to the train category. Nearby records with the same normalized
+Entries without a stop name, numeric-only operating labels, and entries whose
+type explicitly indicates an out-of-service stop are omitted. A missing means of
+transport may fall back to a transport suffix in the official name. Remaining
+modes are normalized into train, tram, bus, boat, cable-car, chairlift,
+funicular, or fallback categories and receive distinct blue map symbols. Cable
+categories are mutually exclusive so `Standseilbahn` does not also match the
+generic `Seilbahn` cable-car rule. Metro descriptions are normalized to the train
+category. Nearby records with the same normalized
 stop name are merged within a bounded ground-distance tolerance, so train/bus
 interchanges expose both modes while the train symbol remains visually primary.
+Nearby stops with different official names are never merged because they may
+have different timetables and CFF deep links. When such symbols would overlap at
+medium zoom, a deterministic pixel displacement fans them apart; the displacement
+is removed once their real coordinates are visually distinct at a closer zoom.
 The layer is disabled by default and its visibility preference is stored locally.
 
 A click first checks the already loaded stop vectors. A hit adds a dedicated
 selection halo below the icon and opens a compact project-owned panel. Its
 header contains the official stop name followed by all translated transport
-modes. Two localized SBB/CFF/FFS deep links prefill the stop as departure or
-destination using the documented `von` and `nach` parameters. No additional
-GeoAdmin popup request is needed, administrative fields remain hidden, and live
-timetable departures are outside the current scope. If no stop is hit, the same
-map interaction may then identify a visible closure; only closure HTML passes
-through the shared sanitizer.
+modes. The panel passes every original BAV identifier of a grouped stop to the
+`transport.opendata.ch` stationboard client. Results are validated, merged,
+deduplicated, sorted by predicted departure time, and cached for 45 seconds.
+The UI shows the line, destination, predicted time, and positive delay when
+available. Requests are aborted when another stop is selected or the popup is
+closed, and timetable failure does not hide the stop or its two localized
+SBB/CFF/FFS deep links. If no stop is hit, the same map interaction may then
+identify a visible closure; only closure HTML passes through the shared
+sanitizer.
 
 For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
 `MapServer/identify` endpoint for two technical layers:
@@ -651,10 +665,10 @@ state.
 ### `src/components/PublicTransportStopPopup.tsx`
 
 Renders the compact structured stop panel. The official stop name and all
-translated modes share the header, while the body exposes localized links that
-prefill the stop as departure or destination on the official SBB/CFF/FFS
-timetable. Administrative attributes and embedded live departures remain
-outside the component.
+translated modes share the header. The component aborts superseded stationboard
+requests, formats the next departures in the active locale, and keeps localized
+links that prefill the stop as departure or destination on the official
+SBB/CFF/FFS timetable.
 
 ### `src/closures/trailClosures.ts`
 
@@ -665,11 +679,22 @@ sanitization lives under `src/map/geoAdminPopup.ts`.
 
 ### `src/transport/publicTransportStops.ts`
 
-Owns the BAV layer identifier, abortable viewport identify requests, bounded
-subdivision for dense results, multilingual attribute normalization, filtering
-of operating-only or out-of-service points, mode classification, nearby
-interchange grouping, vector-layer creation, selection highlighting, and
-client-side symbol styling.
+Owns the BAV layer identifier, abortable viewport identify requests, the
+passenger-scale identify clamp, bounded subdivision for dense results,
+multilingual attribute normalization, filtering of numeric operating-only or
+out-of-service points, mode classification, nearby interchange grouping,
+preservation of original station identifiers,
+close-symbol fan layouts for distinct neighbouring stops, vector-layer creation,
+selection highlighting, and client-side symbol styling.
+
+### `src/transport/stationBoard.ts`
+
+Wraps the documented `transport.opendata.ch/v1/stationboard` resource. It tries
+both raw and zero-padded station identifiers, validates the loose JSON contract,
+normalizes line labels and predicted times, merges multimodal boards, removes
+duplicates, sorts departures, and maintains the short in-memory cache. The
+module sends no custom headers because the provider documents browser CORS with
+that restriction.
 
 ### `src/map/geoAdminPopup.ts`
 
@@ -846,7 +871,7 @@ messages, and OpenLayers control placement.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
 8. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
 9. A map click inspects the loaded stop vectors first and then a visible closure.
-10. A stop opens a compact structured panel immediately; a closure fetches and sanitizes the localized official popup.
+10. A stop opens a compact structured panel immediately and starts an abortable stationboard request; a closure fetches and sanitizes the localized official popup.
 11. Selecting a GPX parses it locally, replaces the read-only reference layer,
     and fits the map to the imported geometry.
 12. The route button toggles route-creation mode and the crosshair cursor.
@@ -894,7 +919,7 @@ messages, and OpenLayers control placement.
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
 
-Hiking-overlay, closure-WMS, and public-transport viewport-loading failures remain non-blocking.
+Hiking-overlay, closure-WMS, public-transport viewport-loading, and stationboard failures remain non-blocking.
 
 Search failures display a temporary result-panel message and allow immediate
 retry through another query. Aborted searches are ignored.
@@ -972,12 +997,13 @@ useful evidence about whether browser-only on-demand routing is sufficient. A
 preprocessed graph or backend should be selected only if measured limits justify
 it.
 
-### Optional public-transport timetable integration
+### Public-transport timetable follow-up
 
-The stop layer currently provides filtered passenger locations, normalized
-means of transport, and official stop names. Live departures may later use an
-official or openly licensed timetable service, but this should remain separate
-from the geographic overlay.
+The stop panel now loads departures on demand through the documented
+`transport.opendata.ch` API. This remains isolated from the geographic overlay
+so the provider can be replaced without changing map loading. A later iteration
+may add a manual refresh or a conservative timer while the popup remains open,
+but background polling should not be introduced without measuring API limits.
 
 ### Phase 3 — Route editing
 
