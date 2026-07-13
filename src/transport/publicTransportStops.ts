@@ -112,9 +112,6 @@ const MODE_PRIORITY: PublicTransportMode[] = [
   'bus',
 ];
 
-/** Maximum ground distance in metres for merging records of one named stop. */
-const STOP_GROUPING_DISTANCE_METERS = 150;
-
 /**
  * Distinct stops closer than this ground distance can render on top of each
  * other at medium zoom levels. They remain separate data objects and are only
@@ -133,10 +130,10 @@ const STOP_OVERLAP_RELEASE_RADIUS_PIXELS = 14;
 
 /** Passenger stop displayed on the map and in the compact information popup. */
 export interface PublicTransportStop {
-  /** Stable grouped identifier used by OpenLayers and React. */
+  /** Stable official feature identifier used by OpenLayers and React. */
   id: string;
-  /** Original BAV stop identifiers used by the timetable API. */
-  stationIds: string[];
+  /** Official BAV identifier used by the timetable API. */
+  stationId: string;
   /** Official stop name in the selected GeoAdmin language when available. */
   name: string;
   /** Normalized transport categories used for symbols and translated titles. */
@@ -444,25 +441,11 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
 
   return {
     id: String(featureId),
-    stationIds: [String(featureId)],
+    stationId: String(featureId),
     name,
-    modes,
+    modes: normalizeModes(modes),
     coordinate,
   };
-}
-
-/**
- * Reduces common station suffixes so nearby train and bus records can be
- * grouped when providers publish them as separate stop objects.
- */
-function normalizeStopGroupingName(name: string): string {
-  const normalized = normalizeText(name);
-  const withoutStationSuffix = normalized.replace(
-    /(?:\s+(?:gare|bahnhof|stazione|station|hb|cff|sbb|ffs))+$/,
-    '',
-  );
-
-  return withoutStationSuffix || normalized;
 }
 
 /** Returns the stable display priority of one normalized transport mode. */
@@ -489,66 +472,6 @@ function stopDistanceMeters(
 ): number {
   return getDistance(toLonLat(first), toLonLat(second));
 }
-
-/**
- * Merges two records representing the same passenger stop.
- * The coordinate and label of the highest-priority mode are retained so a
- * train/bus interchange uses the train symbol and the railway stop name.
- */
-function mergeStops(
-  current: PublicTransportStop,
-  incoming: PublicTransportStop,
-): PublicTransportStop {
-  const currentPrimary = current.modes[0];
-  const incomingPrimary = incoming.modes[0];
-  const preferIncoming =
-    getModePriority(incomingPrimary) < getModePriority(currentPrimary);
-
-  const stationIds = [...new Set([
-    ...current.stationIds,
-    ...incoming.stationIds,
-  ])].sort();
-
-  return {
-    id: stationIds.join('|'),
-    stationIds,
-    name: preferIncoming ? incoming.name : current.name,
-    modes: normalizeModes([...current.modes, ...incoming.modes]),
-    coordinate: preferIncoming ? incoming.coordinate : current.coordinate,
-  };
-}
-
-/**
- * Groups nearby records with the same normalized stop name.
- * Separate platform or mode records are common around railway stations; the
- * distance guard avoids combining identically named stops in another district.
- */
-function groupPublicTransportStops(
-  stops: PublicTransportStop[],
-): PublicTransportStop[] {
-  const groupsByName = new Map<string, PublicTransportStop[]>();
-
-  for (const stop of stops) {
-    const key = normalizeStopGroupingName(stop.name);
-    const groups = groupsByName.get(key) ?? [];
-    const groupIndex = groups.findIndex(
-      (candidate) =>
-        stopDistanceMeters(candidate.coordinate, stop.coordinate) <=
-        STOP_GROUPING_DISTANCE_METERS,
-    );
-
-    if (groupIndex === -1) {
-      groups.push({ ...stop, modes: normalizeModes(stop.modes) });
-    } else {
-      groups[groupIndex] = mergeStops(groups[groupIndex], stop);
-    }
-
-    groupsByName.set(key, groups);
-  }
-
-  return [...groupsByName.values()].flat();
-}
-
 
 /** Returns planar map-unit distance between two EPSG:3857 coordinates. */
 function mapCoordinateDistance(
@@ -775,7 +698,7 @@ async function fetchStopsForExtent(
  *
  * @param context - Current viewport, image size, and interface language.
  * @param signal - Abort signal for superseded pans, zooms, or layer hiding.
- * @returns Deduplicated passenger stops with no out-of-service/operational-only points.
+ * @returns Passenger stops deduplicated strictly by official feature identifier.
  * @throws {Error} When the official GeoAdmin service fails.
  */
 export async function loadPublicTransportStops(
@@ -798,7 +721,10 @@ export async function loadPublicTransportStops(
     }
   }
 
-  return groupPublicTransportStops([...stops.values()]);
+  // Recursive viewport subdivision can return the same feature more than
+  // once. The map above removes only those exact-ID duplicates; distinct
+  // official stops are never merged from name similarity or proximity.
+  return [...stops.values()];
 }
 
 /**
@@ -1013,7 +939,7 @@ export function getPublicTransportStopFromFeature(
   const stop = value as Partial<PublicTransportStop>;
   return typeof stop.name === 'string' &&
     Array.isArray(stop.modes) &&
-    Array.isArray(stop.stationIds)
+    typeof stop.stationId === 'string'
     ? (stop as PublicTransportStop)
     : null;
 }

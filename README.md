@@ -133,20 +133,24 @@ The accepted categories are train, metro, tram, bus, boat,
 gondola/cable-car, chairlift, and funicular. An empty transport field is accepted
 only when the official name ends with an explicit parenthesized known mode, such
 as `(téléphérique)`. The remaining stops are rendered as client-side vectors.
-Nearby records representing the same named
-interchange are merged, with the train symbol taking priority for train/bus
-combinations. Distinct facilities with different official names remain separate;
-when their icons would overlap, the symbols are temporarily fanned apart until a
-closer zoom reveals their real positions. Metro keeps its own popup label while
-using the train symbol on the map.
+Records are deduplicated only by their official feature identifier: the
+application does not infer an interchange from a similar name or a short
+distance. A single official feature can already advertise several recognized
+modes and is then represented by one marker, using the highest-priority mode
+symbol. Distinct official features remain separate even when their names or
+coordinates are almost identical; when their icons would overlap, the symbols
+are temporarily fanned apart until a closer zoom reveals their real positions.
+Metro keeps its own popup label while using the train symbol on the map.
 
 Clicking a visible stop while route creation is inactive highlights its map
 symbol and opens a compact panel. The header shows the official stop name and
-all detected transport modes. The panel then requests the next departures from
-the documented `transport.opendata.ch` stationboard API, combines the identifiers
-of grouped multimodal stops, and shows line, destination, predicted time, and
-positive delay when available. A short in-memory cache avoids repeating the same
-request when a popup is reopened.
+all detected transport modes. The panel then requests the next departures for
+that exact official identifier from the documented `transport.opendata.ch`
+stationboard API and shows line, destination, predicted time, and positive delay
+when available. A multimodal official stop naturally returns departures for
+its supported services without borrowing identifiers from neighbouring markers.
+A short in-memory cache avoids repeating the same request when a popup is
+reopened.
 
 Two localized links still open the official SBB/CFF/FFS timetable with the stop
 prefilled as either departure or destination. Departure loading is non-blocking:

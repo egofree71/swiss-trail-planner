@@ -2,9 +2,9 @@
  * Business context: loads the next public-transport departures for one selected
  * stop without coupling the map overlay to a specific timetable UI. The module
  * wraps the documented transport.opendata.ch stationboard endpoint, validates
- * its loosely typed JSON, combines multimodal stop identifiers, and keeps a
- * short in-memory cache to avoid unnecessary repeat requests while a popup is
- * reopened.
+ * its loosely typed JSON and keeps a short in-memory cache to avoid unnecessary
+ * repeat requests while a popup is reopened. Each map marker represents exactly
+ * one official stop identifier; multimodal departures come from that identifier.
  */
 
 import type { PublicTransportMode } from './publicTransportStops';
@@ -33,11 +33,11 @@ export interface StationBoardDeparture {
 export interface StationBoardResult {
   /** Chronologically sorted passenger departures. */
   departures: StationBoardDeparture[];
-  /** Modes confirmed by the timetable for the selected stop identifiers. */
+  /** Modes confirmed by the timetable for the selected official stop. */
   modes: PublicTransportMode[];
 }
 
-/** Number of departures requested for each underlying stop identifier. */
+/** Number of departures requested for the selected official stop. */
 const DEPARTURES_PER_STOP = 8;
 
 /** Cache duration in milliseconds; departures change often but not every click. */
@@ -47,7 +47,7 @@ const CACHE_DURATION_MS = 45_000;
 const STATIONBOARD_ENDPOINT =
   'https://transport.opendata.ch/v1/stationboard';
 
-/** One validated cache entry for a grouped stop. */
+/** One validated cache entry for an official stop identifier. */
 interface StationBoardCacheEntry {
   expiresAt: number;
   result: StationBoardResult;
@@ -157,8 +157,8 @@ function createLineLabel(journey: RawJourney): string {
 
 /**
  * Infers the passenger mode from timetable fields rather than map metadata.
- * Some BAV stop records list every mode available in a wider interchange even
- * when the selected physical stop serves only one of them.
+ * This confirms which modes currently have departures without borrowing modes
+ * or journeys from a neighbouring official stop.
  */
 function detectJourneyMode(journey: RawJourney): PublicTransportMode | null {
   const value = [journey.category, journey.name, journey.number]
@@ -335,17 +335,17 @@ function effectiveDepartureTimestamp(
 }
 
 /**
- * Deduplicates departures returned by multiple records of one multimodal stop.
- * Providers can publish rail and bus identifiers separately while returning
- * overlapping journeys, so time, line, and destination form the stable key.
+ * Deduplicates and sorts departures returned for one official stop.
+ * Time, line, and destination form a stable key when the provider repeats a
+ * journey in its loosely typed response.
  */
-function mergeStationBoards(
-  departureLists: StationBoardDeparture[][],
+function normalizeStationBoard(
+  stationDepartures: StationBoardDeparture[],
 ): StationBoardResult {
   const departures = new Map<string, StationBoardDeparture>();
   const modes = new Set<PublicTransportMode>();
 
-  for (const departure of departureLists.flat()) {
+  for (const departure of stationDepartures) {
     const key = [
       departure.plannedDeparture,
       departure.line.toLowerCase(),
@@ -388,58 +388,37 @@ function mergeStationBoards(
 }
 
 /**
- * Loads the next departures for one displayed stop.
+ * Loads the next departures for one displayed official stop.
  *
- * @param stationIds - One or more BAV identifiers merged into the map marker.
+ * @param stationId - BAV identifier attached to the selected map feature.
  * @param signal - Abort signal used when another stop is selected or closed.
  * @returns Sorted departures and transport modes confirmed by timetable data.
- * @throws {Error} When every provider request fails.
+ * @throws {Error} When the timetable provider request fails.
  */
 export async function loadStationBoard(
-  stationIds: string[],
+  stationId: string,
   signal: AbortSignal,
 ): Promise<StationBoardResult> {
-  const uniqueIds = [...new Set(stationIds.map((id) => id.trim()).filter(Boolean))]
-    .sort();
-  const cacheKey = uniqueIds.join('|');
-  const cached = stationBoardCache.get(cacheKey);
+  const normalizedId = stationId.trim();
+
+  if (!normalizedId) {
+    return { departures: [], modes: [] };
+  }
+
+  const cached = stationBoardCache.get(normalizedId);
 
   if (cached && cached.expiresAt > Date.now()) {
     return cached.result;
   }
 
-  const results = await Promise.allSettled(
-    uniqueIds.map((stationId) =>
-      fetchStationDepartures(stationId, signal),
-    ),
-  );
+  const departures = await fetchStationDepartures(normalizedId, signal);
 
   if (signal.aborted) {
     throw new DOMException('Stationboard request aborted.', 'AbortError');
   }
 
-  const successfulResults = results
-    .filter(
-      (
-        result,
-      ): result is PromiseFulfilledResult<StationBoardDeparture[]> =>
-        result.status === 'fulfilled',
-    )
-    .map((result) => result.value);
-
-  if (successfulResults.length === 0) {
-    const firstFailure = results.find(
-      (result): result is PromiseRejectedResult =>
-        result.status === 'rejected',
-    );
-
-    throw firstFailure?.reason instanceof Error
-      ? firstFailure.reason
-      : new Error('Stationboard loading failed.');
-  }
-
-  const result = mergeStationBoards(successfulResults);
-  stationBoardCache.set(cacheKey, {
+  const result = normalizeStationBoard(departures);
+  stationBoardCache.set(normalizedId, {
     expiresAt: Date.now() + CACHE_DURATION_MS,
     result,
   });

@@ -271,20 +271,22 @@ parenthesized qualifier of the official name, for records such as
 mistaking pure operating points or place names for passenger stops. Cable
 categories are mutually exclusive so `Standseilbahn` does not also match the
 generic `Seilbahn` cable-car rule. Metro keeps its own translated label while
-sharing the clear railway map symbol. Nearby records with the same normalized
-stop name are merged within a bounded ground-distance tolerance, so train/bus
-interchanges expose both modes while the train symbol remains visually primary.
-Nearby stops with different official names are never merged because they may
-have different timetables and CFF deep links. When such symbols would overlap at
-medium zoom, a deterministic pixel displacement fans them apart; the displacement
-is removed once their real coordinates are visually distinct at a closer zoom.
-The layer is disabled by default and its visibility preference is stored locally.
+sharing the clear railway map symbol. Identify results are deduplicated strictly
+by their official feature identifier. The client does not merge nearby records by
+normalized name or distance: one official feature may already expose several
+recognized transport modes, while two different identifiers can represent
+neighbouring facilities with different names, timetables, or CFF deep links. A
+multimodal feature receives one marker using the highest-priority mode symbol.
+When distinct official features would overlap at medium zoom, a deterministic
+pixel displacement fans them apart; the displacement is removed once their real
+coordinates are visually distinct at a closer zoom. The layer is disabled by
+default and its visibility preference is stored locally.
 
 A click first checks the already loaded stop vectors. A hit adds a dedicated
 selection halo below the icon and opens a compact project-owned panel. Its
 header contains the official stop name followed by all translated transport
-modes. The panel passes every original BAV identifier of a grouped stop to the
-`transport.opendata.ch` stationboard client. Results are validated, merged,
+modes. The panel passes only the selected feature's official BAV identifier to
+the `transport.opendata.ch` stationboard client. Results are validated,
 deduplicated, sorted by predicted departure time, and cached for 45 seconds.
 The UI shows the line, destination, predicted time, and positive delay when
 available. Requests are aborted when another stop is selected or the popup is
@@ -687,19 +689,19 @@ Owns the BAV layer identifier, abortable viewport identify requests, the
 passenger-scale identify clamp, bounded subdivision for dense results,
 multilingual attribute normalization, filtering of numeric operating-only,
 out-of-service, empty-mode, or unsupported-mode points, explicit accepted-mode
-classification, narrowly scoped name-qualifier fallback, nearby interchange grouping,
-preservation of original station identifiers,
-close-symbol fan layouts for distinct neighbouring stops, vector-layer creation,
-selection highlighting, and client-side symbol styling.
+classification, narrowly scoped name-qualifier fallback, strict deduplication by
+official feature identifier, preservation of multimodal metadata on one official
+stop, close-symbol fan layouts for distinct neighbouring stops, vector-layer
+creation, selection highlighting, and client-side symbol styling.
 
 ### `src/transport/stationBoard.ts`
 
 Wraps the documented `transport.opendata.ch/v1/stationboard` resource. It tries
-both raw and zero-padded station identifiers, validates the loose JSON contract,
-normalizes line labels and predicted times, merges multimodal boards, removes
-duplicates, sorts departures, and maintains the short in-memory cache. The
-module sends no custom headers because the provider documents browser CORS with
-that restriction.
+both raw and zero-padded forms of the selected official identifier, validates the
+loose JSON contract, normalizes line labels and predicted times, removes duplicate
+journeys, sorts departures, and maintains the short in-memory cache. It never
+combines timetables from neighbouring map features. The module sends no custom
+headers because the provider documents browser CORS with that restriction.
 
 ### `src/map/geoAdminPopup.ts`
 

@@ -164,7 +164,7 @@ export default function PublicTransportStopPopup({
     setDepartures([]);
     setConfirmedModes([]);
 
-    void loadStationBoard(stop.stationIds, controller.signal)
+    void loadStationBoard(stop.stationId, controller.signal)
       .then((result) => {
         setDepartures(result.departures);
         setConfirmedModes(result.modes);
@@ -180,7 +180,7 @@ export default function PublicTransportStopPopup({
       });
 
     return () => controller.abort();
-  }, [stop.id, stop.stationIds]);
+  }, [stop.id, stop.stationId]);
 
   return (
     <aside
