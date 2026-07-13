@@ -88,9 +88,9 @@ architecture document rather than duplicated here.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
-  data flows, technical choices, and planned evolution.
-- [Roadmap](ROADMAP.md): completed milestones, current priorities, and open
-  decisions.
+  data flows, and technical choices.
+- [Validation](docs/VALIDATION.md): release checks, routing scenarios, regression
+  cases, and a reusable test log.
 
 ## Production build and deployment
 

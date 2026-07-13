@@ -613,7 +613,8 @@ swiss-trail-planner/
 │   └── workflows/
 │       └── deploy.yml
 ├── docs/
-│   └── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md
+│   └── VALIDATION.md
 ├── src/
 │   ├── closures/
 │   │   └── trailClosures.ts
@@ -666,7 +667,6 @@ swiss-trail-planner/
 ├── package-lock.json
 ├── package.json
 ├── README.md
-├── ROADMAP.md
 ├── tsconfig.json
 └── vite.config.ts
 ```
@@ -916,7 +916,8 @@ messages, and OpenLayers control placement.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
-- `ROADMAP.md` tracks milestones, priorities, and open technical decisions.
+- `docs/VALIDATION.md` contains repeatable release checks, routing scenarios,
+  regression locations, and a test log.
 - `LICENSE` contains the MIT license.
 
 ## 17. Runtime flow
@@ -1045,58 +1046,18 @@ GPX handling performs no network request.
 - `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
-## 20. Planned evolution
+## 20. Validation and possible evolution
 
-### Phase 2B — Validate dynamic swissTLM3D routing
+Repeatable release checks, regional routing scenarios, known regression
+locations, browser coverage, and a reusable test log live in
+`docs/VALIDATION.md`. This keeps operational validation separate from the
+architecture description.
 
-Test known routes in several contrasting Swiss regions, compare generated
-geometry with the official map, measure request and graph performance, and
-inspect failures for missing endpoints, false connections, bridges, tunnels,
-or incomplete attributes.
-
-The identify-based cell loader now removes the fixed test region and provides
-useful evidence about whether browser-only on-demand routing is sufficient. A
-preprocessed graph or backend should be selected only if measured limits justify
-it.
-
-### Public-transport timetable follow-up
-
-The stop panel now loads departures on demand through the documented
-`transport.opendata.ch` API. This remains isolated from the geographic overlay
-so the provider can be replaced without changing map loading. A later iteration
-may add a manual refresh or a conservative timer while the popup remains open,
-but background polling should not be introduced without measuring API limits.
-
-### Phase 3 — Route editing
-
-Straight and dynamically routed waypoint creation, undo/redo, route reversal,
-route clearing, and elevation-aware GPX track export are implemented. The next
-steps are waypoint movement and insertion. The compact elevation-profile
-visualization is implemented.
-
-### Phase 4 — Production routing
-
-Introduce a separate data-preparation pipeline:
-
-```text
-swissTLM3D
-   │
-   ▼
-cleanup and topology
-   │
-   ▼
-routable graph
-   │
-   ▼
-local engine or API
-   │
-   ▼
-GeoJSON / GPX route
-```
-
-The dynamic browser prototype demonstrates that a custom graph and A* can be
-used with swissTLM3D. The final preprocessing pipeline, national graph delivery,
-and possible backend have not been selected yet.
+The main product scope is implemented. Further work should be driven by observed
+usage or validation results rather than by a fixed feature roadmap. Possible
+follow-ups include waypoint movement or insertion, focused automated regression
+tests, conservative timetable refresh, and a preprocessed routing graph or
+backend only if measured browser-routing limits justify that complexity.
 
 ## 21. When to evolve the architecture
 
