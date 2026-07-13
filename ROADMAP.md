@@ -79,10 +79,11 @@ attribute, API-volume, and route-quality problems before a national data
 pipeline or backend is selected.
 
 The public-transport stop layer is geographic and informational only. It
-filters out operating-only and explicitly out-of-service points, then shows the
-transport mode and official stop name. Live arrival and departure times are
-deliberately deferred until an appropriate official or openly licensed
-timetable service is selected.
+filters out operating-only and explicitly out-of-service points, groups nearby
+multimodal records, highlights the selected stop, and shows its official name
+with all detected transport modes. Links can hand the stop to the official
+SBB/CFF/FFS timetable as a departure or destination. Embedded live arrival and
+departure times remain deliberately deferred.
 
 ## Planned milestones
 

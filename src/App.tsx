@@ -42,6 +42,7 @@ import {
   type PublicTransportStop,
   type PublicTransportStopsDisplay,
   updatePublicTransportStopsDisplay,
+  updatePublicTransportStopSelection,
 } from './transport/publicTransportStops';
 import { downloadRouteGpx } from './export/gpx';
 import {
@@ -294,6 +295,11 @@ export default function App() {
     mapInformationRequestRef.current = null;
     setTrailClosurePopup(null);
     setPublicTransportStopPopup(null);
+    const stopDisplay = publicTransportStopsDisplayRef.current;
+
+    if (stopDisplay) {
+      updatePublicTransportStopSelection(stopDisplay, null);
+    }
   }, []);
 
   /**
@@ -741,6 +747,9 @@ export default function App() {
     publicTransportStopsDisplay.layer.setVisible(
       arePublicTransportStopsVisible,
     );
+    publicTransportStopsDisplay.selectionLayer.setVisible(
+      arePublicTransportStopsVisible,
+    );
 
     /*
      * OpenLayers has its own imperative lifecycle. This effect is the sole
@@ -784,6 +793,7 @@ export default function App() {
           zIndex: 10,
         }),
         trailClosuresLayer,
+        publicTransportStopsDisplay.selectionLayer,
         publicTransportStopsDisplay.layer,
         importedRouteDisplay.layer,
         routeDisplay.layer,
@@ -936,6 +946,7 @@ export default function App() {
     }
 
     display.layer.setVisible(arePublicTransportStopsVisible);
+    display.selectionLayer.setVisible(arePublicTransportStopsVisible);
 
     if (!arePublicTransportStopsVisible) {
       display.source.clear();
@@ -1040,10 +1051,7 @@ export default function App() {
         return;
       }
 
-      mapInformationRequestRef.current?.abort();
-      mapInformationRequestRef.current = null;
-      setTrailClosurePopup(null);
-      setPublicTransportStopPopup(null);
+      closeMapInformationPopup();
 
       if (canInspectStops) {
         const stopDisplay = publicTransportStopsDisplayRef.current;
@@ -1060,7 +1068,8 @@ export default function App() {
 
         // Stops are already filtered and localized during viewport loading, so
         // opening their compact popup requires no additional network request.
-        if (stop) {
+        if (stop && stopDisplay) {
+          updatePublicTransportStopSelection(stopDisplay, stop);
           setPublicTransportStopPopup(stop);
           return;
         }

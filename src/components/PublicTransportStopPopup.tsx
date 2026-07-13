@@ -1,10 +1,11 @@
 /**
- * Business context: presents only the passenger information useful while
- * planning a hike: transport mode in the header and official stop name in the
- * body. Administrative BAV fields stay hidden to keep the panel compact.
+ * Business context: keeps a selected passenger stop tied to practical trip
+ * planning. The compact panel identifies the stop and its transport modes, then
+ * hands departure/destination planning to the official SBB/CFF/FFS timetable.
  */
 import { useEffect } from 'react';
 import { useI18n } from '../i18n/I18nContext';
+import type { Language } from '../i18n/translations';
 import type {
   PublicTransportMode,
   PublicTransportStop,
@@ -14,7 +15,7 @@ import type {
 interface PublicTransportStopPopupProps {
   /** Stop feature already loaded and filtered by the vector overlay. */
   stop: PublicTransportStop;
-  /** Dismisses the panel. */
+  /** Dismisses the panel and its map selection halo. */
   onClose: () => void;
 }
 
@@ -38,19 +39,43 @@ const MODE_LABEL_KEYS: Record<
   other: 'transportStops.mode.other',
 };
 
-/** Renders a compact stop panel with no timetable or administrative metadata. */
+/** Manual SBB deep-link location parameters documented for timetable forms. */
+type SbbLocationParameter = 'von' | 'nach';
+
+/** Builds a localized official timetable URL with one prefilled stop field. */
+function createSbbTimetableUrl(
+  language: Language,
+  parameter: SbbLocationParameter,
+  stopName: string,
+): string {
+  const url = new URL(`https://www.sbb.ch/${language}`);
+  url.searchParams.set(parameter, stopName);
+  return url.toString();
+}
+
+/** Renders a compact stop panel with official timetable hand-off links. */
 export default function PublicTransportStopPopup({
   stop,
   onClose,
 }: PublicTransportStopPopupProps) {
-  const { t } = useI18n();
-  const title = stop.modes
-    .map((mode) =>
-      mode === 'other'
-        ? stop.rawMeansOfTransport
-        : t(MODE_LABEL_KEYS[mode]),
-    )
-    .join(' / ');
+  const { language, t } = useI18n();
+  const modeLabels = stop.modes.map((mode) =>
+    mode === 'other'
+      ? stop.rawMeansOfTransport
+      : t(MODE_LABEL_KEYS[mode]),
+  );
+  const modesText = modeLabels.join(', ');
+  const title = `${stop.name} (${modesText})`;
+  const departureUrl = createSbbTimetableUrl(
+    language,
+    'von',
+    stop.name,
+  );
+  const destinationUrl = createSbbTimetableUrl(
+    language,
+    'nach',
+    stop.name,
+  );
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -70,7 +95,10 @@ export default function PublicTransportStopPopup({
       aria-label={title}
     >
       <header className="map-information-popup-header">
-        <strong>{title}</strong>
+        <div className="public-transport-stop-heading">
+          <strong>{stop.name}</strong>
+          <span> ({modesText})</span>
+        </div>
         <button
           type="button"
           className="map-information-popup-close"
@@ -83,7 +111,22 @@ export default function PublicTransportStopPopup({
       </header>
 
       <div className="map-information-popup-body">
-        <p className="public-transport-stop-name">{stop.name}</p>
+        <div className="public-transport-stop-links">
+          <a href={departureUrl} target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 19 19 5" />
+              <path d="M10 5h9v9" />
+            </svg>
+            <span>{t('transportStops.sbbDeparture')}</span>
+          </a>
+          <a href={destinationUrl} target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 19 19 5" />
+              <path d="M10 5h9v9" />
+            </svg>
+            <span>{t('transportStops.sbbDestination')}</span>
+          </a>
+        </div>
       </div>
     </aside>
   );

@@ -642,11 +642,58 @@ select {
   color: #5c6872;
 }
 
-.public-transport-stop-name {
-  color: #17212b !important;
-  font-size: 1.05rem;
-  font-weight: 650;
-  line-height: 1.4;
+.public-transport-stop-heading {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.public-transport-stop-heading strong {
+  font-weight: 700;
+}
+
+.public-transport-stop-heading span {
+  color: #5c6872;
+  font-weight: 400;
+}
+
+.public-transport-stop-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.public-transport-stop-links a {
+  display: flex;
+  min-height: 2.65rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgb(32 47 60 / 16%);
+  border-radius: 8px;
+  color: #1769e0;
+  background: rgb(23 105 224 / 6%);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.public-transport-stop-links a:hover {
+  background: rgb(23 105 224 / 11%);
+}
+
+.public-transport-stop-links a:focus-visible {
+  outline: 3px solid rgb(23 105 224 / 40%);
+  outline-offset: 2px;
+}
+
+.public-transport-stop-links svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .map-information-popup-error {

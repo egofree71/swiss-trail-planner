@@ -259,16 +259,21 @@ selected attributes into client-side OpenLayers features.
 Entries without a stop name or usable means of transport, and entries whose type
 explicitly indicates an out-of-service stop, are omitted. Remaining means of
 transport are normalized into train, tram, bus, boat, cable-car, funicular, or
-fallback categories and receive distinct blue map symbols. The layer is disabled
-by default and its visibility preference is stored locally.
+fallback categories and receive distinct blue map symbols. Metro descriptions
+are normalized to the train category. Nearby records with the same normalized
+stop name are merged within a bounded ground-distance tolerance, so train/bus
+interchanges expose both modes while the train symbol remains visually primary.
+The layer is disabled by default and its visibility preference is stored locally.
 
-A click first checks the already loaded stop vectors. A hit opens a compact
-project-owned panel whose header contains the translated transport mode and
-whose body contains only the official stop name. No additional popup request is
-needed, administrative fields remain hidden, and live timetable departures are
-outside the current scope. If no stop is hit, the same map interaction may then
-identify a visible closure; only closure HTML passes through the shared
-sanitizer.
+A click first checks the already loaded stop vectors. A hit adds a dedicated
+selection halo below the icon and opens a compact project-owned panel. Its
+header contains the official stop name followed by all translated transport
+modes. Two localized SBB/CFF/FFS deep links prefill the stop as departure or
+destination using the documented `von` and `nach` parameters. No additional
+GeoAdmin popup request is needed, administrative fields remain hidden, and live
+timetable departures are outside the current scope. If no stop is hit, the same
+map interaction may then identify a visible closure; only closure HTML passes
+through the shared sanitizer.
 
 For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
 `MapServer/identify` endpoint for two technical layers:
@@ -645,9 +650,11 @@ state.
 
 ### `src/components/PublicTransportStopPopup.tsx`
 
-Renders the compact structured stop panel. The translated transport mode is the
-header and the official stop name is the only body content. It intentionally
-hides administrative attributes and timetable departures.
+Renders the compact structured stop panel. The official stop name and all
+translated modes share the header, while the body exposes localized links that
+prefill the stop as departure or destination on the official SBB/CFF/FFS
+timetable. Administrative attributes and embedded live departures remain
+outside the component.
 
 ### `src/closures/trailClosures.ts`
 
@@ -660,8 +667,9 @@ sanitization lives under `src/map/geoAdminPopup.ts`.
 
 Owns the BAV layer identifier, abortable viewport identify requests, bounded
 subdivision for dense results, multilingual attribute normalization, filtering
-of operating-only or out-of-service points, mode classification, vector-layer
-creation, and client-side symbol styling.
+of operating-only or out-of-service points, mode classification, nearby
+interchange grouping, vector-layer creation, selection highlighting, and
+client-side symbol styling.
 
 ### `src/map/geoAdminPopup.ts`
 

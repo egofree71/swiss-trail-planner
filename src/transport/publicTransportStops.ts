@@ -9,9 +9,14 @@ import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
 import Feature, { type FeatureLike } from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
+import { toLonLat } from 'ol/proj.js';
+import { getDistance } from 'ol/sphere.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
+import CircleStyle from 'ol/style/Circle.js';
+import Fill from 'ol/style/Fill.js';
 import Icon from 'ol/style/Icon.js';
+import Stroke from 'ol/style/Stroke.js';
 import Style from 'ol/style/Style.js';
 import boatIconUrl from '../assets/public-transport-stops/boat.png';
 import busIconUrl from '../assets/public-transport-stops/bus.png';
@@ -64,6 +69,20 @@ export type PublicTransportMode =
   | 'funicular'
   | 'other';
 
+/** Primary-mode ordering keeps the most structurally useful symbol visible. */
+const MODE_PRIORITY: PublicTransportMode[] = [
+  'train',
+  'tram',
+  'boat',
+  'cableCar',
+  'funicular',
+  'bus',
+  'other',
+];
+
+/** Maximum ground distance in metres for merging records of one named stop. */
+const STOP_GROUPING_DISTANCE_METERS = 150;
+
 /** Passenger stop displayed on the map and in the compact information popup. */
 export interface PublicTransportStop {
   /** Stable identifier from the official BAV layer. */
@@ -84,6 +103,10 @@ export interface PublicTransportStopsDisplay {
   layer: VectorLayer<VectorSource<Feature<Point>>>;
   /** Mutable source replaced after each completed viewport request. */
   source: VectorSource<Feature<Point>>;
+  /** Halo layer that keeps the selected stop identifiable under the popup. */
+  selectionLayer: VectorLayer<VectorSource<Feature<Point>>>;
+  /** Source containing at most one selected-stop marker. */
+  selectionSource: VectorSource<Feature<Point>>;
 }
 
 /** GeoJSON point returned by the identify service. */
@@ -211,6 +234,16 @@ function detectTransportModes(value: string): PublicTransportMode[] {
     modes.add('boat');
   }
 
+  if (
+    /metro|metropolitain|metropolitana|u bahn|underground|subway/.test(
+      normalized,
+    )
+  ) {
+    // Metro services use the train symbol because the official generic metro
+    // crop is visually ambiguous at map scale.
+    modes.add('train');
+  }
+
   if (/tram|strassenbahn|streetcar/.test(normalized)) {
     modes.add('tram');
   }
@@ -322,6 +355,106 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
   };
 }
 
+/**
+ * Reduces common station suffixes so nearby train and bus records can be
+ * grouped when providers publish them as separate stop objects.
+ */
+function normalizeStopGroupingName(name: string): string {
+  const normalized = normalizeText(name);
+  const withoutStationSuffix = normalized.replace(
+    /(?:\s+(?:gare|bahnhof|stazione|station|hb|cff|sbb|ffs))+$/,
+    '',
+  );
+
+  return withoutStationSuffix || normalized;
+}
+
+/** Returns the stable display priority of one normalized transport mode. */
+function getModePriority(mode: PublicTransportMode): number {
+  const priority = MODE_PRIORITY.indexOf(mode);
+  return priority === -1 ? MODE_PRIORITY.length : priority;
+}
+
+/** Sorts modes and drops the generic fallback when a known mode is present. */
+function normalizeModes(
+  modes: Iterable<PublicTransportMode>,
+): PublicTransportMode[] {
+  const uniqueModes = new Set(modes);
+
+  if (uniqueModes.size > 1) {
+    uniqueModes.delete('other');
+  }
+
+  return [...uniqueModes].sort(
+    (first, second) => getModePriority(first) - getModePriority(second),
+  );
+}
+
+/** Returns geodesic ground distance between two EPSG:3857 coordinates. */
+function stopDistanceMeters(
+  first: Coordinate,
+  second: Coordinate,
+): number {
+  return getDistance(toLonLat(first), toLonLat(second));
+}
+
+/**
+ * Merges two records representing the same passenger stop.
+ * The coordinate and label of the highest-priority mode are retained so a
+ * train/bus interchange uses the train symbol and the railway stop name.
+ */
+function mergeStops(
+  current: PublicTransportStop,
+  incoming: PublicTransportStop,
+): PublicTransportStop {
+  const currentPrimary = current.modes[0] ?? 'other';
+  const incomingPrimary = incoming.modes[0] ?? 'other';
+  const preferIncoming =
+    getModePriority(incomingPrimary) < getModePriority(currentPrimary);
+  const rawMeans = new Set(
+    [current.rawMeansOfTransport, incoming.rawMeansOfTransport].filter(Boolean),
+  );
+
+  return {
+    id: [current.id, incoming.id].sort().join('|'),
+    name: preferIncoming ? incoming.name : current.name,
+    modes: normalizeModes([...current.modes, ...incoming.modes]),
+    rawMeansOfTransport: [...rawMeans].join(' / '),
+    coordinate: preferIncoming ? incoming.coordinate : current.coordinate,
+  };
+}
+
+/**
+ * Groups nearby records with the same normalized stop name.
+ * Separate platform or mode records are common around railway stations; the
+ * distance guard avoids combining identically named stops in another district.
+ */
+function groupPublicTransportStops(
+  stops: PublicTransportStop[],
+): PublicTransportStop[] {
+  const groupsByName = new Map<string, PublicTransportStop[]>();
+
+  for (const stop of stops) {
+    const key = normalizeStopGroupingName(stop.name);
+    const groups = groupsByName.get(key) ?? [];
+    const groupIndex = groups.findIndex(
+      (candidate) =>
+        stopDistanceMeters(candidate.coordinate, stop.coordinate) <=
+        STOP_GROUPING_DISTANCE_METERS,
+    );
+
+    if (groupIndex === -1) {
+      groups.push({ ...stop, modes: normalizeModes(stop.modes) });
+    } else {
+      groups[groupIndex] = mergeStops(groups[groupIndex], stop);
+    }
+
+    groupsByName.set(key, groups);
+  }
+
+  return [...groupsByName.values()].flat();
+}
+
 /** Splits an extent into four overlapping-free quadrants. */
 function subdivideExtent(extent: Extent): Extent[] {
   const centerX = (extent[0] + extent[2]) / 2;
@@ -413,7 +546,7 @@ export async function loadPublicTransportStops(
     }
   }
 
-  return [...stops.values()];
+  return groupPublicTransportStops([...stops.values()]);
 }
 
 /**
@@ -431,17 +564,6 @@ const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
   other: otherIconUrl,
 };
 
-/** Primary-mode ordering keeps the most structurally useful symbol visible. */
-const MODE_PRIORITY: PublicTransportMode[] = [
-  'train',
-  'tram',
-  'boat',
-  'cableCar',
-  'funicular',
-  'bus',
-  'other',
-];
-
 /** Shared immutable OpenLayers styles, one per transport category. */
 const MODE_STYLES = new Map<PublicTransportMode, Style>(
   MODE_PRIORITY.map((mode) => [
@@ -456,27 +578,46 @@ const MODE_STYLES = new Map<PublicTransportMode, Style>(
   ]),
 );
 
+/**
+ * Selection halo drawn below the stop icon so the popup remains visually tied
+ * to one marker even when several stops are clustered nearby.
+ */
+const SELECTED_STOP_STYLE = new Style({
+  image: new CircleStyle({
+    radius: 17,
+    fill: new Fill({ color: 'rgba(255, 255, 255, 0.88)' }),
+    stroke: new Stroke({ color: '#1769e0', width: 3 }),
+  }),
+});
+
 /** Selects the first mode according to the stable visual priority. */
 function getPrimaryMode(modes: PublicTransportMode[]): PublicTransportMode {
   return MODE_PRIORITY.find((mode) => modes.includes(mode)) ?? 'other';
 }
 
-/** Creates the persistent vector layer for filtered passenger stops. */
+/** Creates the persistent vector layers for filtered and selected stops. */
 export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay {
   const source = new VectorSource<Feature<Point>>({
     attributions: PUBLIC_TRANSPORT_STOPS_ATTRIBUTION,
   });
+  const selectionSource = new VectorSource<Feature<Point>>();
+  const selectionLayer = new VectorLayer({
+    source: selectionSource,
+    minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
+    zIndex: 15,
+    style: SELECTED_STOP_STYLE,
+  });
   const layer = new VectorLayer({
     source,
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
-    zIndex: 15,
+    zIndex: 16,
     style: (feature) => {
       const stop = getPublicTransportStopFromFeature(feature);
       return stop ? MODE_STYLES.get(getPrimaryMode(stop.modes)) : undefined;
     },
   });
 
-  return { layer, source };
+  return { layer, source, selectionLayer, selectionSource };
 }
 
 /** Replaces the visible stop features after one completed viewport load. */
@@ -495,6 +636,24 @@ export function updatePublicTransportStopsDisplay(
 
   display.source.clear();
   display.source.addFeatures(features);
+}
+
+/** Updates the selected-stop halo without changing the loaded stop features. */
+export function updatePublicTransportStopSelection(
+  display: PublicTransportStopsDisplay,
+  stop: PublicTransportStop | null,
+): void {
+  display.selectionSource.clear();
+
+  if (!stop) {
+    return;
+  }
+
+  display.selectionSource.addFeature(
+    new Feature<Point>({
+      geometry: new Point(stop.coordinate),
+    }),
+  );
 }
 
 /** Reads structured stop metadata from one feature hit by OpenLayers. */

@@ -128,12 +128,15 @@ detailed zoom levels, the application requests visible stop features through
 the GeoAdmin identify API, removes operational or explicitly out-of-service
 points that do not provide passenger transport, and renders the remaining stops
 as client-side vectors with distinct symbols for train, tram, bus, boat, and
-cable transport.
+cable transport. Nearby records representing the same named interchange are
+merged, with the train symbol taking priority for train/bus combinations. Metro
+records use the train symbol rather than the ambiguous generic fallback icon.
 
-Clicking a visible stop while route creation is inactive opens a compact panel.
-Its header shows the localized means of transport and its body shows only the
-official stop name. Administrative fields and live departure times are not
-included in this first integration.
+Clicking a visible stop while route creation is inactive highlights its map
+symbol and opens a compact panel. The header shows the official stop name and
+all detected transport modes. Two localized links open the official SBB/CFF/FFS
+timetable with the stop prefilled as either departure or destination.
+Administrative fields and live departure times are not included.
 
 ## Location search
 
