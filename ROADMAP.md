@@ -56,6 +56,7 @@ The application should remain lightweight and map-centered:
 - [x] Add a unified Layers menu for base maps and optional information overlays.
 - [x] Show closures by default and remember the user's visibility choice.
 - [x] Add localized click information for visible closures.
+- [x] Add official military shooting notices and danger zones with localized click information and selected-polygon highlighting.
 - [x] Add optional official public-transport stops to the Layers menu.
 - [x] Filter passenger-relevant stops, preserve mode-specific symbols, and show compact localized stop details.
 - [x] Load and display the next public-transport departures on demand.
@@ -80,12 +81,19 @@ attribute, API-volume, and route-quality problems before a national data
 pipeline or backend is selected.
 
 The public-transport stop layer is geographic and informational only. It
-filters out operating-only and explicitly out-of-service points, groups nearby
-multimodal records, highlights the selected stop, and shows its official name
-with all detected transport modes. The compact panel loads the next departures
-from `transport.opendata.ch`, while links can still hand the stop to the official
+filters out operating-only, explicitly out-of-service, and unsupported-mode
+points. Distinct official stop identifiers remain separate even when nearby;
+only their symbols may be fanned apart visually. A single official multimodal
+feature keeps one marker and all detected modes. The selected stop is
+highlighted, and its compact panel loads the next departures from
+`transport.opendata.ch`, while links can still hand the stop to the official
 SBB/CFF/FFS timetable as a departure or destination. Automatic background
 refresh remains deliberately deferred.
+
+The information-layer menu also includes the official Swiss Armed Forces
+shooting-notice and danger-zone WMS. It is safety information shown by default,
+with localized click metadata, a pale vector highlight for the selected polygon,
+and compact output that omits PDF download links.
 
 ## Planned milestones
 

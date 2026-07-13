@@ -835,7 +835,7 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
   const selectionLayer = new VectorLayer({
     source: selectionSource,
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
-    zIndex: 15,
+    zIndex: 14,
     style: (feature, resolution) => {
       const geometry = feature.getGeometry();
       const coordinate = geometry instanceof Point
@@ -854,7 +854,7 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
   const layer = new VectorLayer({
     source,
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
-    zIndex: 16,
+    zIndex: 15,
     style: (feature, resolution) => {
       const stop = getPublicTransportStopFromFeature(feature);
 

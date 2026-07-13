@@ -17,6 +17,10 @@ interface MapLayersSelectorProps {
   areTrailClosuresVisible: boolean;
   /** Shows or hides the official closure overlay. */
   onTrailClosuresChange: (isVisible: boolean) => void;
+  /** Whether official shooting notices and danger zones are visible. */
+  areShootingDangerZonesVisible: boolean;
+  /** Shows or hides the official military danger-zone overlay. */
+  onShootingDangerZonesChange: (isVisible: boolean) => void;
   /** Whether official public-transport stops are currently visible. */
   arePublicTransportStopsVisible: boolean;
   /** Shows or hides the official stop overlay. */
@@ -44,6 +48,8 @@ export default function MapLayersSelector({
   onBaseMapChange,
   areTrailClosuresVisible,
   onTrailClosuresChange,
+  areShootingDangerZonesVisible,
+  onShootingDangerZonesChange,
   arePublicTransportStopsVisible,
   onPublicTransportStopsChange,
 }: MapLayersSelectorProps) {
@@ -188,6 +194,41 @@ export default function MapLayersSelector({
                 className={[
                   'map-layer-option-toggle',
                   areTrailClosuresVisible
+                    ? 'map-layer-option-toggle--checked'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-hidden="true"
+              >
+                <span />
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className={[
+                'map-layer-option',
+                'map-layer-option--overlay',
+                areShootingDangerZonesVisible
+                  ? 'map-layer-option--selected'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              role="menuitemcheckbox"
+              aria-checked={areShootingDangerZonesVisible}
+              onClick={() =>
+                onShootingDangerZonesChange(
+                  !areShootingDangerZonesVisible,
+                )
+              }
+            >
+              <span>{t('shootingDangerZones.layer')}</span>
+              <span
+                className={[
+                  'map-layer-option-toggle',
+                  areShootingDangerZonesVisible
                     ? 'map-layer-option-toggle--checked'
                     : '',
                 ]

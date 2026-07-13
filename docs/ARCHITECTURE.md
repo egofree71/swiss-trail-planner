@@ -1,7 +1,7 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: selectable raster backgrounds, hiking, closure, and
-> public-transport overlays,
+> Documented state: selectable raster backgrounds, hiking, closure, military
+> shooting-danger, and public-transport overlays,
 > search, geolocation, fullscreen, manual route creation, route statistics,
 > elevation profile, GPX export, and experimental on-demand swissTLM3D routing
 > around user-selected positions.
@@ -37,6 +37,8 @@ It can:
 - display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
 - show the official ASTRA hiking-trail closures and detours WMS overlay;
 - identify a visible closure and display its localized official metadata;
+- show the official Swiss Armed Forces shooting-notice and danger-zone WMS overlay;
+- identify a visible military danger zone, highlight its polygon, and display compact localized official metadata;
 - optionally show official public-transport stops and inspect localized stop metadata;
 - search official Swiss location indexes;
 - display a selected search result as a vector marker;
@@ -96,10 +98,11 @@ The project evolves through independent functional layers:
 9. four-language interface and localized GeoAdmin search;
 10. elevation-aware GPX export and read-only GPX reference loading;
 11. official hiking-closure overlay and localized feature information;
-12. optional public-transport stop overlay and localized stop information;
-13. waypoint editing;
-14. repeatable routing-data preparation;
-15. reliable national hiking routing.
+12. official military shooting-danger overlay and localized feature information;
+13. optional public-transport stop overlay and localized stop information;
+14. waypoint editing;
+15. repeatable routing-data preparation;
+16. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -151,6 +154,8 @@ Browser
    ├── OpenLayers Map / View
    │      ├── TileLayer: national map (JPEG)
    │      ├── TileLayer: hiking trails (transparent PNG)
+   │      ├── TileLayer: military shooting danger zones (transparent WMS)
+   │      ├── VectorLayer: selected military danger-zone polygon
    │      ├── TileLayer: hiking closures and detours (transparent WMS)
    │      ├── VectorLayer: filtered passenger public-transport stops
    │      ├── VectorLayer: imported read-only GPX geometry
@@ -167,8 +172,8 @@ Browser
    │
    └── HTTPS requests
           ├── wmts.geo.admin.ch (base maps and hiking trails)
-          ├── wms.geo.admin.ch (closures and detours portrayal)
-          ├── api3.geo.admin.ch (search, routing and stop identify, closure popup, and elevation profile)
+          ├── wms.geo.admin.ch (closure, detour, and military danger-zone portrayal)
+          ├── api3.geo.admin.ch (search, routing, information-layer inspection, and elevation profile)
           └── transport.opendata.ch (on-demand public-transport departures)
 
 Deployment
@@ -195,8 +200,8 @@ selected route section.
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
-| GeoAdmin HTML popup API | Localized official closure metadata |
-| GeoAdmin WMS | Official server-rendered closure and detour symbology |
+| GeoAdmin HTML popup API | Localized official closure and military danger-zone metadata |
+| GeoAdmin WMS | Official server-rendered closure, detour, and military danger-zone symbology |
 | OpenLayers vector styling | Filtered public-transport stop symbols by normalized mode |
 | transport.opendata.ch | Documented JSON stationboard for on-demand next departures |
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
@@ -249,6 +254,30 @@ does not modify routing
 costs or graph connectivity. Users decide whether a visible closure affects
 their planned route.
 
+The military safety overlay uses the official WMS layer
+`ch.vbs.schiessanzeigen`. Its server-side portrayal keeps the published danger
+zones visually consistent with the federal map viewer. The OpenLayers tile
+layer applies partial opacity so map detail and underlying information symbols
+remain readable through large polygons. The layer is enabled by default because
+live-fire activity can make a planned hiking area unsafe, but it shares the
+detailed-zoom threshold used by the hiking and closure overlays. Its explicit
+visibility choice is stored independently in local browser storage.
+
+When the layer is visible and route creation is inactive, the same map-click
+pipeline identifies a matching danger-zone polygon and asks GeoAdmin to return
+its geometry in EPSG:3857 GeoJSON. The official WMS and a small client-side
+selection layer are rendered above hiking closures and public-transport stop
+symbols, while imported and editable routes remain above the safety overlay.
+The selected polygon uses a pale fill and orange outline. The highlight is
+cleared with the information panel, when the layer is hidden, when the language
+changes, or when route creation starts.
+The localized official `htmlPopup` still passes through the common sanitizer,
+and a layer-specific final pass removes PDF download links while preserving the
+principal place, contact, and current shooting-date information. A visible
+closure keeps click priority when both portrayals overlap. Like the closure
+layer, the military overlay is informational only and does not change route
+costs or connectivity.
+
 The optional public-transport stop overlay uses the official feature layer
 `ch.bav.haltestellen-oev`, but does not display its unfiltered raster portrayal.
 The source dataset also contains operational and retired points that are not
@@ -294,9 +323,10 @@ positive delay when available. The date heading includes the weekday so sparse
 or weekend timetables do not make a next-day departure look like a same-day
 service. Requests are aborted when another stop is selected or the popup is
 closed, and timetable failure does not hide the stop or its two localized
-SBB/CFF/FFS deep links. If no stop is hit, the same map interaction may then
-identify a visible closure; only closure HTML passes through the shared
-sanitizer.
+SBB/CFF/FFS deep links. If no stop is hit, the same map interaction checks a
+visible hiking closure and then a visible military danger zone. Both official
+HTML popups pass through the shared sanitizer; the danger-zone module also
+removes PDF download links.
 
 For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
 `MapServer/identify` endpoint for two technical layers:
@@ -587,6 +617,8 @@ swiss-trail-planner/
 ├── src/
 │   ├── closures/
 │   │   └── trailClosures.ts
+│   ├── dangers/
+│   │   └── shootingDangerZones.ts
 │   ├── transport/
 │   │   └── publicTransportStops.ts
 │   ├── components/
@@ -600,6 +632,7 @@ swiss-trail-planner/
 │   │   ├── RouteExportDialog.tsx
 │   │   ├── RouteImportControl.tsx
 │   │   ├── RouteStatistics.tsx
+│   │   ├── ShootingDangerZonePopup.tsx
 │   │   └── TrailClosurePopup.tsx
 │   ├── export/
 │   │   └── gpx.ts
@@ -657,8 +690,8 @@ Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
 switchable. The component does not know about OpenLayers; `App.tsx` owns the
 actual layer sources and visibility. Outside pointer presses and Escape close
-the menu. It owns independent switches for closures and public-transport stops without
-adding another permanent map button.
+the menu. It owns independent switches for hiking closures, military danger
+zones, and public-transport stops without adding another permanent map button.
 
 ### `src/components/MapInformationPopup.tsx`
 
@@ -670,6 +703,12 @@ error states, and sanitized HTML container used by official information layers.
 Supplies closure-specific translations to the shared information panel. Escape
 and the close button dismiss the panel without changing map, route, or layer
 state.
+
+### `src/components/ShootingDangerZonePopup.tsx`
+
+Supplies shooting-notice and military danger-zone translations to the shared
+information panel. Escape and the close button dismiss the panel without
+changing map, route, or layer state.
 
 ### `src/components/PublicTransportStopPopup.tsx`
 
@@ -686,6 +725,15 @@ Owns the ASTRA layer identifier, WMS source factory, scale-aware identify
 request, localized HTML-popup request, response validation, cancellation, and
 popup retrieval. Network contracts remain outside React; shared HTML
 sanitization lives under `src/map/geoAdminPopup.ts`.
+
+### `src/dangers/shootingDangerZones.ts`
+
+Owns the Swiss Armed Forces layer identifier, WMS source factory, scale-aware
+identify request, returned GeoJSON polygon parsing, selected-area vector layer,
+localized HTML-popup request, response validation, cancellation, and compact
+popup cleanup. It reuses the shared HTML sanitizer and then removes PDF download
+links while retaining the principal official metadata and current shooting
+dates.
 
 ### `src/transport/publicTransportStops.ts`
 
@@ -709,9 +757,9 @@ headers because the provider documents browser CORS with that restriction.
 
 ### `src/map/geoAdminPopup.ts`
 
-Sanitizes official GeoAdmin closure-popup fragments, keeping only safe
-semantic elements, links, and images. Public-transport stop panels use structured
-feature data and do not inject provider HTML.
+Sanitizes official GeoAdmin closure and military danger-zone popup fragments,
+keeping only safe semantic elements, links, and images. Public-transport stop
+panels use structured feature data and do not inject provider HTML.
 
 ### `src/components/LanguageSelector.tsx`
 
@@ -880,48 +928,49 @@ messages, and OpenLayers control placement.
 5. The Layers menu changes the base-map source or toggles information overlays.
 6. The rendered hiking overlay starts loading when zoom moves beyond level 12.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
-8. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
-9. A map click inspects the loaded stop vectors first and then a visible closure.
-10. A stop opens a compact structured panel immediately and starts an abortable stationboard request; a closure fetches and sanitizes the localized official popup.
-11. Selecting a GPX parses it locally, replaces the read-only reference layer,
+8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
+9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
+10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
+11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices.
+12. Selecting a GPX parses it locally, replaces the read-only reference layer,
     and fits the map to the imported geometry.
-12. The route button toggles route-creation mode and the crosshair cursor.
-13. Entering route mode attaches a map `singleclick` listener and reveals the
+13. The route button toggles route-creation mode and the crosshair cursor.
+14. Entering route mode attaches a map `singleclick` listener and reveals the
     route toolbar.
-14. With snapping disabled, a click stores a direct section immediately.
-15. The first snapped click derives and loads a local 3 × 3 cell group while
+15. With snapping disabled, a click stores a direct section immediately.
+16. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
-16. Dense identify requests are subdivided when either layer reaches 200 results.
-17. Returned road vertices become graph nodes and edges; hiking geometry marks
+17. Dense identify requests are subdivided when either layer reaches 200 results.
+18. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-18. The first clicked point is snapped to the nearest walkable segment.
-19. Later clicks derive a corridor of cells between waypoints, load only missing
+19. The first clicked point is snapped to the nearest walkable segment.
+20. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-20. A disconnected or empty corridor is retried once with a wider cell radius.
-21. If no routable path remains, the current click becomes a free point or a
+21. A disconnected or empty corridor is retried once with a wider cell radius.
+22. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-22. Updating route history rebuilds the route line and waypoint features.
-23. Distance is recalculated locally from the flattened route geometry.
-24. After a short debounce, an abortable profile request refreshes ascent,
+23. Updating route history rebuilds the route line and waypoint features.
+24. Distance is recalculated locally from the flattened route geometry.
+25. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-25. The profile button reveals or hides the SVG chart without another request.
-26. Undo moves the last complete step to redo; redo restores it without routing.
-27. Reversal rebuilds immutable steps in the opposite order and clears redo.
-28. Deletion clears both applied and redo histories and hides the summary.
-29. GPX export opens a modal naming form before any XML is generated.
-30. Confirming the form converts the flattened route to WGS 84, merges exact
+26. The profile button reveals or hides the SVG chart without another request.
+27. Undo moves the last complete step to redo; redo restores it without routing.
+28. Reversal rebuilds immutable steps in the opposite order and clears redo.
+29. Deletion clears both applied and redo histories and hides the summary.
+30. GPX export opens a modal naming form before any XML is generated.
+31. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-31. Changing language updates interface text, number formatting, document
+32. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-32. Leaving route mode removes the click listener and aborts active network work
+33. Leaving route mode removes the click listener and aborts active network work
     while keeping completed cells, route geometry, and statistics available.
-33. The fullscreen button requests fullscreen for the root application element.
-34. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-35. Location search and browser geolocation continue to operate independently.
-36. On unmount, map listeners, timers, requests, references, and the map target
+34. The fullscreen button requests fullscreen for the root application element.
+35. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+36. Location search and browser geolocation continue to operate independently.
+37. On unmount, map listeners, timers, requests, references, and the map target
     are cleaned up by their owning components.
-37. A push to `main` triggers the Pages workflow, which builds and deploys
+38. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 
@@ -930,7 +979,8 @@ messages, and OpenLayers control placement.
 Initial base-map failure is blocking because the application cannot function
 without a map. Isolated later tile failures do not hide an already usable map.
 
-Hiking-overlay, closure-WMS, public-transport viewport-loading, and stationboard failures remain non-blocking.
+Hiking-overlay, closure-WMS, military danger-zone WMS, public-transport
+viewport-loading, and stationboard failures remain non-blocking.
 
 Search failures display a temporary result-panel message and allow immediate
 retry through another query. Aborted searches are ignored.
@@ -949,9 +999,10 @@ active operation is aborted when route mode is left or the application unmounts.
 There is no persistent logging or general retry mechanism yet.
 
 Information-layer loading, identify, and popup failures do not affect map
-navigation or route state. Closure panels report a localized error, and turning
-an active layer off aborts its pending feature work. A failed stop refresh keeps
-the map usable and does not expose unfiltered operating points.
+navigation or route state. Closure and military danger-zone panels report a
+localized error, and turning an active layer off aborts its pending feature
+work. A failed stop refresh keeps the map usable and does not expose unfiltered
+operating points.
 
 Elevation-profile failures are non-blocking. The distance remains visible,
 altitude-dependent values become dashes, and route editing continues normally.

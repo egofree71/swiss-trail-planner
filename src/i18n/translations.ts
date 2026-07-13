@@ -98,6 +98,12 @@ const frenchTranslations = {
   'closures.loading': 'Chargement des informations…',
   'closures.loadError':
     'Les informations de cette fermeture n’ont pas pu être chargées.',
+  'shootingDangerZones.layer': 'Avis de tir / zones de danger',
+  'shootingDangerZones.title': 'Avis de tir / zone de danger',
+  'shootingDangerZones.close': 'Fermer',
+  'shootingDangerZones.loading': 'Chargement des informations…',
+  'shootingDangerZones.loadError':
+    'Les informations de cette zone de danger n’ont pas pu être chargées.',
   'transportStops.layer': 'Arrêts de transports publics',
   'transportStops.title': 'Arrêt de transport public',
   'transportStops.close': 'Fermer',
@@ -236,6 +242,12 @@ const germanTranslations: Record<TranslationKey, string> = {
   'closures.loading': 'Informationen werden geladen…',
   'closures.loadError':
     'Die Informationen zu dieser Sperrung konnten nicht geladen werden.',
+  'shootingDangerZones.layer': 'Schiessanzeigen / Gefahrenzonen',
+  'shootingDangerZones.title': 'Schiessanzeige / Gefahrenzone',
+  'shootingDangerZones.close': 'Schliessen',
+  'shootingDangerZones.loading': 'Informationen werden geladen…',
+  'shootingDangerZones.loadError':
+    'Die Informationen zu dieser Gefahrenzone konnten nicht geladen werden.',
   'transportStops.layer': 'Haltestellen des öffentlichen Verkehrs',
   'transportStops.title': 'Haltestelle des öffentlichen Verkehrs',
   'transportStops.close': 'Schliessen',
@@ -372,6 +384,12 @@ const italianTranslations: Record<TranslationKey, string> = {
   'closures.loading': 'Caricamento delle informazioni…',
   'closures.loadError':
     'Non è stato possibile caricare le informazioni su questa chiusura.',
+  'shootingDangerZones.layer': 'Avvisi di tiro / zone di pericolo',
+  'shootingDangerZones.title': 'Avviso di tiro / zona di pericolo',
+  'shootingDangerZones.close': 'Chiudi',
+  'shootingDangerZones.loading': 'Caricamento delle informazioni…',
+  'shootingDangerZones.loadError':
+    'Non è stato possibile caricare le informazioni su questa zona di pericolo.',
   'transportStops.layer': 'Fermate dei trasporti pubblici',
   'transportStops.title': 'Fermata dei trasporti pubblici',
   'transportStops.close': 'Chiudi',
@@ -507,6 +525,12 @@ const englishTranslations: Record<TranslationKey, string> = {
   'closures.loading': 'Loading information…',
   'closures.loadError':
     'The information for this closure could not be loaded.',
+  'shootingDangerZones.layer': 'Shooting notices / danger zones',
+  'shootingDangerZones.title': 'Shooting notice / danger zone',
+  'shootingDangerZones.close': 'Close',
+  'shootingDangerZones.loading': 'Loading information…',
+  'shootingDangerZones.loadError':
+    'The information for this danger zone could not be loaded.',
   'transportStops.layer': 'Public transport stops',
   'transportStops.title': 'Public transport stop',
   'transportStops.close': 'Close',

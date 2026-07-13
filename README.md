@@ -14,6 +14,7 @@ positions selected by the user.
 - selectable official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
 - official hiking trails displayed above every background at detailed zoom levels;
 - official hiking-trail closures and detours shown by default, with click details;
+- official military shooting notices and danger zones shown by default, with localized click details and a visible selected-area highlight;
 - optional passenger-relevant public-transport stops with mode-specific symbols, compact click details, and next departures;
 - search for Swiss communes, localities, postal codes, and geographic names;
 - selected search result displayed with a map marker;
@@ -114,6 +115,31 @@ project-owned panel. Turning the layer off closes the panel and stops further
 identify requests. The overlay is intentionally informational only: route
 calculation does not automatically avoid a closed section, matching the
 planning workflow of other hiking applications.
+
+## Military shooting notices and danger zones
+
+The unified Layers menu also controls the official Swiss Armed Forces layer:
+
+```text
+ch.vbs.schiessanzeigen
+```
+
+The WMS overlay keeps the official red danger-zone portrayal and is rendered
+with partial opacity so the underlying topography, closures, and stop symbols
+remain readable. It is enabled by default because an active shooting area is
+important safety information when planning a hike, but it appears only at
+detailed zoom levels. It remains above hiking closures and public-transport
+stops so its full safety perimeter stays immediately visible. The Layers menu
+can hide it, and the browser remembers that choice locally.
+
+Clicking a visible polygon while route-creation mode is inactive identifies it
+through GeoAdmin, draws its returned geometry with a pale fill and orange outline,
+and opens localized official information in the same sanitized project-owned
+panel as hiking closures. The highlight makes adjacent danger zones unambiguous
+and is cleared when the panel closes or the layer is hidden. The panel keeps the
+principal place, contact, and current shooting-date information supplied by the
+service while omitting PDF download links. The overlay remains informational only
+and does not alter route calculation.
 
 ## Public transport stops
 
@@ -329,6 +355,13 @@ Closures and detours:
 - WMS endpoint: `https://wms.geo.admin.ch/`;
 - Layer: `ch.astra.wanderland-sperrungen_umleitungen`;
 - feature details: GeoAdmin `identify` and `htmlPopup` endpoints.
+
+Military shooting notices and danger zones:
+
+- WMS endpoint: `https://wms.geo.admin.ch/`;
+- Layer: `ch.vbs.schiessanzeigen`;
+- feature details: GeoAdmin `identify` and `htmlPopup` endpoints;
+- compact popup output omits PDF download links.
 
 Public transport stops:
 
