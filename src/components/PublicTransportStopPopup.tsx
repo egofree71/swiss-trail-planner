@@ -27,6 +27,19 @@ interface PublicTransportStopPopupProps {
 /** Loading state for the independently fetched stationboard. */
 type StationBoardStatus = 'loading' | 'ready' | 'error';
 
+/** Departures sharing one Swiss local calendar date. */
+interface DepartureDateGroup {
+  /** Stable calendar key used for React rendering. */
+  dateKey: string;
+  /** Localized date heading shown above the departures. */
+  dateLabel: string;
+  /** Chronologically sorted departures for that date. */
+  departures: StationBoardDeparture[];
+}
+
+/** Timetable times belong to the Swiss public-transport service area. */
+const SWISS_TIME_ZONE = 'Europe/Zurich';
+
 /** Translation keys for normalized public-transport categories. */
 const MODE_LABEL_KEYS: Record<
   PublicTransportMode,
@@ -99,6 +112,21 @@ function getDisplayedDepartureTime(
   return departure.estimatedDeparture ?? departure.plannedDeparture;
 }
 
+/** Builds a stable YYYY-MM-DD key in the Swiss time zone. */
+function createDepartureDateKey(
+  departureTime: string,
+  dateKeyFormatter: Intl.DateTimeFormat,
+): string {
+  const parts = dateKeyFormatter.formatToParts(new Date(departureTime));
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  return year && month && day
+    ? `${year}-${month}-${day}`
+    : departureTime;
+}
+
 /** Renders a compact stop panel with departures and official timetable links. */
 export default function PublicTransportStopPopup({
   stop,
@@ -143,9 +171,57 @@ export default function PublicTransportStopPopup({
       new Intl.DateTimeFormat(locale, {
         hour: '2-digit',
         minute: '2-digit',
+        timeZone: SWISS_TIME_ZONE,
       }),
     [locale],
   );
+  const dateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: SWISS_TIME_ZONE,
+      }),
+    [locale],
+  );
+  const dateKeyFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone: SWISS_TIME_ZONE,
+      }),
+    [],
+  );
+  const departureDateGroups = useMemo<DepartureDateGroup[]>(() => {
+    const groups: DepartureDateGroup[] = [];
+
+    for (const departure of departures) {
+      const departureTime = getDisplayedDepartureTime(departure);
+      const departureDate = new Date(departureTime);
+      const dateKey = createDepartureDateKey(
+        departureTime,
+        dateKeyFormatter,
+      );
+      const previousGroup = groups[groups.length - 1];
+
+      if (previousGroup?.dateKey === dateKey) {
+        previousGroup.departures.push(departure);
+        continue;
+      }
+
+      groups.push({
+        dateKey,
+        dateLabel: dateFormatter.format(departureDate),
+        departures: [departure],
+      });
+    }
+
+    return groups;
+  }, [dateFormatter, dateKeyFormatter, departures]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -191,7 +267,7 @@ export default function PublicTransportStopPopup({
       <header className="map-information-popup-header">
         <div className="public-transport-stop-heading">
           <strong>{stop.name}</strong>
-          {modesText && <span> ({modesText})</span>}
+          {modesText && <strong> ({modesText})</strong>}
         </div>
         <button
           type="button"
@@ -233,34 +309,45 @@ export default function PublicTransportStopPopup({
           )}
 
           {stationBoardStatus === 'ready' && departures.length > 0 && (
-            <ol className="public-transport-departure-list">
-              {departures.map((departure) => (
-                <li key={departure.id}>
-                  <span className="public-transport-departure-line">
-                    {departure.line}
-                  </span>
-                  <span className="public-transport-departure-destination">
-                    {departure.destination}
-                  </span>
-                  <time
-                    dateTime={getDisplayedDepartureTime(departure)}
-                    className="public-transport-departure-time"
-                  >
-                    {timeFormatter.format(
-                      new Date(getDisplayedDepartureTime(departure)),
-                    )}
-                  </time>
-                  {departure.delayMinutes !== null && (
-                    <span
-                      className="public-transport-departure-delay"
-                      title={t('transportStops.delayTitle')}
-                    >
-                      +{departure.delayMinutes} {t('units.minuteShort')}
-                    </span>
-                  )}
-                </li>
+            <div className="public-transport-departure-groups">
+              {departureDateGroups.map((group) => (
+                <section
+                  className="public-transport-departure-group"
+                  key={group.dateKey}
+                >
+                  <h3>{group.dateLabel}</h3>
+                  <ol className="public-transport-departure-list">
+                    {group.departures.map((departure) => (
+                      <li key={departure.id}>
+                        <span className="public-transport-departure-line">
+                          {departure.line}
+                        </span>
+                        <span className="public-transport-departure-destination">
+                          {departure.destination}
+                        </span>
+                        <time
+                          dateTime={getDisplayedDepartureTime(departure)}
+                          className="public-transport-departure-time"
+                        >
+                          {timeFormatter.format(
+                            new Date(getDisplayedDepartureTime(departure)),
+                          )}
+                        </time>
+                        {departure.delayMinutes !== null && (
+                          <span
+                            className="public-transport-departure-delay"
+                            title={t('transportStops.delayTitle')}
+                          >
+                            +{departure.delayMinutes}{' '}
+                            {t('units.minuteShort')}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </section>
               ))}
-            </ol>
+            </div>
           )}
         </section>
 

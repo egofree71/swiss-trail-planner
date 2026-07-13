@@ -147,10 +147,12 @@ symbol and opens a compact panel. The header shows the official stop name and
 all detected transport modes. The panel then requests the next departures for
 that exact official identifier from the documented `transport.opendata.ch`
 stationboard API and shows line, destination, predicted time, and positive delay
-when available. A multimodal official stop naturally returns departures for
-its supported services without borrowing identifiers from neighbouring markers.
-A short in-memory cache avoids repeating the same request when a popup is
-reopened.
+when available. Departures are grouped under their localized Swiss service date,
+including the weekday, so sparse timetables remain unambiguous when the next
+journeys fall on another day. A multimodal official stop naturally returns
+departures for its supported services without borrowing identifiers from
+neighbouring markers. A short in-memory cache avoids repeating the same request
+when a popup is reopened.
 
 Two localized links still open the official SBB/CFF/FFS timetable with the stop
 prefilled as either departure or destination. Departure loading is non-blocking:
