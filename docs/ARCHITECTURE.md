@@ -261,13 +261,17 @@ technical sub-points such as platform numbers instead of stable passenger stops.
 The real viewport still determines which geometry is requested.
 
 Entries without a stop name, numeric-only operating labels, and entries whose
-type explicitly indicates an out-of-service stop are omitted. A missing means of
-transport may fall back to a transport suffix in the official name. Remaining
-modes are normalized into train, tram, bus, boat, cable-car, chairlift,
-funicular, or fallback categories and receive distinct blue map symbols. Cable
+type explicitly indicates an out-of-service stop are omitted. The accepted
+passenger modes are explicitly limited to train, metro, tram, bus, boat,
+cable-car, chairlift, and funicular. Empty or unrecognized means-of-transport
+values are rejected instead of becoming a generic stop category. A narrowly
+scoped fallback accepts a known mode only when it appears in the final
+parenthesized qualifier of the official name, for records such as
+`Plan-Francey (téléphérique)` whose transport field is empty. This avoids
+mistaking pure operating points or place names for passenger stops. Cable
 categories are mutually exclusive so `Standseilbahn` does not also match the
-generic `Seilbahn` cable-car rule. Metro descriptions are normalized to the train
-category. Nearby records with the same normalized
+generic `Seilbahn` cable-car rule. Metro keeps its own translated label while
+sharing the clear railway map symbol. Nearby records with the same normalized
 stop name are merged within a bounded ground-distance tolerance, so train/bus
 interchanges expose both modes while the train symbol remains visually primary.
 Nearby stops with different official names are never merged because they may
@@ -681,8 +685,9 @@ sanitization lives under `src/map/geoAdminPopup.ts`.
 
 Owns the BAV layer identifier, abortable viewport identify requests, the
 passenger-scale identify clamp, bounded subdivision for dense results,
-multilingual attribute normalization, filtering of numeric operating-only or
-out-of-service points, mode classification, nearby interchange grouping,
+multilingual attribute normalization, filtering of numeric operating-only,
+out-of-service, empty-mode, or unsupported-mode points, explicit accepted-mode
+classification, narrowly scoped name-qualifier fallback, nearby interchange grouping,
 preservation of original station identifiers,
 close-symbol fan layouts for distinct neighbouring stops, vector-layer creation,
 selection highlighting, and client-side symbol styling.

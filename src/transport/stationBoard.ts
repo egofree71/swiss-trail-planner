@@ -25,8 +25,8 @@ export interface StationBoardDeparture {
   delayMinutes: number | null;
   /** Planned or predicted platform when available. */
   platform: string | null;
-  /** Transport category inferred from the timetable journey itself. */
-  mode: PublicTransportMode;
+  /** Recognized transport category inferred from the timetable journey. */
+  mode: PublicTransportMode | null;
 }
 
 /** Combined stationboard data used by the popup. */
@@ -160,7 +160,7 @@ function createLineLabel(journey: RawJourney): string {
  * Some BAV stop records list every mode available in a wider interchange even
  * when the selected physical stop serves only one of them.
  */
-function detectJourneyMode(journey: RawJourney): PublicTransportMode {
+function detectJourneyMode(journey: RawJourney): PublicTransportMode | null {
   const value = [journey.category, journey.name, journey.number]
     .map(readString)
     .filter((part): part is string => part !== null)
@@ -193,17 +193,19 @@ function detectJourneyMode(journey: RawJourney): PublicTransportMode {
     return 'chairlift';
   }
 
-  // Metro categories such as `M` are operationally railway services in this
-  // interface, alongside S-Bahn and conventional train categories.
+  if (/\b(?:m|metro|subway)\b/.test(value)) {
+    return 'metro';
+  }
+
   if (
-    /\b(?:m|metro|subway|zug|train|treno|rail|s|r|re|ir|ic|ec|ice|tgv|ter|rjx)\b/.test(
+    /\b(?:zug|train|treno|rail|s|r|re|ir|ic|ec|ice|tgv|ter|rjx)\b/.test(
       value,
     )
   ) {
     return 'train';
   }
 
-  return 'other';
+  return null;
 }
 
 /** Converts one loosely typed journey into the stable popup contract. */
@@ -350,7 +352,9 @@ function mergeStationBoards(
       departure.destination.toLowerCase(),
     ].join('|');
 
-    modes.add(departure.mode);
+    if (departure.mode) {
+      modes.add(departure.mode);
+    }
 
     if (!departures.has(key)) {
       departures.set(key, departure);
@@ -359,18 +363,14 @@ function mergeStationBoards(
 
   const modePriority: PublicTransportMode[] = [
     'train',
+    'metro',
     'tram',
     'boat',
     'cableCar',
     'chairlift',
     'funicular',
     'bus',
-    'other',
   ];
-
-  if (modes.size > 1) {
-    modes.delete('other');
-  }
 
   return {
     departures: [...departures.values()]

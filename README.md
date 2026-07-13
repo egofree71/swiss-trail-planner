@@ -127,15 +127,18 @@ It is disabled by default and the browser remembers an explicit choice. At
 detailed zoom levels, the application requests visible stop features through
 the GeoAdmin identify API. Identification is capped at a stable passenger-stop
 portrayal scale because the official layer exposes technical platform objects at
-its closest scales. Numeric-only operating points and explicitly out-of-service
-records are removed before the remaining stops are rendered as client-side
-vectors with distinct symbols for train, tram, bus, boat, gondola/cable-car,
-chairlift, and funicular transport. Nearby records representing the same named
+its closest scales. Numeric-only operating points, explicitly out-of-service
+records, and entries without a recognized passenger transport mode are removed.
+The accepted categories are train, metro, tram, bus, boat,
+gondola/cable-car, chairlift, and funicular. An empty transport field is accepted
+only when the official name ends with an explicit parenthesized known mode, such
+as `(téléphérique)`. The remaining stops are rendered as client-side vectors.
+Nearby records representing the same named
 interchange are merged, with the train symbol taking priority for train/bus
 combinations. Distinct facilities with different official names remain separate;
 when their icons would overlap, the symbols are temporarily fanned apart until a
-closer zoom reveals their real positions. Metro records use the train symbol
-rather than the ambiguous generic fallback icon.
+closer zoom reveals their real positions. Metro keeps its own popup label while
+using the train symbol on the map.
 
 Clicking a visible stop while route creation is inactive highlights its map
 symbol and opens a compact panel. The header shows the official stop name and

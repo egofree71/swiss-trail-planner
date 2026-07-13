@@ -23,7 +23,6 @@ import busIconUrl from '../assets/public-transport-stops/bus.png';
 import cableCarIconUrl from '../assets/public-transport-stops/cable-car.png';
 import chairliftIconUrl from '../assets/public-transport-stops/chairlift.png';
 import funicularIconUrl from '../assets/public-transport-stops/funicular.png';
-import otherIconUrl from '../assets/public-transport-stops/other.png';
 import trainIconUrl from '../assets/public-transport-stops/train.png';
 import tramIconUrl from '../assets/public-transport-stops/tram.png';
 import type { Language } from '../i18n/translations';
@@ -79,27 +78,38 @@ const STOP_PROPERTY_NAME = 'publicTransportStop';
 /** Internal feature property describing how a close stop is visually separated. */
 const STOP_OVERLAP_LAYOUT_PROPERTY_NAME = 'publicTransportStopOverlapLayout';
 
-/** Passenger transport categories represented by distinct map symbols. */
+/**
+ * Passenger transport categories accepted by the map overlay.
+ *
+ * The official layer also contains pure operating points with no passenger
+ * service. Keeping this list explicit prevents an unknown or empty transport
+ * value from silently becoming a generic stop symbol.
+ */
+export const ACCEPTED_PUBLIC_TRANSPORT_MODES = [
+  'train',
+  'metro',
+  'tram',
+  'bus',
+  'boat',
+  'cableCar',
+  'chairlift',
+  'funicular',
+] as const;
+
+/** Passenger transport category represented in the stop overlay and popup. */
 export type PublicTransportMode =
-  | 'train'
-  | 'tram'
-  | 'bus'
-  | 'boat'
-  | 'cableCar'
-  | 'chairlift'
-  | 'funicular'
-  | 'other';
+  (typeof ACCEPTED_PUBLIC_TRANSPORT_MODES)[number];
 
 /** Primary-mode ordering keeps the most structurally useful symbol visible. */
 const MODE_PRIORITY: PublicTransportMode[] = [
   'train',
+  'metro',
   'tram',
   'boat',
   'cableCar',
   'chairlift',
   'funicular',
   'bus',
-  'other',
 ];
 
 /** Maximum ground distance in metres for merging records of one named stop. */
@@ -131,8 +141,6 @@ export interface PublicTransportStop {
   name: string;
   /** Normalized transport categories used for symbols and translated titles. */
   modes: PublicTransportMode[];
-  /** Original means-of-transport value for an unknown category fallback. */
-  rawMeansOfTransport: string;
   /** Point coordinate in the OpenLayers display projection (EPSG:3857). */
   coordinate: Coordinate;
 }
@@ -304,9 +312,7 @@ function detectTransportModes(value: string): PublicTransportMode[] {
       normalized,
     )
   ) {
-    // Metro services use the train symbol because the official generic metro
-    // crop is visually ambiguous at map scale.
-    modes.add('train');
+    modes.add('metro');
   }
 
   if (/tram|strassenbahn|streetcar/.test(normalized)) {
@@ -325,11 +331,21 @@ function detectTransportModes(value: string): PublicTransportMode[] {
     modes.add('train');
   }
 
-  if (modes.size === 0 && normalized && normalized !== '-') {
-    modes.add('other');
-  }
-
   return [...modes];
+}
+
+/**
+ * Reads only a final parenthesized mode qualifier from an official stop name.
+ *
+ * A few useful cableway records omit the transport field but retain a suffix
+ * such as `(téléphérique)`. Restricting the fallback to that explicit suffix
+ * avoids classifying place names such as `Zug Süd` as railway passenger stops.
+ */
+function detectTransportModesFromNameQualifier(
+  name: string,
+): PublicTransportMode[] {
+  const qualifier = name.match(/\(([^()]*)\)\s*$/)?.[1];
+  return qualifier ? detectTransportModes(qualifier) : [];
 }
 
 /** Tests localized type values that explicitly describe an unavailable stop. */
@@ -395,10 +411,8 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
   ]);
 
   // Explicitly retired stops remain hidden even when their name contains a
-  // transport word. Some active cableway records, however, publish an empty
-  // means-of-transport field while preserving the mode in a suffix such as
-  // `Plan-Francey (téléphérique)`. The name is therefore a safe fallback for
-  // mode detection, but not for overriding an explicit out-of-service status.
+  // transport word. Empty or unknown transport fields are handled below by a
+  // narrowly scoped final-parenthesis fallback for useful cableway records.
   if (!name || isOutOfServiceType(stopType)) {
     return null;
   }
@@ -415,10 +429,15 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
     meansOfTransport && meansOfTransport.trim() !== '-'
       ? meansOfTransport
       : '';
-  const modes = detectTransportModes(
-    `${usableMeansOfTransport} ${name}`.trim(),
-  );
+  const metadataModes = detectTransportModes(usableMeansOfTransport);
+  const modes =
+    metadataModes.length > 0
+      ? metadataModes
+      : detectTransportModesFromNameQualifier(name);
 
+  // The BAV layer intentionally includes pure operating points. A feature is
+  // passenger-relevant only when its metadata, or the explicit name qualifier
+  // fallback above, resolves to one of the accepted transport categories.
   if (modes.length === 0) {
     return null;
   }
@@ -428,7 +447,6 @@ function parsePublicTransportStop(value: unknown): PublicTransportStop | null {
     stationIds: [String(featureId)],
     name,
     modes,
-    rawMeansOfTransport: usableMeansOfTransport || name,
     coordinate,
   };
 }
@@ -453,15 +471,11 @@ function getModePriority(mode: PublicTransportMode): number {
   return priority === -1 ? MODE_PRIORITY.length : priority;
 }
 
-/** Sorts modes and drops the generic fallback when a known mode is present. */
+/** Sorts and deduplicates accepted passenger transport modes. */
 function normalizeModes(
   modes: Iterable<PublicTransportMode>,
 ): PublicTransportMode[] {
   const uniqueModes = new Set(modes);
-
-  if (uniqueModes.size > 1) {
-    uniqueModes.delete('other');
-  }
 
   return [...uniqueModes].sort(
     (first, second) => getModePriority(first) - getModePriority(second),
@@ -485,13 +499,10 @@ function mergeStops(
   current: PublicTransportStop,
   incoming: PublicTransportStop,
 ): PublicTransportStop {
-  const currentPrimary = current.modes[0] ?? 'other';
-  const incomingPrimary = incoming.modes[0] ?? 'other';
+  const currentPrimary = current.modes[0];
+  const incomingPrimary = incoming.modes[0];
   const preferIncoming =
     getModePriority(incomingPrimary) < getModePriority(currentPrimary);
-  const rawMeans = new Set(
-    [current.rawMeansOfTransport, incoming.rawMeansOfTransport].filter(Boolean),
-  );
 
   const stationIds = [...new Set([
     ...current.stationIds,
@@ -503,7 +514,6 @@ function mergeStops(
     stationIds,
     name: preferIncoming ? incoming.name : current.name,
     modes: normalizeModes([...current.modes, ...incoming.modes]),
-    rawMeansOfTransport: [...rawMeans].join(' / '),
     coordinate: preferIncoming ? incoming.coordinate : current.coordinate,
   };
 }
@@ -798,13 +808,14 @@ export async function loadPublicTransportStops(
  */
 const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
   train: trainIconUrl,
+  // Metro keeps its own popup label but uses the clear railway map symbol.
+  metro: trainIconUrl,
   tram: tramIconUrl,
   bus: busIconUrl,
   boat: boatIconUrl,
   cableCar: cableCarIconUrl,
   chairlift: chairliftIconUrl,
   funicular: funicularIconUrl,
-  other: otherIconUrl,
 };
 
 /** Shared immutable OpenLayers styles for symbols at their real position. */
@@ -886,7 +897,7 @@ function getSelectedStopStyle(displacement: Coordinate): Style {
 
 /** Selects the first mode according to the stable visual priority. */
 function getPrimaryMode(modes: PublicTransportMode[]): PublicTransportMode {
-  return MODE_PRIORITY.find((mode) => modes.includes(mode)) ?? 'other';
+  return MODE_PRIORITY.find((mode) => modes.includes(mode)) ?? modes[0];
 }
 
 /** Creates the persistent vector layers for filtered and selected stops. */

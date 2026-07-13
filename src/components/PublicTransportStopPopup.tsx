@@ -31,27 +31,28 @@ type StationBoardStatus = 'loading' | 'ready' | 'error';
 const MODE_LABEL_KEYS: Record<
   PublicTransportMode,
   | 'transportStops.mode.train'
+  | 'transportStops.mode.metro'
   | 'transportStops.mode.tram'
   | 'transportStops.mode.bus'
   | 'transportStops.mode.boat'
   | 'transportStops.mode.cableCar'
   | 'transportStops.mode.chairlift'
   | 'transportStops.mode.funicular'
-  | 'transportStops.mode.other'
 > = {
   train: 'transportStops.mode.train',
+  metro: 'transportStops.mode.metro',
   tram: 'transportStops.mode.tram',
   bus: 'transportStops.mode.bus',
   boat: 'transportStops.mode.boat',
   cableCar: 'transportStops.mode.cableCar',
   chairlift: 'transportStops.mode.chairlift',
   funicular: 'transportStops.mode.funicular',
-  other: 'transportStops.mode.other',
 };
 
 /** Terms that already identify a transport mode inside an official stop name. */
 const MODE_NAME_PATTERNS: Partial<Record<PublicTransportMode, RegExp>> = {
   bus: /\bbus\b/,
+  metro: /\bmetro\b/,
   cableCar:
     /telepherique|telecabine|kabinenbahn|gondelbahn|pendelbahn|luftseilbahn|seilbahn|gondola|funivia|cabinovia|cable car/,
   chairlift: /telesiege|sesselbahn|sessellift|seggiovia|chairlift|chair lift/,
@@ -123,11 +124,7 @@ export default function PublicTransportStopPopup({
       return [];
     }
 
-    return [
-      mode === 'other'
-        ? stop.rawMeansOfTransport
-        : t(MODE_LABEL_KEYS[mode]),
-    ];
+    return [t(MODE_LABEL_KEYS[mode])];
   });
   const modesText = modeLabels.join(', ');
   const title = modesText ? `${stop.name} (${modesText})` : stop.name;
