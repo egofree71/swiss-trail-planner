@@ -1,8 +1,9 @@
 /**
- * Business context: owns the OpenLayers representation and direct waypoint
+ * Business context: owns the OpenLayers representation and direct drag
  * interaction for the route currently edited by the user. Route history stays
  * immutable React data, while this module rebuilds the lightweight red route
- * layer and provides a bounded drag interaction for existing waypoints.
+ * layer and lets users move existing waypoints or pull a new waypoint from an
+ * existing route section.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import Feature from 'ol/Feature.js';
@@ -49,16 +50,49 @@ export interface RouteDisplay {
   source: VectorSource;
 }
 
+/** Existing waypoint or incoming route section selected for one drag edit. */
+export type RouteDragTarget =
+  | {
+      /** Move an already committed waypoint. */
+      type: 'waypoint';
+      /** Index of the waypoint in immutable route history. */
+      waypointIndex: number;
+      /** Exact committed coordinate at pointer down. */
+      coordinate: Coordinate;
+    }
+  | {
+      /** Insert a waypoint into an existing incoming section. */
+      type: 'segment';
+      /** Index of the destination step whose incoming section was selected. */
+      stepIndex: number;
+      /** Closest coordinate on the stored section at pointer down. */
+      coordinate: Coordinate;
+    };
+
+/** Closest selectable route section under one pointer pixel. */
+export interface RouteSegmentHit {
+  /** Destination step whose incoming geometry contains the hit. */
+  stepIndex: number;
+  /** Nearest coordinate on the stored section. */
+  coordinate: Coordinate;
+}
+
 /** Callbacks used by the pointer interaction without owning route state. */
-export interface RouteWaypointDragCallbacks {
+export interface RouteDragCallbacks {
   /** Returns whether a new drag may begin at this moment. */
   canStart: () => boolean;
-  /** Called once when an existing waypoint is pressed. */
-  onStart: (waypointIndex: number, coordinate: Coordinate) => void;
+  /** Returns the current immutable route state for line hit detection. */
+  getSteps: () => RouteStep[];
+  /** Called once when an existing waypoint or route section is pressed. */
+  onStart: (target: RouteDragTarget) => void;
   /** Called for visual previews while the pointer moves. */
-  onDrag: (waypointIndex: number, coordinate: Coordinate) => void;
-  /** Called once on release so the application can recalculate adjacent sections. */
-  onEnd: (waypointIndex: number, coordinate: Coordinate) => void;
+  onDrag: (target: RouteDragTarget, coordinate: Coordinate) => void;
+  /** Called once on release so the application can recalculate affected sections. */
+  onEnd: (
+    target: RouteDragTarget,
+    coordinate: Coordinate,
+    didDrag: boolean,
+  ) => void;
 }
 
 /** Swiss-red route colour chosen to stay distinct from blue hydrography. */
@@ -69,6 +103,10 @@ const ROUTE_WAYPOINT_INDEX_PROPERTY = 'routeWaypointIndex';
 const DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 /** Pointer tolerance in screen pixels, deliberately larger than the visible point on touch screens. */
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
+/** Route-line tolerance in screen pixels, matching the white casing around the red line. */
+const ROUTE_SEGMENT_HIT_TOLERANCE_PX = 7;
+/** Minimum screen movement that turns a press on the route line into insertion. */
+const ROUTE_INSERT_DRAG_DISTANCE_PX = 3;
 
 /**
  * Route line styles in screen pixels. The 11 px white casing separates the
@@ -127,6 +165,42 @@ function coordinateDistanceSquared(
   return deltaX * deltaX + deltaY * deltaY;
 }
 
+/** Returns the closest XY coordinate on one finite segment and its squared distance. */
+function getClosestPointOnSegment(
+  coordinate: Coordinate,
+  start: Coordinate,
+  end: Coordinate,
+): { coordinate: Coordinate; distanceSquared: number } {
+  const segmentX = end[0] - start[0];
+  const segmentY = end[1] - start[1];
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    return {
+      coordinate: [start[0], start[1]],
+      distanceSquared: coordinateDistanceSquared(coordinate, start),
+    };
+  }
+
+  const projection =
+    ((coordinate[0] - start[0]) * segmentX +
+      (coordinate[1] - start[1]) * segmentY) /
+    segmentLengthSquared;
+  const boundedProjection = Math.max(0, Math.min(1, projection));
+  const closestCoordinate: Coordinate = [
+    start[0] + boundedProjection * segmentX,
+    start[1] + boundedProjection * segmentY,
+  ];
+
+  return {
+    coordinate: closestCoordinate,
+    distanceSquared: coordinateDistanceSquared(
+      coordinate,
+      closestCoordinate,
+    ),
+  };
+}
+
 /** Appends a coordinate unless it would create a sub-decimetre duplicate vertex. */
 function appendCoordinate(
   coordinates: Coordinate[],
@@ -150,7 +224,7 @@ function getWaypointIndex(feature: Feature): number | null {
 }
 
 /** Updates the map target cursor classes without overriding the busy cursor. */
-function updateWaypointCursor(
+function updateRouteDragCursor(
   map: Map,
   isHovering: boolean,
   isDragging: boolean,
@@ -275,18 +349,82 @@ export function getRouteWaypointIndexAtPixel(
 }
 
 /**
- * Creates an interaction that drags existing waypoint features only.
+ * Returns the closest stored incoming section under one screen pixel.
+ *
+ * The calculation uses immutable step geometry rather than the flattened
+ * display feature so the caller knows exactly where a new waypoint belongs.
+ * Existing waypoint hit detection should run first because points take
+ * precedence over the line around section endpoints.
+ *
+ * @param map - OpenLayers map used to convert pixel tolerance to map units.
+ * @param steps - Current immutable route state.
+ * @param pixel - Screen pixel from an OpenLayers browser event.
+ * @param hitTolerance - Maximum distance from the visible route in pixels.
+ */
+export function getRouteSegmentHitAtPixel(
+  map: Map,
+  steps: RouteStep[],
+  pixel: Pixel,
+  hitTolerance = ROUTE_SEGMENT_HIT_TOLERANCE_PX,
+): RouteSegmentHit | null {
+  const pointerCoordinate = map.getCoordinateFromPixel(pixel);
+  const resolution = map.getView().getResolution();
+
+  if (!pointerCoordinate || resolution === undefined || resolution <= 0) {
+    return null;
+  }
+
+  const toleranceSquared = (resolution * hitTolerance) ** 2;
+  let closestHit: RouteSegmentHit | null = null;
+  let closestDistanceSquared = Number.POSITIVE_INFINITY;
+
+  for (let stepIndex = 1; stepIndex < steps.length; stepIndex += 1) {
+    const segment = steps[stepIndex].segment;
+
+    if (!segment || segment.length < 2) {
+      continue;
+    }
+
+    for (
+      let coordinateIndex = 1;
+      coordinateIndex < segment.length;
+      coordinateIndex += 1
+    ) {
+      const candidate = getClosestPointOnSegment(
+        pointerCoordinate,
+        segment[coordinateIndex - 1],
+        segment[coordinateIndex],
+      );
+
+      if (candidate.distanceSquared < closestDistanceSquared) {
+        closestDistanceSquared = candidate.distanceSquared;
+        closestHit = {
+          stepIndex,
+          coordinate: candidate.coordinate,
+        };
+      }
+    }
+  }
+
+  return closestDistanceSquared <= toleranceSquared ? closestHit : null;
+}
+
+/**
+ * Creates one interaction for moving waypoints or pulling a new point from a
+ * route section.
  *
  * The interaction owns no route data. During dragging it reports coordinates
  * to the application, which draws a temporary straight preview and performs
  * network recalculation only after release. Returning `true` on pointer down
- * also prevents OpenLayers DragPan from moving the map beneath the waypoint.
+ * also prevents OpenLayers DragPan from moving the map beneath the route.
  */
-export function createRouteWaypointDragInteraction(
+export function createRouteDragInteraction(
   display: RouteDisplay,
-  callbacks: RouteWaypointDragCallbacks,
+  callbacks: RouteDragCallbacks,
 ): PointerInteraction {
-  let draggedWaypointIndex: number | null = null;
+  let dragTarget: RouteDragTarget | null = null;
+  let startPixel: Pixel | null = null;
+  let maximumPixelDistanceSquared = 0;
 
   return new PointerInteraction({
     handleDownEvent: (event: MapBrowserEvent) => {
@@ -300,25 +438,61 @@ export function createRouteWaypointDragInteraction(
         event.pixel,
       );
 
-      if (waypointIndex === null) {
-        return false;
+      if (waypointIndex !== null) {
+        const step = callbacks.getSteps()[waypointIndex];
+
+        if (!step) {
+          return false;
+        }
+
+        dragTarget = {
+          type: 'waypoint',
+          waypointIndex,
+          coordinate: [...step.waypoint],
+        };
+      } else {
+        const segmentHit = getRouteSegmentHitAtPixel(
+          event.map,
+          callbacks.getSteps(),
+          event.pixel,
+        );
+
+        if (!segmentHit) {
+          return false;
+        }
+
+        dragTarget = {
+          type: 'segment',
+          stepIndex: segmentHit.stepIndex,
+          coordinate: [...segmentHit.coordinate],
+        };
       }
 
-      draggedWaypointIndex = waypointIndex;
-      updateWaypointCursor(event.map, false, true);
-      callbacks.onStart(waypointIndex, [...event.coordinate]);
+      startPixel = [...event.pixel];
+      maximumPixelDistanceSquared = 0;
+      updateRouteDragCursor(event.map, false, true);
+      callbacks.onStart(dragTarget);
       return true;
     },
     handleDragEvent: (event: MapBrowserEvent) => {
-      if (draggedWaypointIndex === null) {
+      if (!dragTarget) {
         return;
       }
 
-      callbacks.onDrag(draggedWaypointIndex, [...event.coordinate]);
+      if (startPixel) {
+        const deltaX = event.pixel[0] - startPixel[0];
+        const deltaY = event.pixel[1] - startPixel[1];
+        maximumPixelDistanceSquared = Math.max(
+          maximumPixelDistanceSquared,
+          deltaX * deltaX + deltaY * deltaY,
+        );
+      }
+
+      callbacks.onDrag(dragTarget, [...event.coordinate]);
     },
     handleMoveEvent: (event: MapBrowserEvent) => {
       if (!callbacks.canStart()) {
-        updateWaypointCursor(event.map, false, false);
+        updateRouteDragCursor(event.map, false, false);
         return;
       }
 
@@ -327,17 +501,35 @@ export function createRouteWaypointDragInteraction(
         display,
         event.pixel,
       );
-      updateWaypointCursor(event.map, waypointIndex !== null, false);
+      const segmentHit =
+        waypointIndex === null
+          ? getRouteSegmentHitAtPixel(
+              event.map,
+              callbacks.getSteps(),
+              event.pixel,
+            )
+          : null;
+
+      updateRouteDragCursor(
+        event.map,
+        waypointIndex !== null || segmentHit !== null,
+        false,
+      );
     },
     handleUpEvent: (event: MapBrowserEvent) => {
-      if (draggedWaypointIndex === null) {
+      if (!dragTarget) {
         return false;
       }
 
-      const waypointIndex = draggedWaypointIndex;
-      draggedWaypointIndex = null;
-      updateWaypointCursor(event.map, false, false);
-      callbacks.onEnd(waypointIndex, [...event.coordinate]);
+      const releasedTarget = dragTarget;
+      const didDrag =
+        maximumPixelDistanceSquared >= ROUTE_INSERT_DRAG_DISTANCE_PX ** 2;
+
+      dragTarget = null;
+      startPixel = null;
+      maximumPixelDistanceSquared = 0;
+      updateRouteDragCursor(event.map, false, false);
+      callbacks.onEnd(releasedTarget, [...event.coordinate], didDrag);
       return false;
     },
     stopDown: (handled) => handled,
@@ -345,8 +537,8 @@ export function createRouteWaypointDragInteraction(
 }
 
 /** Removes cursor state if route editing is left during an active drag. */
-export function clearRouteWaypointDragCursor(map: Map): void {
-  updateWaypointCursor(map, false, false);
+export function clearRouteDragCursor(map: Map): void {
+  updateRouteDragCursor(map, false, false);
 }
 
 /**
@@ -434,4 +626,45 @@ export function updateRouteWaypointDragPreview(
   }
 
   updateRouteDisplay(display, previewSteps, waypointIndex);
+}
+
+/**
+ * Draws a temporary inserted waypoint while a route section is pulled.
+ *
+ * The selected incoming section is replaced by two straight preview sections.
+ * Immutable history and the exact stored geometry remain untouched until the
+ * application completes routing after release.
+ */
+export function updateRouteInsertionDragPreview(
+  display: RouteDisplay,
+  steps: RouteStep[],
+  stepIndex: number,
+  coordinate: Coordinate,
+): void {
+  const destinationStep = steps[stepIndex];
+  const previousStep = steps[stepIndex - 1];
+
+  if (!destinationStep || !previousStep || stepIndex < 1) {
+    updateRouteDisplay(display, steps);
+    return;
+  }
+
+  const insertedCoordinate: Coordinate = [...coordinate];
+  const insertedStep: RouteStep = {
+    waypoint: insertedCoordinate,
+    segment: [[...previousStep.waypoint], insertedCoordinate],
+    mode: destinationStep.mode,
+  };
+  const updatedDestinationStep: RouteStep = {
+    ...destinationStep,
+    segment: [insertedCoordinate, [...destinationStep.waypoint]],
+  };
+  const previewSteps = [
+    ...steps.slice(0, stepIndex),
+    insertedStep,
+    updatedDestinationStep,
+    ...steps.slice(stepIndex + 1),
+  ];
+
+  updateRouteDisplay(display, previewSteps, stepIndex);
 }

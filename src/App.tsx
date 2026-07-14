@@ -82,15 +82,18 @@ import {
   updateImportedRouteDisplay,
 } from './map/importedRoute';
 import {
-  clearRouteWaypointDragCursor,
+  clearRouteDragCursor,
   collectRouteCoordinates,
+  createRouteDragInteraction,
   createRouteDisplay,
-  createRouteWaypointDragInteraction,
+  getRouteSegmentHitAtPixel,
   getRouteWaypointIndexAtPixel,
   reverseRouteSteps,
+  type RouteDragTarget,
   type RouteDisplay,
   type RouteStep,
   updateRouteDisplay,
+  updateRouteInsertionDragPreview,
   updateRouteWaypointDragPreview,
 } from './map/route';
 import {
@@ -132,15 +135,26 @@ interface RouteHistory {
   redoStates: RouteStep[][];
 }
 
-/** Imperative drag session kept outside React renders for pointer responsiveness. */
-interface RouteWaypointDragState {
-  /** Index of the waypoint being moved. */
-  waypointIndex: number;
-  /** Original waypoint coordinate used to ignore click-only interactions. */
-  startCoordinate: Coordinate;
-  /** Route state that owns the preview and must still be current on release. */
-  expectedSteps: RouteStep[];
-}
+/** Imperative route drag session kept outside React renders for responsiveness. */
+type RouteDragState =
+  | {
+      /** Existing waypoint being moved. */
+      type: 'waypoint';
+      waypointIndex: number;
+      /** Original waypoint coordinate used to ignore click-only interactions. */
+      startCoordinate: Coordinate;
+      /** Route state that owns the preview and must still be current on release. */
+      expectedSteps: RouteStep[];
+    }
+  | {
+      /** Incoming section split by the new waypoint. */
+      type: 'segment';
+      stepIndex: number;
+      /** Closest original line coordinate used to require a genuine drag. */
+      startCoordinate: Coordinate;
+      /** Route state that owns the preview and must still be current on release. */
+      expectedSteps: RouteStep[];
+    };
 
 /** Duration in milliseconds for transient geolocation feedback. */
 const LOCATION_MESSAGE_DURATION_MS = 6_000;
@@ -422,6 +436,109 @@ async function rebuildRouteAfterWaypointMove(
   return nextSteps;
 }
 
+/**
+ * Splits one existing incoming section by inserting a dragged waypoint.
+ *
+ * Both resulting sections inherit the selected section's routing intent.
+ * Network halves are recalculated independently and may each fall back to a
+ * straight segment, while every unrelated step keeps its exact geometry.
+ */
+async function rebuildRouteAfterWaypointInsertion(
+  steps: RouteStep[],
+  stepIndex: number,
+  targetCoordinate: Coordinate,
+  routingLoader: DynamicRoutingNetworkLoader,
+  signal: AbortSignal,
+): Promise<RouteStep[]> {
+  const destinationStep = steps[stepIndex];
+  const previousStep = steps[stepIndex - 1];
+
+  if (!destinationStep || !previousStep || stepIndex < 1) {
+    return steps;
+  }
+
+  let insertedStep: RouteStep;
+
+  if (destinationStep.mode === 'network') {
+    const routedPath = await routingLoader.route(
+      previousStep.waypoint,
+      targetCoordinate,
+      signal,
+    );
+
+    if (routedPath && routedPath.coordinates.length >= 2) {
+      const segment = routedPath.coordinates.map(
+        (coordinate): Coordinate => [...coordinate],
+      );
+      connectRoutedSegmentEndpoint(segment, previousStep.waypoint, 'start');
+      insertedStep = {
+        waypoint: [...segment[segment.length - 1]],
+        segment,
+        mode: 'network',
+      };
+    } else {
+      insertedStep = createStraightRouteStep(
+        previousStep,
+        targetCoordinate,
+      );
+    }
+  } else {
+    insertedStep = createStraightRouteStep(previousStep, targetCoordinate);
+  }
+
+  let updatedDestinationStep: RouteStep;
+
+  if (destinationStep.mode === 'network') {
+    const routedPath = await routingLoader.route(
+      insertedStep.waypoint,
+      destinationStep.waypoint,
+      signal,
+    );
+
+    if (routedPath && routedPath.coordinates.length >= 2) {
+      const segment = routedPath.coordinates.map(
+        (coordinate): Coordinate => [...coordinate],
+      );
+      connectRoutedSegmentEndpoint(segment, insertedStep.waypoint, 'start');
+      connectRoutedSegmentEndpoint(
+        segment,
+        destinationStep.waypoint,
+        'end',
+      );
+      updatedDestinationStep = {
+        ...destinationStep,
+        segment,
+        mode: 'network',
+      };
+    } else {
+      updatedDestinationStep = {
+        ...destinationStep,
+        segment: [
+          [...insertedStep.waypoint],
+          [...destinationStep.waypoint],
+        ],
+        mode: 'straight',
+      };
+    }
+  } else {
+    updatedDestinationStep = {
+      ...destinationStep,
+      segment: [
+        [...insertedStep.waypoint],
+        [...destinationStep.waypoint],
+      ],
+      mode: 'straight',
+    };
+  }
+
+  return [
+    ...steps.slice(0, stepIndex),
+    insertedStep,
+    updatedDestinationStep,
+    ...steps.slice(stepIndex + 1),
+  ];
+}
+
 /** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
   const { language, t } = useI18n();
@@ -451,8 +568,7 @@ export default function App() {
     undoStates: [],
     redoStates: [],
   });
-  const routeWaypointDragStateRef =
-    useRef<RouteWaypointDragState | null>(null);
+  const routeDragStateRef = useRef<RouteDragState | null>(null);
   const routeCreationActiveRef = useRef(false);
   const routeCreationSessionRef = useRef(0);
   const routeOperationPendingRef = useRef(false);
@@ -811,7 +927,7 @@ export default function App() {
 
   /** Recalculates the one or two sections touching a released waypoint. */
   const moveRouteWaypoint = (
-    dragState: RouteWaypointDragState,
+    dragState: Extract<RouteDragState, { type: 'waypoint' }>,
     targetCoordinate: Coordinate,
   ) => {
     if (
@@ -881,6 +997,92 @@ export default function App() {
         }
 
         console.error('Unable to recalculate the moved route waypoint.', error);
+        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
+      } finally {
+        const ownsCurrentOperation =
+          routingAbortControllerRef.current === abortController;
+
+        if (ownsCurrentOperation) {
+          routingAbortControllerRef.current = null;
+          routeOperationPendingRef.current = false;
+          setIsRouteOperationPending(false);
+        }
+      }
+    })();
+  };
+
+  /** Inserts one waypoint into a dragged route section as one undoable edit. */
+  const insertRouteWaypoint = (
+    dragState: Extract<RouteDragState, { type: 'segment' }>,
+    targetCoordinate: Coordinate,
+  ) => {
+    if (
+      routeOperationPendingRef.current ||
+      routeHistoryRef.current.steps !== dragState.expectedSteps
+    ) {
+      const display = routeDisplayRef.current;
+
+      if (display) {
+        updateRouteDisplay(display, routeHistoryRef.current.steps);
+      }
+      return;
+    }
+
+    const routeCreationSession = routeCreationSessionRef.current;
+    routeOperationPendingRef.current = true;
+    setIsRouteOperationPending(true);
+
+    const abortController = new AbortController();
+    routingAbortControllerRef.current = abortController;
+
+    void (async () => {
+      clearRouteMessageTimer();
+      setRouteMessage('');
+
+      try {
+        const routingLoader = routingLoaderRef.current;
+
+        if (!routingLoader) {
+          throw new Error('The dynamic routing loader is unavailable.');
+        }
+
+        const nextSteps = await rebuildRouteAfterWaypointInsertion(
+          dragState.expectedSteps,
+          dragState.stepIndex,
+          targetCoordinate,
+          routingLoader,
+          abortController.signal,
+        );
+
+        if (
+          routeCreationSessionRef.current !== routeCreationSession ||
+          routeHistoryRef.current.steps !== dragState.expectedSteps
+        ) {
+          return;
+        }
+
+        commitAsyncRouteMutation(dragState.expectedSteps, nextSteps);
+      } catch (error) {
+        if (isAbortedRequest(error, abortController.signal)) {
+          return;
+        }
+
+        if (routeCreationSessionRef.current !== routeCreationSession) {
+          return;
+        }
+
+        const display = routeDisplayRef.current;
+
+        if (display) {
+          updateRouteDisplay(display, routeHistoryRef.current.steps);
+        }
+
+        if (error instanceof RoutingAreaTooLargeError) {
+          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
+          return;
+        }
+
+        console.error('Unable to insert the dragged route waypoint.', error);
         showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
       } finally {
         const ownsCurrentOperation =
@@ -1627,8 +1829,11 @@ export default function App() {
   }, [routeHistory.steps]);
 
   /**
-   * Enables direct waypoint movement only while route creation is active.
-   * Pointer movement stays local; routing begins once the waypoint is released.
+   * Enables direct route shaping only while route creation is active.
+   *
+   * Existing waypoints can be moved, while dragging a route section creates a
+   * temporary inserted point. Pointer movement stays local; routing begins only
+   * once the edit is released.
    */
   useEffect(() => {
     const map = mapRef.current;
@@ -1638,68 +1843,129 @@ export default function App() {
       return;
     }
 
-    const interaction = createRouteWaypointDragInteraction(display, {
+    const interaction = createRouteDragInteraction(display, {
       canStart: () =>
         routeCreationActiveRef.current &&
         !routeOperationPendingRef.current &&
         routeHistoryRef.current.steps.length > 0,
-      onStart: (waypointIndex) => {
+      getSteps: () => routeHistoryRef.current.steps,
+      onStart: (target: RouteDragTarget) => {
         const expectedSteps = routeHistoryRef.current.steps;
-        const step = expectedSteps[waypointIndex];
 
-        if (!step) {
+        if (target.type === 'waypoint') {
+          const step = expectedSteps[target.waypointIndex];
+
+          if (!step) {
+            return;
+          }
+
+          routeDragStateRef.current = {
+            type: 'waypoint',
+            waypointIndex: target.waypointIndex,
+            startCoordinate: [...step.waypoint],
+            expectedSteps,
+          };
+          updateRouteWaypointDragPreview(
+            display,
+            expectedSteps,
+            target.waypointIndex,
+            step.waypoint,
+          );
           return;
         }
 
-        routeWaypointDragStateRef.current = {
-          waypointIndex,
-          startCoordinate: [...step.waypoint],
+        if (
+          target.stepIndex < 1 ||
+          !expectedSteps[target.stepIndex] ||
+          !expectedSteps[target.stepIndex - 1]
+        ) {
+          return;
+        }
+
+        routeDragStateRef.current = {
+          type: 'segment',
+          stepIndex: target.stepIndex,
+          startCoordinate: [...target.coordinate],
           expectedSteps,
         };
-        updateRouteWaypointDragPreview(
+        updateRouteInsertionDragPreview(
           display,
           expectedSteps,
-          waypointIndex,
-          step.waypoint,
+          target.stepIndex,
+          target.coordinate,
         );
       },
-      onDrag: (waypointIndex, coordinate) => {
-        const dragState = routeWaypointDragStateRef.current;
+      onDrag: (target: RouteDragTarget, coordinate) => {
+        const dragState = routeDragStateRef.current;
 
         if (
           !dragState ||
-          dragState.waypointIndex !== waypointIndex ||
+          dragState.type !== target.type ||
           routeHistoryRef.current.steps !== dragState.expectedSteps
         ) {
           return;
         }
 
-        updateRouteWaypointDragPreview(
-          display,
-          dragState.expectedSteps,
-          waypointIndex,
-          coordinate,
-        );
+        if (
+          dragState.type === 'waypoint' &&
+          target.type === 'waypoint' &&
+          dragState.waypointIndex === target.waypointIndex
+        ) {
+          updateRouteWaypointDragPreview(
+            display,
+            dragState.expectedSteps,
+            dragState.waypointIndex,
+            coordinate,
+          );
+          return;
+        }
+
+        if (
+          dragState.type === 'segment' &&
+          target.type === 'segment' &&
+          dragState.stepIndex === target.stepIndex
+        ) {
+          updateRouteInsertionDragPreview(
+            display,
+            dragState.expectedSteps,
+            dragState.stepIndex,
+            coordinate,
+          );
+        }
       },
-      onEnd: (waypointIndex, coordinate) => {
-        const dragState = routeWaypointDragStateRef.current;
-        routeWaypointDragStateRef.current = null;
+      onEnd: (target: RouteDragTarget, coordinate, didDrag) => {
+        const dragState = routeDragStateRef.current;
+        routeDragStateRef.current = null;
+
+        const targetMatchesState =
+          dragState?.type === target.type &&
+          ((dragState.type === 'waypoint' &&
+            target.type === 'waypoint' &&
+            dragState.waypointIndex === target.waypointIndex) ||
+            (dragState.type === 'segment' &&
+              target.type === 'segment' &&
+              dragState.stepIndex === target.stepIndex));
 
         if (
           !dragState ||
-          dragState.waypointIndex !== waypointIndex ||
+          !targetMatchesState ||
           routeHistoryRef.current.steps !== dragState.expectedSteps ||
           !containsCoordinate(MAP_EXTENT, coordinate) ||
           coordinateDistanceSquared(
             dragState.startCoordinate,
             coordinate,
-          ) <= ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED
+          ) <= ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED ||
+          (dragState.type === 'segment' && !didDrag)
         ) {
           updateRouteDisplay(display, routeHistoryRef.current.steps);
           return;
         }
 
-        moveRouteWaypoint(dragState, coordinate);
+        if (dragState.type === 'waypoint') {
+          moveRouteWaypoint(dragState, coordinate);
+        } else {
+          insertRouteWaypoint(dragState, coordinate);
+        }
       },
     });
 
@@ -1707,8 +1973,8 @@ export default function App() {
 
     return () => {
       map.removeInteraction(interaction);
-      clearRouteWaypointDragCursor(map);
-      routeWaypointDragStateRef.current = null;
+      clearRouteDragCursor(map);
+      routeDragStateRef.current = null;
       updateRouteDisplay(display, routeHistoryRef.current.steps);
     };
   }, [isRouteCreationActive, language]);
@@ -1776,18 +2042,19 @@ export default function App() {
       }
 
       const display = routeDisplayRef.current;
+      const expectedSteps = routeHistoryRef.current.steps;
 
-      // A click on an existing waypoint belongs to the drag interaction and
-      // must never append a new endpoint, even when no movement occurred.
+      // A press on the current route belongs to the drag interaction and must
+      // never append a new endpoint, even when no movement occurred.
       if (
         display &&
-        getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null
+        (getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null ||
+          getRouteSegmentHitAtPixel(map, expectedSteps, event.pixel) !== null)
       ) {
         return;
       }
 
       const clickedCoordinate: Coordinate = [...event.coordinate];
-      const expectedSteps = routeHistoryRef.current.steps;
       const routeCreationSession = routeCreationSessionRef.current;
       const previousStep = expectedSteps[expectedSteps.length - 1];
 
