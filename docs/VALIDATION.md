@@ -98,6 +98,12 @@ and locations over broad but unstructured exploration.
       labels. Its available modes appear below as sharp 20-pixel SVG pictograms,
       wrap cleanly for long multimodal names, and expose translated accessible
       labels and hover tooltips.
+- [ ] On desktop, the public-transport popup is wider than the other information
+      panels so long destinations are less often truncated, while narrow viewports
+      still constrain it to the available width.
+- [ ] Departure times remain vertically aligned when only some services have a
+      positive delay; delay values occupy their own right-aligned column with a
+      compact gap that neither reduces nor shifts the time column.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.
 - [ ] Closing a popup, starting a location search, or disabling its layer clears

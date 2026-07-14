@@ -682,6 +682,10 @@ select {
   color: #5c6872;
 }
 
+.public-transport-stop-popup {
+  width: min(29rem, calc(100vw - 2rem));
+}
+
 .public-transport-stop-popup .map-information-popup-header {
   align-items: flex-start;
 }
@@ -748,9 +752,9 @@ select {
 .public-transport-departure-list li {
   display: grid;
   min-height: 2.65rem;
-  grid-template-columns: minmax(2.6rem, auto) minmax(0, 1fr) auto auto;
+  grid-template-columns: 3.4rem minmax(0, 1fr) 3.15rem 3.5rem;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.35rem;
   border-bottom: 1px solid rgb(32 47 60 / 11%);
 }
 
@@ -781,11 +785,11 @@ select {
 .public-transport-departure-time {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+  text-align: right;
   white-space: nowrap;
 }
 
 .public-transport-departure-delay {
-  min-width: 2.1rem;
   color: #c22b2b;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;

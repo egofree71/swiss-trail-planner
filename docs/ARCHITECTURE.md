@@ -334,9 +334,13 @@ the `transport.opendata.ch` stationboard client. Results are validated,
 deduplicated, sorted by predicted departure time, and cached for 45 seconds.
 The UI groups departures by their localized calendar date in the
 `Europe/Zurich` time zone and shows the line, destination, predicted time, and
-positive delay when available. The date heading includes the weekday so sparse
-or weekend timetables do not make a next-day departure look like a same-day
-service. Requests are aborted when another stop is selected or the popup is
+positive delay when available. The transport panel uses a wider desktop-only
+width than the other information panels so destination names retain useful space.
+Fixed timetable columns reserve independent space for the line, time, and delay,
+with a compact gap between time and delay so delayed services do not shift the
+time column relative to on-time departures. The date heading includes the weekday so
+sparse or weekend timetables do not make a next-day departure look like a
+same-day service. Requests are aborted when another stop is selected or the popup is
 closed, and timetable failure does not hide the stop or its two localized
 SBB/CFF/FFS deep links. If no stop is hit, the same map interaction checks a
 visible hiking closure and then a visible military danger zone. Both official
@@ -766,8 +770,10 @@ SVG pictograms used on the map. Translated alternative text and tooltips preserv
 mode identification without repeating labels inside long or already qualified
 stop names. The component aborts superseded stationboard requests, groups the
 next departures by Swiss local date, formats dates and times in the active locale,
-and keeps localized links that prefill the stop as departure or destination on
-the official SBB/CFF/FFS timetable.
+and keeps time and delay values in separate aligned columns inside a wider
+desktop panel with compact column spacing. It also keeps
+localized links that prefill the stop as departure or destination on the
+official SBB/CFF/FFS timetable.
 
 ### `src/closures/trailClosures.ts`
 
