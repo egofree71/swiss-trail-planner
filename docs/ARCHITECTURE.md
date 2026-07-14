@@ -385,8 +385,13 @@ The request uses `type=locations` and limits `origins` to:
 - `gazetteer` for geographic names.
 
 The UI starts searching after two characters and 300 milliseconds of inactivity.
-Each effect owns an `AbortController`, so changing the query cancels the older
-request.
+Whenever the search field receives focus, `LocationSearch` notifies `App.tsx` to
+close any public-transport, hiking-closure, or shooting-danger information
+panel, clear its visual selection, and abort pending popup work. This also covers
+a previously entered query whose cached suggestions reopen immediately on
+focus, preventing the temporary list from being hidden by an older map-
+information panel. Each search effect owns an `AbortController`, so changing the
+query also cancels the older search request.
 
 SearchServer labels may contain simple HTML emphasis tags. The API client parses
 them as an HTML document, removes italic classification text, and returns only
@@ -826,10 +831,12 @@ Owns the search-field interface:
 - request cancellation lifecycle;
 - result-panel visibility;
 - keyboard navigation;
+- notification when the user starts editing a non-empty query;
 - result selection.
 
-It does not know about OpenLayers. It reports a typed result through its
-`onSelect` callback.
+It does not know about OpenLayers. It reports search activity and a typed result
+through callbacks; `App.tsx` decides which map-information panels and selections
+to clear.
 
 ### `src/components/RouteControls.tsx`
 
@@ -1037,7 +1044,10 @@ messages, and OpenLayers control placement.
     committed route geometry, and statistics available.
 40. The fullscreen button requests fullscreen for the root application element.
 41. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-42. Location search and browser geolocation continue to operate independently.
+42. Focusing the location-search field closes any stop, hiking-closure, or
+    shooting-danger popup, clears its selection, and aborts obsolete popup work
+    before existing or newly requested suggestions appear. Location search and
+    browser geolocation otherwise continue to operate independently.
 43. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
 44. A push to `main` triggers the Pages workflow, which builds and deploys

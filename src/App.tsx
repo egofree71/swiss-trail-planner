@@ -2541,7 +2541,10 @@ export default function App() {
         </div>
       )}
 
-      <LocationSearch onSelect={selectSearchResult} />
+      <LocationSearch
+        onSearchFocus={closeMapInformationPopup}
+        onSelect={selectSearchResult}
+      />
 
       <nav className="map-controls" aria-label={t('map.controls')}>
         <RouteControls

@@ -32,6 +32,10 @@ and locations over broad but unstructured exploration.
       changing the current view.
 - [ ] Hiking trails appear only at the intended detailed zoom levels.
 - [ ] Search, geolocation, zoom controls, scale, and fullscreen mode work.
+- [ ] Focusing the location-search field closes any open stop, hiking-closure,
+      or shooting-danger popup, clears its map selection, and leaves both cached
+      and newly requested suggestions unobstructed. Verify this after reopening a
+      previously entered query without changing its text.
 - [ ] The map can still be dragged through transparent gaps around and below the
       floating controls, including when the wide route-action toolbar is open.
 - [ ] French, German, Italian, and English can be selected without recreating
@@ -92,8 +96,8 @@ and locations over broad but unstructured exploration.
       halo correctly aligned.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.
-- [ ] Closing a popup or disabling its layer clears the associated selection and
-      aborts obsolete requests.
+- [ ] Closing a popup, starting a location search, or disabling its layer clears
+      the associated selection and aborts obsolete requests.
 
 ## 3. Routing validation scenarios
 

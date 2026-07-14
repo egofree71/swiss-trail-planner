@@ -16,6 +16,8 @@ import {
 } from '../search/locationSearch';
 
 interface LocationSearchProps {
+  /** Closes map information when the search field becomes active. */
+  onSearchFocus: () => void;
   /** Moves the map to the selected official search result. */
   onSelect: (result: LocationSearchResult) => void;
 }
@@ -28,6 +30,7 @@ const MINIMUM_QUERY_LENGTH = 2;
 const SEARCH_DELAY_MS = 300;
 
 export default function LocationSearch({
+  onSearchFocus,
   onSelect,
 }: LocationSearchProps) {
   const { language, t } = useI18n();
@@ -107,6 +110,10 @@ export default function LocationSearch({
       abortController.abort();
     };
   }, [language, query]);
+
+  const handleQueryChange = (nextQuery: string) => {
+    setQuery(nextQuery);
+  };
 
   const selectResult = (result: LocationSearchResult) => {
     skipNextSearchRef.current = true;
@@ -189,8 +196,12 @@ export default function LocationSearch({
           }
           autoComplete="off"
           spellCheck={false}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => handleQueryChange(event.target.value)}
           onFocus={() => {
+            // Focusing a populated search can immediately reopen cached
+            // suggestions, so map-information panels must be cleared first.
+            onSearchFocus();
+
             if (
               query.trim().length >= MINIMUM_QUERY_LENGTH &&
               (results.length > 0 || status !== 'idle')
