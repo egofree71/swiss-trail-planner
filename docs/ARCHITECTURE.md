@@ -327,8 +327,9 @@ default and its visibility preference is stored locally.
 
 A click first checks the already loaded stop vectors. A hit adds a dedicated
 selection halo below the icon and opens a compact project-owned panel. Its
-header contains the official stop name followed by all translated transport
-modes. The panel passes only the selected feature's official BAV identifier to
+header keeps the official stop name on its own line and shows the available
+transport modes below it as compact SVG pictograms with translated alternative
+text and tooltips. The panel passes only the selected feature's official BAV identifier to
 the `transport.opendata.ch` stationboard client. Results are validated,
 deduplicated, sorted by predicted departure time, and cached for 45 seconds.
 The UI groups departures by their localized calendar date in the
@@ -759,12 +760,14 @@ changing map, route, or layer state.
 
 ### `src/components/PublicTransportStopPopup.tsx`
 
-Renders the compact structured stop panel. The official stop name and all
-translated modes share the same bold header treatment. The component aborts
-superseded stationboard requests, groups the next departures by Swiss local date,
-formats dates and times in the active locale, and keeps localized links that
-prefill the stop as departure or destination on the official SBB/CFF/FFS
-timetable.
+Renders the compact structured stop panel. The official stop name occupies its
+own header line, while the available transport modes appear below it as the same
+SVG pictograms used on the map. Translated alternative text and tooltips preserve
+mode identification without repeating labels inside long or already qualified
+stop names. The component aborts superseded stationboard requests, groups the
+next departures by Swiss local date, formats dates and times in the active locale,
+and keeps localized links that prefill the stop as departure or destination on
+the official SBB/CFF/FFS timetable.
 
 ### `src/closures/trailClosures.ts`
 

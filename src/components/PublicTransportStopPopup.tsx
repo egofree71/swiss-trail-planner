@@ -5,6 +5,13 @@
  * links to the official SBB/CFF/FFS timetable.
  */
 import { useEffect, useMemo, useState } from 'react';
+import boatIconUrl from '../assets/public-transport-stops/boat.svg';
+import busIconUrl from '../assets/public-transport-stops/bus.svg';
+import cableCarIconUrl from '../assets/public-transport-stops/cable-car.svg';
+import chairliftIconUrl from '../assets/public-transport-stops/chairlift.svg';
+import funicularIconUrl from '../assets/public-transport-stops/funicular.svg';
+import trainIconUrl from '../assets/public-transport-stops/train.svg';
+import tramIconUrl from '../assets/public-transport-stops/tram.svg';
 import { useI18n } from '../i18n/I18nContext';
 import type { Language } from '../i18n/translations';
 import {
@@ -62,34 +69,18 @@ const MODE_LABEL_KEYS: Record<
   funicular: 'transportStops.mode.funicular',
 };
 
-/** Terms that already identify a transport mode inside an official stop name. */
-const MODE_NAME_PATTERNS: Partial<Record<PublicTransportMode, RegExp>> = {
-  bus: /\bbus\b/,
-  metro: /\bmetro\b/,
-  cableCar:
-    /telepherique|telecabine|kabinenbahn|gondelbahn|pendelbahn|luftseilbahn|seilbahn|gondola|funivia|cabinovia|cable car/,
-  chairlift: /telesiege|sesselbahn|sessellift|seggiovia|chairlift|chair lift/,
-  funicular: /funiculaire|standseilbahn|funicolare|funicular/,
+/** SVG pictograms shared with the stop markers for immediate visual recognition. */
+const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
+  train: trainIconUrl,
+  // Metro has its own translated label but shares the clear railway symbol.
+  metro: trainIconUrl,
+  tram: tramIconUrl,
+  bus: busIconUrl,
+  boat: boatIconUrl,
+  cableCar: cableCarIconUrl,
+  chairlift: chairliftIconUrl,
+  funicular: funicularIconUrl,
 };
-
-/** Normalizes accents and punctuation before testing multilingual mode names. */
-function normalizeStopName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-/** Avoids headings such as `EPFL (bus) (Bus)` or duplicate cable-car labels. */
-function stopNameAlreadyContainsMode(
-  stopName: string,
-  mode: PublicTransportMode,
-): boolean {
-  const pattern = MODE_NAME_PATTERNS[mode];
-  return pattern ? pattern.test(normalizeStopName(stopName)) : false;
-}
 
 /** Manual SBB deep-link location parameters documented for timetable forms. */
 type SbbLocationParameter = 'von' | 'nach';
@@ -144,18 +135,7 @@ export default function PublicTransportStopPopup({
       : stationBoardStatus === 'ready' && confirmedModes.length > 0
         ? confirmedModes
         : stop.modes;
-  const modeLabels = displayedModes.flatMap((mode) => {
-    // Official names sometimes already distinguish adjacent platforms with a
-    // mode suffix. Repeating it would create headings such as
-    // `Château-d'Oex (téléphérique) (Téléphérique)`.
-    if (stopNameAlreadyContainsMode(stop.name, mode)) {
-      return [];
-    }
-
-    return [t(MODE_LABEL_KEYS[mode])];
-  });
-  const modesText = modeLabels.join(', ');
-  const title = modesText ? `${stop.name} (${modesText})` : stop.name;
+  const modeLabels = displayedModes.map((mode) => t(MODE_LABEL_KEYS[mode]));
   const departureUrl = createSbbTimetableUrl(
     language,
     'von',
@@ -262,12 +242,23 @@ export default function PublicTransportStopPopup({
     <aside
       className="map-information-popup public-transport-stop-popup"
       role="dialog"
-      aria-label={title}
+      aria-label={stop.name}
     >
       <header className="map-information-popup-header">
         <div className="public-transport-stop-heading">
           <strong>{stop.name}</strong>
-          {modesText && <strong> ({modesText})</strong>}
+          {displayedModes.length > 0 && (
+            <div className="public-transport-stop-modes">
+              {displayedModes.map((mode, index) => (
+                <img
+                  key={mode}
+                  src={MODE_ICON_URLS[mode]}
+                  alt={modeLabels[index]}
+                  title={modeLabels[index]}
+                />
+              ))}
+            </div>
+          )}
         </div>
         <button
           type="button"

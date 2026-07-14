@@ -682,13 +682,32 @@ select {
   color: #5c6872;
 }
 
+.public-transport-stop-popup .map-information-popup-header {
+  align-items: flex-start;
+}
+
 .public-transport-stop-heading {
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 0.4rem;
   line-height: 1.35;
 }
 
 .public-transport-stop-heading strong {
   font-weight: 700;
+}
+
+.public-transport-stop-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.public-transport-stop-modes img {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
 }
 
 .public-transport-departures {

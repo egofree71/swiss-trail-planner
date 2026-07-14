@@ -94,6 +94,10 @@ and locations over broad but unstructured exploration.
       then grow to 29, 33, and 37 pixels at zooms 17, 18, and 19 respectively,
       stay sharp on standard and high-density displays, and keep their selection
       halo correctly aligned.
+- [ ] A selected stop shows its official name without appended textual mode
+      labels. Its available modes appear below as sharp 20-pixel SVG pictograms,
+      wrap cleanly for long multimodal names, and expose translated accessible
+      labels and hover tooltips.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.
 - [ ] Closing a popup, starting a location search, or disabling its layer clears
