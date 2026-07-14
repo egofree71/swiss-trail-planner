@@ -103,7 +103,9 @@ and locations over broad but unstructured exploration.
       still constrain it to the available width.
 - [ ] Departure times remain vertically aligned when only some services have a
       positive delay; delay values occupy their own right-aligned column with a
-      compact gap that neither reduces nor shifts the time column.
+      compact gap that neither reduces nor shifts the time column. Delayed
+      predicted times use the same red emphasis as the visible `+X min` value,
+      while on-time departures remain in the default text colour.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.
 - [ ] Closing a popup, starting a location search, or disabling its layer clears

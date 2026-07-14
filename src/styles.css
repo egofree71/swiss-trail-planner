@@ -789,6 +789,10 @@ select {
   white-space: nowrap;
 }
 
+.public-transport-departure-time--delayed {
+  color: #c22b2b;
+}
+
 .public-transport-departure-delay {
   color: #c22b2b;
   font-size: 0.8rem;

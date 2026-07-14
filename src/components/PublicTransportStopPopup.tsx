@@ -318,7 +318,11 @@ export default function PublicTransportStopPopup({
                         </span>
                         <time
                           dateTime={getDisplayedDepartureTime(departure)}
-                          className="public-transport-departure-time"
+                          className={
+                            departure.delayMinutes !== null
+                              ? 'public-transport-departure-time public-transport-departure-time--delayed'
+                              : 'public-transport-departure-time'
+                          }
                         >
                           {timeFormatter.format(
                             new Date(getDisplayedDepartureTime(departure)),

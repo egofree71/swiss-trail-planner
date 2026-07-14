@@ -338,7 +338,10 @@ positive delay when available. The transport panel uses a wider desktop-only
 width than the other information panels so destination names retain useful space.
 Fixed timetable columns reserve independent space for the line, time, and delay,
 with a compact gap between time and delay so delayed services do not shift the
-time column relative to on-time departures. The date heading includes the weekday so
+time column relative to on-time departures. A predicted departure with a positive
+delay uses the same red emphasis as its explicit delay value, while the numeric
+`+X min` indicator remains visible so the status is not conveyed by colour alone.
+The date heading includes the weekday so
 sparse or weekend timetables do not make a next-day departure look like a
 same-day service. Requests are aborted when another stop is selected or the popup is
 closed, and timetable failure does not hide the stop or its two localized
