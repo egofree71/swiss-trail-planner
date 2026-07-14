@@ -579,14 +579,19 @@ from Web Mercator through WGS 84 to approximate LV95 coordinates and sends a
 bounded POST request to GeoAdmin's elevation-profile service. The official
 swisstopo approximation is sufficiently precise for terrain samples spaced at
 about 20 metres. The service applies a small moving-average offset before the
-client accumulates positive and negative elevation changes.
+client accumulates positive and negative elevation changes. The same ordered
+samples feed the slope-sensitive hiking-time polynomial published by Schweizer
+Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020). Each
+consecutive sample contributes time from its horizontal distance and local
+grade; grades outside the model's published ±40 percent domain are clamped to
+that boundary rather than extrapolating the 15th-degree curve.
 
 `src/components/RouteStatistics.tsx` renders the floating bottom summary and
 owns the show/hide state of the profile panel. It shows distance immediately,
 uses an ellipsis while elevations are loading, and keeps distance visible with
 dashes for the remaining values if the external profile request fails. Walking
-time follows the Swiss rule of thumb and is rounded to five minutes because it
-is an estimate excluding breaks.
+time follows the Schweizer Wanderwege section-by-section polynomial and is
+rounded to five minutes because it remains an estimate excluding breaks.
 
 `src/components/RouteElevationProfile.tsx` draws the ordered elevation samples
 as a lightweight responsive SVG above the summary bar. It scales cumulative
@@ -933,8 +938,9 @@ bounds, a minimum 40-metre vertical range, and a route-coloured profile line.
 
 Calculates geodesic distance, converts route coordinates to LV95 for the
 official elevation-profile service, validates ordered distance/elevation
-samples, accumulates ascent and descent, and applies the standard Swiss
-walking-time estimate. The same samples feed the profile chart. Requests are
+samples, accumulates ascent and descent, and applies the published Schweizer
+Wanderwege 15th-degree hiking-time model to each sampled section. The same
+samples feed the profile chart. Requests are
 abortable so stale route histories cannot update the UI.
 
 ### `src/export/gpx.ts`

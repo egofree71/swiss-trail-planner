@@ -896,11 +896,7 @@ export default function App() {
     [activeRouteSegments],
   );
   const routeDurationMinutes = routeElevation
-    ? estimateHikingDuration(
-        routeDistanceMeters,
-        routeElevation.ascentMeters,
-        routeElevation.descentMeters,
-      )
+    ? estimateHikingDuration(routeElevation.points)
     : null;
 
   /** Closes any information-layer metadata and cancels its active request. */

@@ -21,7 +21,7 @@ time.
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, estimated walking time, and a collapsible elevation profile |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
@@ -61,7 +61,7 @@ http://localhost:5173/
    or export the current itinerary. A waypoint move, insertion, or individual deletion is restored as
    one complete undoable edit.
 5. Load a GPX file as the current purple, read-only itinerary. Its distance,
-   ascent, descent, walking-time estimate, and elevation profile use the same
+   ascent, descent, Swiss hiking-time estimate, and elevation profile use the same
    bottom summary as an editable route. Complete embedded GPX elevations are
    reused; GeoAdmin supplies the profile only when they are unavailable.
    Starting a new route replaces the imported itinerary.
@@ -77,6 +77,8 @@ The application uses official swisstopo backgrounds and swissTLM3D geodata,
 official hiking-closure and military danger-zone layers, Federal Office of
 Transport stop data, GeoAdmin services, and `transport.opendata.ch` departure
 data.
+Walking-time estimates apply the slope-sensitive model published by Schweizer
+Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
 Current limitations:
 

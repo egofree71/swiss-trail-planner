@@ -2,8 +2,8 @@
  * Business context: derives the compact planning statistics shown for the
  * current route. Distance is calculated immediately in the browser. Editable
  * routes use GeoAdmin's elevation service, while imported GPX files reuse their
- * complete embedded elevations when possible. The resulting values also feed
- * the standard Swiss hiking-time estimate.
+ * complete embedded elevations when possible. The ordered profile samples also
+ * feed the Swiss hiking-time polynomial published by Schweizer Wanderwege.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import LineString from 'ol/geom/LineString.js';
@@ -35,12 +35,39 @@ const PROFILE_MAX_INPUT_COORDINATES = 4_000;
  * climbs over normal hiking distances.
  */
 const PROFILE_SMOOTHING_OFFSET = 2;
-/** Minutes allocated by the Swiss rule of thumb for one kilometre walked. */
-const MINUTES_PER_KILOMETRE = 15;
-/** Minutes added by the Swiss rule of thumb for 100 metres of ascent. */
-const MINUTES_PER_100_METERS_ASCENT = 15;
-/** Minutes added by the Swiss rule of thumb for 200 metres of descent. */
-const MINUTES_PER_200_METERS_DESCENT = 15;
+/**
+ * Coefficients of the 15th-degree Swiss hiking-time polynomial.
+ *
+ * Schweizer Wanderwege published these numeric parameters in
+ * "Wanderzeitberechnung, Version 2020.2" dated 8 June 2020. The polynomial
+ * returns minutes per kilometre for a slope expressed in percent. Keeping the
+ * coefficients in ascending degree order makes the source table easy to audit;
+ * evaluation below uses Horner's method for numerical stability.
+ */
+const SWISS_HIKING_TIME_COEFFICIENTS = [
+  14.271,
+  0.36992,
+  0.025922,
+  -0.0014384,
+  0.000032105,
+  0.0000081542,
+  -9.0261e-8,
+  -2.0757e-8,
+  1.0192e-10,
+  2.8588e-11,
+  -5.7466e-14,
+  -2.1842e-14,
+  1.5176e-17,
+  8.6894e-18,
+  -1.3584e-21,
+  -1.4026e-21,
+] as const;
+/**
+ * Published validity boundary of the polynomial. Clamping avoids extrapolating
+ * the high-degree curve when a short sampled section exceeds a 40 percent
+ * slope because of genuine terrain or residual elevation noise.
+ */
+const SWISS_HIKING_TIME_MAX_SLOPE_PERCENT = 40;
 
 /** One ordered elevation sample along the route. */
 export interface RouteElevationPoint {
@@ -484,21 +511,65 @@ export async function fetchRouteElevationSummary(
   };
 }
 
+/** Evaluates the Swiss minutes-per-kilometre polynomial at one slope. */
+function hikingMinutesPerKilometre(slopePercent: number): number {
+  let minutesPerKilometre = 0;
+
+  for (
+    let index = SWISS_HIKING_TIME_COEFFICIENTS.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    minutesPerKilometre =
+      minutesPerKilometre * slopePercent +
+      SWISS_HIKING_TIME_COEFFICIENTS[index];
+  }
+
+  return minutesPerKilometre;
+}
+
 /**
- * Applies the standard Swiss hiking-time rule of thumb.
- * @param distanceMeters - Horizontal route distance in metres.
- * @param ascentMeters - Accumulated ascent in metres.
- * @param descentMeters - Accumulated descent in metres.
+ * Applies the Schweizer Wanderwege hiking-time model section by section.
+ *
+ * Using each pair of ordered elevation samples preserves the model's important
+ * non-linear behaviour: moderate descents can be as fast as level walking,
+ * while steep ascents and descents take progressively longer. Repeated profile
+ * distances mark gaps between independent GPX segments and are ignored.
+ *
+ * @param points - Ordered cumulative-distance and elevation profile samples.
  * @returns Estimated walking time in minutes, excluding breaks.
  */
 export function estimateHikingDuration(
-  distanceMeters: number,
-  ascentMeters: number,
-  descentMeters: number,
+  points: RouteElevationPoint[],
 ): number {
-  return (
-    (distanceMeters / 1_000) * MINUTES_PER_KILOMETRE +
-    (ascentMeters / 100) * MINUTES_PER_100_METERS_ASCENT +
-    (descentMeters / 200) * MINUTES_PER_200_METERS_DESCENT
-  );
+  let durationMinutes = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previousPoint = points[index - 1];
+    const currentPoint = points[index];
+    const horizontalDistanceMeters =
+      currentPoint.distanceMeters - previousPoint.distanceMeters;
+
+    if (
+      !Number.isFinite(horizontalDistanceMeters) ||
+      horizontalDistanceMeters <= 0
+    ) {
+      continue;
+    }
+
+    const elevationDifferenceMeters =
+      currentPoint.elevationMeters - previousPoint.elevationMeters;
+    const rawSlopePercent =
+      (100 * elevationDifferenceMeters) / horizontalDistanceMeters;
+    const slopePercent = Math.min(
+      SWISS_HIKING_TIME_MAX_SLOPE_PERCENT,
+      Math.max(-SWISS_HIKING_TIME_MAX_SLOPE_PERCENT, rawSlopePercent),
+    );
+
+    durationMinutes +=
+      (horizontalDistanceMeters / 1_000) *
+      hikingMinutesPerKilometre(slopePercent);
+  }
+
+  return durationMinutes;
 }

@@ -85,6 +85,12 @@ and locations over broad but unstructured exploration.
 - [ ] Deletion clears the editable route and its statistics.
 - [ ] Distance, ascent, descent, duration, and the elevation profile refresh
       after route changes.
+- [ ] A flat 4.2 km profile estimates about one hour before the existing
+      five-minute display rounding.
+- [ ] Moderate downhill samples do not receive the old blanket descent
+      penalty, while steep uphill and downhill samples increase the estimate.
+- [ ] The 10 km comparison route used with SuisseMobile, swisstopo, and
+      Suisse Rando displays about 2 h 50 rather than the former 3 h 50.
 - [ ] A nearly flat route with only a few metres of elevation variation uses at
       least a 40-metre vertical chart range and therefore appears visually flat
       rather than filling the profile height.
@@ -214,7 +220,7 @@ logic would benefit most from focused automated tests:
 - GPX import validation and export serialization;
 - route-state undo/redo, waypoint move, insertion and deletion rebuilding,
   loop closure/reopening, reversal, and geometry flattening;
-- route distance, ascent, descent, and duration calculations;
+- route distance, ascent, descent, and Schweizer Wanderwege duration calculations;
 - selected routing cost and topology helpers where representative fixtures can
   be kept small.
 
