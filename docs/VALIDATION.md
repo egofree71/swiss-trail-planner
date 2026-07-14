@@ -32,6 +32,8 @@ and locations over broad but unstructured exploration.
       changing the current view.
 - [ ] Hiking trails appear only at the intended detailed zoom levels.
 - [ ] Search, geolocation, zoom controls, scale, and fullscreen mode work.
+- [ ] The map can still be dragged through transparent gaps around and below the
+      floating controls, including when the wide route-action toolbar is open.
 - [ ] French, German, Italian, and English can be selected without recreating
       the map or losing the current route.
 

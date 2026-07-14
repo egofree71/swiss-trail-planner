@@ -271,6 +271,15 @@ select {
   align-items: flex-end;
   flex-direction: column;
   gap: 0.85rem;
+  /* The toolbar grows to the width of the route actions. Its transparent box
+     must not block map dragging between or below the visible controls. */
+  pointer-events: none;
+}
+
+.map-controls button,
+.map-controls select,
+.map-controls .map-layers-menu {
+  pointer-events: auto;
 }
 
 .route-controls,
