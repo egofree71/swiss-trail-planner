@@ -1,13 +1,14 @@
 /**
  * Business context: derives the compact planning statistics shown for the
- * current route. Distance is calculated immediately in the browser, while
- * ascent and descent come from GeoAdmin's official elevation-profile service.
- * The resulting values also feed the standard Swiss hiking-time estimate.
+ * current route. Distance is calculated immediately in the browser. Editable
+ * routes use GeoAdmin's elevation service, while imported GPX files reuse their
+ * complete embedded elevations when possible. The resulting values also feed
+ * the standard Swiss hiking-time estimate.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import LineString from 'ol/geom/LineString.js';
 import { toLonLat } from 'ol/proj.js';
-import { getLength } from 'ol/sphere.js';
+import { getDistance, getLength } from 'ol/sphere.js';
 
 /** Official GeoAdmin endpoint returning elevations along an LV95 polyline. */
 const ELEVATION_PROFILE_ENDPOINT =
@@ -45,7 +46,7 @@ const MINUTES_PER_200_METERS_DESCENT = 15;
 export interface RouteElevationPoint {
   /** Cumulative distance from the start of the route in metres. */
   distanceMeters: number;
-  /** Smoothed terrain elevation in metres. */
+  /** Profile elevation in metres. */
   elevationMeters: number;
 }
 
@@ -55,8 +56,16 @@ export interface RouteElevationSummary {
   ascentMeters: number;
   /** Accumulated negative elevation change in metres, expressed positively. */
   descentMeters: number;
-  /** Ordered samples returned by the profile service. */
+  /** Ordered samples used by the elevation chart. */
   points: RouteElevationPoint[];
+}
+
+/** One imported GPX segment with a complete altitude for every map coordinate. */
+export interface ImportedRouteElevationSegment {
+  /** Ordered segment geometry in EPSG:3857. */
+  coordinates: Coordinate[];
+  /** Embedded GPX elevations matching the coordinate array one-for-one. */
+  elevationsMeters: number[];
 }
 
 /** Untrusted altitude container returned by the profile service. */
@@ -177,6 +186,196 @@ export function calculateRouteDistance(coordinates: Coordinate[]): number {
     coordinates.map((coordinate) => [coordinate[0], coordinate[1]]),
   );
   return getLength(line, { projection: 'EPSG:3857' });
+}
+
+/** Calculates total geodesic length without inventing links across GPX gaps. */
+export function calculateRouteSegmentsDistance(segments: Coordinate[][]): number {
+  return segments.reduce(
+    (total, segment) => total + calculateRouteDistance(segment),
+    0,
+  );
+}
+
+
+/** Measures cumulative geodesic distances at each imported GPX coordinate. */
+function measureImportedSegment(coordinates: Coordinate[]): number[] {
+  const lonLatCoordinates = coordinates.map((coordinate) =>
+    toLonLat(coordinate),
+  );
+  const cumulativeDistances = [0];
+
+  for (let index = 1; index < lonLatCoordinates.length; index += 1) {
+    cumulativeDistances.push(
+      cumulativeDistances[cumulativeDistances.length - 1] +
+        getDistance(lonLatCoordinates[index - 1], lonLatCoordinates[index]),
+    );
+  }
+
+  return cumulativeDistances;
+}
+
+/** Interpolates an imported GPX elevation at one cumulative segment distance. */
+function importedElevationAtDistance(
+  cumulativeDistances: number[],
+  elevationsMeters: number[],
+  distanceMeters: number,
+): number {
+  if (distanceMeters <= 0) {
+    return elevationsMeters[0];
+  }
+
+  const lastIndex = cumulativeDistances.length - 1;
+  const totalDistanceMeters = cumulativeDistances[lastIndex];
+
+  if (distanceMeters >= totalDistanceMeters) {
+    return elevationsMeters[lastIndex];
+  }
+
+  let upperIndex = 1;
+
+  while (
+    upperIndex < cumulativeDistances.length &&
+    cumulativeDistances[upperIndex] < distanceMeters
+  ) {
+    upperIndex += 1;
+  }
+
+  const lowerIndex = upperIndex - 1;
+  const lowerDistance = cumulativeDistances[lowerIndex];
+  const upperDistance = cumulativeDistances[upperIndex];
+  const distanceSpan = upperDistance - lowerDistance;
+  const fraction =
+    distanceSpan > 0
+      ? (distanceMeters - lowerDistance) / distanceSpan
+      : 0;
+
+  return (
+    elevationsMeters[lowerIndex] +
+    (elevationsMeters[upperIndex] - elevationsMeters[lowerIndex]) * fraction
+  );
+}
+
+/**
+ * Builds a regular profile from complete elevations embedded in a GPX file.
+ *
+ * GPX track points are often distributed irregularly because they preserve map
+ * bends as well as profile samples. Resampling the embedded altitude function at
+ * the same roughly 20 metre interval used by GeoAdmin prevents dense bends from
+ * producing a visibly jagged chart while retaining the file's own elevations.
+ * Deliberate gaps remain independent for distance and elevation accumulation.
+ *
+ * @param segments - Imported map geometry with complete matching elevations.
+ * @returns Combined route statistics and regularly spaced profile samples.
+ * @throws {Error} If no segment contains a valid measurable elevation series.
+ */
+export function createImportedRouteElevationSummary(
+  segments: ImportedRouteElevationSegment[],
+): RouteElevationSummary {
+  let ascentMeters = 0;
+  let descentMeters = 0;
+  let cumulativeRouteDistanceMeters = 0;
+  const points: RouteElevationPoint[] = [];
+
+  for (const segment of segments) {
+    if (
+      segment.coordinates.length < 2 ||
+      segment.coordinates.length !== segment.elevationsMeters.length ||
+      segment.elevationsMeters.some((elevation) => !Number.isFinite(elevation))
+    ) {
+      continue;
+    }
+
+    const cumulativeDistances = measureImportedSegment(segment.coordinates);
+    const segmentDistanceMeters =
+      cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
+
+    if (segmentDistanceMeters <= 0) {
+      continue;
+    }
+
+    const sampleCount = profileSampleCount(segmentDistanceMeters);
+    const segmentPoints: RouteElevationPoint[] = [];
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      const distanceMeters =
+        sampleCount === 1
+          ? 0
+          : (index / (sampleCount - 1)) * segmentDistanceMeters;
+      segmentPoints.push({
+        distanceMeters: cumulativeRouteDistanceMeters + distanceMeters,
+        elevationMeters: importedElevationAtDistance(
+          cumulativeDistances,
+          segment.elevationsMeters,
+          distanceMeters,
+        ),
+      });
+    }
+
+    for (let index = 1; index < segmentPoints.length; index += 1) {
+      const difference =
+        segmentPoints[index].elevationMeters -
+        segmentPoints[index - 1].elevationMeters;
+
+      if (difference > 0) {
+        ascentMeters += difference;
+      } else {
+        descentMeters -= difference;
+      }
+    }
+
+    points.push(...segmentPoints);
+    cumulativeRouteDistanceMeters += segmentDistanceMeters;
+  }
+
+  if (points.length < PROFILE_MIN_SAMPLE_POINTS) {
+    throw new Error('Imported elevation profile contains too few valid samples.');
+  }
+
+  return { ascentMeters, descentMeters, points };
+}
+
+/**
+ * Retrieves elevation profiles for independent GPX segments and combines their
+ * totals without adding ascent, descent, or distance across deliberate gaps.
+ */
+export async function fetchRouteSegmentsElevationSummary(
+  segments: Coordinate[][],
+  signal: AbortSignal,
+): Promise<RouteElevationSummary> {
+  let ascentMeters = 0;
+  let descentMeters = 0;
+  let cumulativeDistanceMeters = 0;
+  const points: RouteElevationPoint[] = [];
+
+  for (const segment of segments) {
+    const distanceMeters = calculateRouteDistance(segment);
+
+    if (segment.length < 2 || distanceMeters <= 0) {
+      continue;
+    }
+
+    const summary = await fetchRouteElevationSummary(
+      segment,
+      distanceMeters,
+      signal,
+    );
+
+    ascentMeters += summary.ascentMeters;
+    descentMeters += summary.descentMeters;
+    points.push(
+      ...summary.points.map((point) => ({
+        ...point,
+        distanceMeters: point.distanceMeters + cumulativeDistanceMeters,
+      })),
+    );
+    cumulativeDistanceMeters += distanceMeters;
+  }
+
+  if (points.length < PROFILE_MIN_SAMPLE_POINTS) {
+    throw new Error('Elevation profile contains too few valid samples.');
+  }
+
+  return { ascentMeters, descentMeters, points };
 }
 
 /**

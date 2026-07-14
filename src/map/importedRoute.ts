@@ -1,7 +1,7 @@
 /**
- * Business context: renders one externally loaded GPX itinerary as a read-only
- * reference layer. It stays independent from the red editable route so users
- * can compare or trace a new itinerary without mutating the imported geometry.
+ * Business context: renders one externally loaded GPX itinerary as the current read-only
+ * itinerary. The purple layer remains non-editable, but only one itinerary is
+ * kept at a time so an editable route and imported GPX never compete for UI state.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import Feature from 'ol/Feature.js';
@@ -12,7 +12,7 @@ import { Stroke, Style } from 'ol/style.js';
 
 /** OpenLayers resources owned by the root application for the loaded GPX. */
 export interface ImportedRouteDisplay {
-  /** Read-only vector layer inserted below the editable route. */
+  /** Read-only vector layer used while the imported GPX is current. */
   layer: VectorLayer<VectorSource>;
   /** Mutable source replaced whenever another GPX is loaded. */
   source: VectorSource;
@@ -49,7 +49,7 @@ export function createImportedRouteDisplay(): ImportedRouteDisplay {
 }
 
 /**
- * Replaces the displayed imported route without affecting editable route state.
+ * Replaces or clears the displayed imported itinerary.
  * @param display - OpenLayers resources to update in place.
  * @param segments - Independent EPSG:3857 line segments.
  */

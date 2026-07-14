@@ -22,7 +22,7 @@ time.
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, estimated walking time, and a collapsible elevation profile |
-| Import and export | Read-only GPX reference loading and named GPX export with smoothed elevations when available |
+| Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
 | Interface | Compact floating controls, no permanent toolbar, and French, German, Italian, and English translations |
@@ -60,8 +60,11 @@ http://localhost:5173/
 4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
    or export the current itinerary. A waypoint move, insertion, or individual deletion is restored as
    one complete undoable edit.
-5. Load a GPX file to display it as an independent purple, read-only reference
-   while planning a new red route.
+5. Load a GPX file as the current purple, read-only itinerary. Its distance,
+   ascent, descent, walking-time estimate, and elevation profile use the same
+   bottom summary as an editable route. Complete embedded GPX elevations are
+   reused; GeoAdmin supplies the profile only when they are unavailable.
+   Starting a new route replaces the imported itinerary.
 6. Outside route-creation mode, click visible closures, danger zones, or public
    transport stops to inspect their available information.
 
@@ -80,7 +83,7 @@ Current limitations:
 - dynamic swissTLM3D routing is experimental and runs entirely in the browser;
 - closures and danger zones are informational and do not automatically change
   route calculation;
-- imported GPX routes are read-only;
+- imported GPX routes are read-only and replace the current editable route;
 - routes are not persisted locally or remotely;
 - external map, elevation, routing, and timetable services can be temporarily
   unavailable or incomplete.

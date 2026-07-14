@@ -92,8 +92,14 @@ and locations over broad but unstructured exploration.
 - [ ] Exported geometry preserves routed bends and waypoint order; a closed route
       ends at exactly the same coordinate where it starts.
 - [ ] Elevation values are present when the profile request succeeded.
-- [ ] A valid GPX track or route loads as a separate purple read-only reference.
-- [ ] Invalid, empty, and oversized GPX files leave the existing routes unchanged.
+- [ ] A valid GPX track or route replaces the editable route and loads as the current purple read-only itinerary.
+- [ ] The imported GPX shows distance, ascent, descent, estimated walking time, and a collapsible elevation profile.
+- [ ] Exporting and immediately reimporting a short route preserves the same smooth profile shape by reusing embedded `<ele>` values.
+- [ ] A GPX with complete elevations does not require GeoAdmin to build its profile; a GPX with missing or invalid elevations falls back successfully.
+- [ ] A GPX with several `trkseg` elements does not add distance or elevation change across the gaps.
+- [ ] Starting route creation clears the imported GPX and its statistics without prompting.
+- [ ] Loading another GPX replaces the previous imported itinerary.
+- [ ] Invalid, empty, and oversized GPX files leave the current itinerary unchanged.
 
 ### Information layers
 

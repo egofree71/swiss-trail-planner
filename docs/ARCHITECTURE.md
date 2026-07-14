@@ -61,8 +61,9 @@ It can:
 - close the route with a dedicated final section back to the first waypoint, or reopen it without losing the normal route;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
-- load one external GPX track or route as an independent read-only reference;
-- fit the map to imported GPX geometry without changing editable route history;
+- load one external GPX track or route as the current read-only itinerary;
+- replace the editable route on successful GPX import and clear the imported GPX when a new editable route starts;
+- calculate imported GPX distance, ascent, descent, walking time, and elevation profile without inventing links across separate track segments;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal or hide a compact elevation profile from the summary bar;
 - reveal a compact route action strip for snap mode, reversal, loop closure, deletion, and export;
@@ -119,7 +120,7 @@ Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
 controls are separate presentational components. Editable route rendering and
 its focused route-shaping pointer interaction remain together in `src/map/route.ts`;
-the imported route stays in its own map module. A broader map-controller
+the imported route stays in its own map module and shares only the current-itinerary metrics pipeline. A broader map-controller
 abstraction is still unnecessary for one bounded editing interaction.
 
 OpenLayers map ownership remains in `App.tsx` because there is still only one
@@ -150,14 +151,14 @@ Browser
    │      │      └── geo.admin.ch SearchServer
    │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
-   │      ├── route edit snapshots, imported-GPX state, statistics, and temporary routing status
+   │      ├── route edit snapshots, single-current-itinerary imported-GPX state, statistics, and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
    │      ├── owns OpenLayers lifecycle, route-editing state, and adjacent-section recalculation
    │      ├── requests dynamic routing cells for snapped clicks
-   │      └── refreshes elevation statistics after route changes
+   │      └── refreshes elevation statistics after editable-route or imported-GPX changes
    │
    ├── OpenLayers Map / View
    │      ├── TileLayer: national map (JPEG)
@@ -612,20 +613,35 @@ discarding cells that completed successfully.
 ## 12. Read-only GPX import
 
 `RouteImportControl` owns only the hidden file input and compact import button.
-It returns the selected `File` to `App.tsx`; no imported data enters React route
-history.
+It returns the selected `File` to `App.tsx`; imported geometry never becomes
+editable route history.
 
 `src/import/gpx.ts` parses common GPX tracks and routes locally with
-`DOMParser`. Each `trkseg` remains an independent line, and coordinate values
-are validated before they are transformed from WGS 84 to the map projection.
-Waypoint-only GPX documents are rejected because they do not define an
-itinerary. A size limit protects the browser from accidental oversized files.
+`DOMParser`. Each `trkseg` remains an independent line, coordinate values are
+validated before transformation from WGS 84, and a complete `<ele>` series is
+preserved for each segment. If any retained point in the itinerary lacks a
+valid elevation, the imported geometry remains valid but the application falls
+back to GeoAdmin for the complete profile. Waypoint-only GPX documents are
+rejected because they do not define an itinerary. A size limit protects the
+browser from accidental oversized files.
 
-`src/map/importedRoute.ts` owns a separate purple read-only vector layer below
-the red editable route. Loading a new GPX clears and replaces only that layer.
-After display, `App.tsx` fits the OpenLayers view to the imported extent; normal
-WMTS tile loading then retrieves the map for that location. Route-creation mode,
-undo/redo history, statistics, and export remain independent.
+A successful import becomes the single current itinerary: active routing is
+aborted, route-creation mode is left, editable route history is cleared, and the
+new purple read-only geometry replaces any prior GPX. Invalid imports leave the
+current itinerary untouched. Starting route creation later clears the imported
+layer immediately, without confirmation.
+
+`src/map/importedRoute.ts` owns the purple read-only vector layer. `App.tsx` fits
+the view to its extent and feeds its projected segments into the shared metrics
+pipeline. Distance is summed per segment. When every retained GPX point has a
+valid `<ele>` value, the embedded altitude function is resampled at the same
+roughly 20 metre spacing used for editable routes; this preserves the exported
+profile while avoiding visible artefacts from irregularly spaced geometry
+vertices. GPX files without a complete elevation series use the normal GeoAdmin
+profile request instead. Elevation accumulation remains segment-local in both
+paths so deliberate GPX gaps do not create fictional connectors. The resulting
+cumulative samples feed the same collapsible profile and bottom statistics bar
+used by editable routes.
 
 ## 13. GitHub Pages deployment
 
@@ -755,7 +771,7 @@ swiss-trail-planner/
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the tile and vector layers, replaces the selected base-map source,
-handles map, geolocation, fullscreen, GPX reference loading, information-layer
+handles map, geolocation, fullscreen, single-current-itinerary GPX loading, information-layer
 visibility and feature inspection, route-creation mode, immutable route edit
 snapshots, waypoint move and insertion recalculation, loop closing and reopening, dynamic graph loading, route
 statistics, and temporary routing status. It
@@ -931,12 +947,13 @@ the previous geometry-only export.
 
 Validates file size policy, parses GPX XML, extracts named tracks and routes,
 keeps disconnected track segments separate, rejects invalid coordinates, and
-returns WGS 84 geometry without touching OpenLayers state.
+returns WGS 84 geometry with a complete elevation series when every retained
+point supplies a valid `<ele>` value. It does not touch OpenLayers state.
 
 ### `src/map/importedRoute.ts`
 
-Creates and updates the independent read-only GPX vector layer. Its purple
-casing style distinguishes imported references from the red editable route and
+Creates and updates the read-only GPX vector layer. Its purple casing style
+distinguishes an imported current itinerary from the red editable route and
 blue hydrography.
 
 ### `src/map/route.ts`
@@ -1035,74 +1052,78 @@ messages, and OpenLayers control placement.
 9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
 10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
 11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices.
-12. Selecting a GPX parses it locally, replaces the read-only reference layer,
-    and fits the map to the imported geometry.
-13. The route button toggles route-creation mode and the crosshair cursor.
-14. Entering route mode attaches the route-click listener, one focused route
+12. Selecting a valid GPX leaves route creation, clears editable route history,
+    replaces the previous imported itinerary, and fits the map to its geometry.
+13. Independent GPX segments are measured separately, then combined for the
+    shared distance, elevation, walking-time, and profile display. Complete
+    embedded elevations are regularly resampled; otherwise GeoAdmin supplies
+    the profile.
+14. Starting editable route creation clears the imported GPX without prompting.
+15. The route button toggles route-creation mode and the crosshair cursor.
+16. Entering route mode attaches the route-click listener, one focused route
     drag interaction, and the contextual toolbar.
-15. With snapping disabled, a map click stores a direct section immediately.
-16. The first snapped click derives and loads a local 3 × 3 cell group while
+17. With snapping disabled, a map click stores a direct section immediately.
+18. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
-17. Dense identify requests are subdivided when either layer reaches 200 results.
-18. Returned road vertices become graph nodes and edges; hiking geometry marks
+19. Dense identify requests are subdivided when either layer reaches 200 results.
+20. Returned road vertices become graph nodes and edges; hiking geometry marks
     preferred edges through spatial matching.
-19. The first clicked point is snapped to the nearest walkable segment.
-20. Later clicks derive a corridor of cells between waypoints, load only missing
+21. The first clicked point is snapped to the nearest walkable segment.
+22. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-21. A disconnected or empty corridor is retried once with a wider cell radius.
-22. If no routable path remains, the current click becomes a free point or a
+23. A disconnected or empty corridor is retried once with a wider cell radius.
+24. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-23. Pressing an existing waypoint starts a potential move or deletion sequence
+25. Pressing an existing waypoint starts a potential move or deletion sequence
     and prevents map panning; a click deletes it, while a drag moves it.
-24. Pressing the route line outside a waypoint selects the closest stored normal
+26. Pressing the route line outside a waypoint selects the closest stored normal
     or closing section and starts a potential insertion sequence.
-25. Pointer movement draws straight previews only: adjacent sections for a moved
+27. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
     made during the drag.
-26. Releasing a moved point recalculates its affected normal sections and, for
+28. Releasing a moved point recalculates its affected normal sections and, for
     the first or last point of a closed route, the closing section.
-27. Releasing a dragged normal or closing section after a genuine movement
+29. Releasing a dragged normal or closing section after a genuine movement
     replaces that section with two sections through the new waypoint; each half
     inherits and independently resolves the original straight or network routing intent.
-28. The loop button creates one dedicated section from the final waypoint back
+30. The loop button creates one dedicated section from the final waypoint back
     to the first using the current snap mode, or removes that section to reopen
     the route. No duplicate start waypoint is created.
-29. While the loop is closed, empty-map clicks do not append another waypoint;
+31. While the loop is closed, empty-map clicks do not append another waypoint;
     the closing section remains draggable and the first and last waypoints remain editable.
-30. Every addition, waypoint move, waypoint insertion, waypoint deletion,
+32. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
-31. Updating the committed route state rebuilds the route line and indexed
+33. Updating the committed route state rebuilds the route line and indexed
     waypoint features.
-32. Distance is recalculated locally from the flattened route geometry, including
+34. Distance is recalculated locally from the flattened route geometry, including
     the optional closing section.
-33. After a short debounce, an abortable profile request refreshes ascent,
+35. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-34. The profile button reveals or hides the SVG chart without another request.
-35. Undo and redo exchange complete stored route states without routing again.
-36. Reversal rebuilds normal and closing geometry in the opposite direction as
+36. The profile button reveals or hides the SVG chart without another request.
+37. Undo and redo exchange complete stored route states without routing again.
+38. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
-37. Deletion clears the current route and all undo/redo states and hides the summary.
-38. GPX export opens a modal naming form before any XML is generated.
-39. Confirming the form converts the flattened route to WGS 84, merges exact
+39. Deletion clears the current route and all undo/redo states and hides the summary.
+40. GPX export opens a modal naming form before any XML is generated.
+41. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-40. Changing language updates interface text, number formatting, document
+42. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-41. Leaving route mode removes the route-click listener and drag interaction,
+43. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-42. The fullscreen button requests fullscreen for the root application element.
-43. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-44. Focusing the location-search field closes any stop, hiking-closure, or
+44. The fullscreen button requests fullscreen for the root application element.
+45. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+46. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
-45. On unmount, map listeners, interactions, timers, requests, references, and
+47. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-46. A push to `main` triggers the Pages workflow, which builds and deploys
+48. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist`.
-
 
 ## 18. Error handling
 
@@ -1142,9 +1163,11 @@ Elevation-profile failures are non-blocking. The distance remains visible,
 altitude-dependent values become dashes, and route editing continues normally.
 Superseded profile requests are aborted after route mutations.
 
-Invalid, empty, or oversized GPX files leave both the existing imported layer
-and editable route untouched and produce a translated temporary error. Imported
-GPX handling performs no network request.
+Invalid, empty, or oversized GPX files leave the current itinerary untouched and
+produce a translated temporary error. Parsing remains local. After a successful
+import, complete embedded GPX elevations supply the shared statistics and chart
+without another elevation request; missing or incomplete elevations fall back
+to the normal GeoAdmin profile service.
 
 ## 19. Code conventions
 

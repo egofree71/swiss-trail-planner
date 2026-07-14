@@ -116,9 +116,11 @@ import {
   RoutingAreaTooLargeError,
 } from './routing/dynamicRoutingNetwork';
 import {
-  calculateRouteDistance,
+  calculateRouteSegmentsDistance,
+  createImportedRouteElevationSummary,
   estimateHikingDuration,
   fetchRouteElevationSummary,
+  fetchRouteSegmentsElevationSummary,
   type RouteElevationSummary,
 } from './metrics/routeMetrics';
 import type { LocationSearchResult } from './search/locationSearch';
@@ -873,13 +875,25 @@ export default function App() {
     useState<RouteElevationStatus>('loading');
   const [routeElevation, setRouteElevation] =
     useState<RouteElevationSummary | null>(null);
+  const [importedRouteSegments, setImportedRouteSegments] = useState<
+    Coordinate[][]
+  >([]);
+  const [importedRouteElevationSummary, setImportedRouteElevationSummary] =
+    useState<RouteElevationSummary | null>(null);
   const routeCoordinates = useMemo(
     () => collectRouteCoordinates(routeHistory.steps, routeHistory.closure),
     [routeHistory.steps, routeHistory.closure],
   );
+  const activeRouteSegments = useMemo(
+    () =>
+      routeCoordinates.length >= 2
+        ? [routeCoordinates]
+        : importedRouteSegments,
+    [importedRouteSegments, routeCoordinates],
+  );
   const routeDistanceMeters = useMemo(
-    () => calculateRouteDistance(routeCoordinates),
-    [routeCoordinates],
+    () => calculateRouteSegmentsDistance(activeRouteSegments),
+    [activeRouteSegments],
   );
   const routeDurationMinutes = routeElevation
     ? estimateHikingDuration(
@@ -1189,8 +1203,8 @@ export default function App() {
   };
 
   /**
-   * Loads one GPX as an independent read-only layer and frames its full extent.
-   * The editable route and its undo/redo history remain untouched.
+   * Loads one GPX as the single current read-only itinerary and frames its full
+   * extent. A successful import replaces the editable route and its history.
    */
   const importRouteFile = async (file: File) => {
     const map = mapRef.current;
@@ -1216,17 +1230,53 @@ export default function App() {
       }
 
       const projectedSegments = importedRoute.segments.map((segment) =>
-        segment.map((coordinate) => fromLonLat(coordinate)),
+        segment.coordinates.map((coordinate) => fromLonLat(coordinate)),
       );
+      let embeddedElevationSummary: RouteElevationSummary | null = null;
 
+      if (
+        importedRoute.segments.every(
+          (segment) => segment.elevationsMeters !== null,
+        )
+      ) {
+        try {
+          embeddedElevationSummary = createImportedRouteElevationSummary(
+            importedRoute.segments.map((segment, index) => ({
+              coordinates: projectedSegments[index],
+              elevationsMeters: segment.elevationsMeters ?? [],
+            })),
+          );
+        } catch (error) {
+          // Geometry remains usable when unusual embedded elevations cannot be measured.
+          console.warn(
+            'Unable to use GPX elevations; falling back to GeoAdmin.',
+            error,
+          );
+        }
+      }
+
+      routingAbortControllerRef.current?.abort();
+      routingAbortControllerRef.current = null;
+      routeOperationPendingRef.current = false;
+      routeCreationActiveRef.current = false;
+      routeCreationSessionRef.current += 1;
+      setIsRouteOperationPending(false);
+      setIsRouteCreationActive(false);
+      commitRouteHistory({
+        steps: [],
+        closure: null,
+        undoStates: [],
+        redoStates: [],
+      });
       updateImportedRouteDisplay(display, projectedSegments);
+      setImportedRouteSegments(projectedSegments);
+      setImportedRouteElevationSummary(embeddedElevationSummary);
       clearRouteMessageTimer();
       setRouteMessage('');
 
       /*
        * Fitting the loaded geometry triggers the normal WMTS tile requests for
-       * that location. A bottom margin leaves room for editable-route statistics
-       * when a separate route is already being created.
+       * that location. A bottom margin leaves room for the imported itinerary statistics.
        */
       const importedExtent = display.source.getExtent();
 
@@ -1234,7 +1284,7 @@ export default function App() {
         map.getView().fit(importedExtent, {
           duration: 600,
           maxZoom: 16,
-          padding: [80, 80, routeCoordinates.length >= 2 ? 180 : 80, 80],
+          padding: [80, 80, 180, 80],
         });
       }
     } catch (error) {
@@ -1616,6 +1666,17 @@ export default function App() {
 
     routeCreationActiveRef.current = nextState;
     routeCreationSessionRef.current += 1;
+
+    if (nextState && importedRouteSegments.length > 0) {
+      const importedDisplay = importedRouteDisplayRef.current;
+
+      if (importedDisplay) {
+        updateImportedRouteDisplay(importedDisplay, []);
+      }
+
+      setImportedRouteSegments([]);
+      setImportedRouteElevationSummary(null);
+    }
 
     if (!nextState) {
       routingAbortControllerRef.current?.abort();
@@ -2545,9 +2606,18 @@ export default function App() {
    * requests are aborted so rapid undo/redo actions cannot publish stale data.
    */
   useEffect(() => {
-    if (routeCoordinates.length < 2 || routeDistanceMeters <= 0) {
+    if (activeRouteSegments.length === 0 || routeDistanceMeters <= 0) {
       setRouteElevation(null);
       setRouteElevationStatus('loading');
+      return;
+    }
+
+    if (
+      routeCoordinates.length < 2 &&
+      importedRouteElevationSummary !== null
+    ) {
+      setRouteElevation(importedRouteElevationSummary);
+      setRouteElevationStatus('ready');
       return;
     }
 
@@ -2556,11 +2626,19 @@ export default function App() {
     setRouteElevationStatus('loading');
 
     const requestTimer = window.setTimeout(() => {
-      void fetchRouteElevationSummary(
-        routeCoordinates,
-        routeDistanceMeters,
-        abortController.signal,
-      )
+      const elevationRequest =
+        activeRouteSegments.length === 1
+          ? fetchRouteElevationSummary(
+              activeRouteSegments[0],
+              routeDistanceMeters,
+              abortController.signal,
+            )
+          : fetchRouteSegmentsElevationSummary(
+              activeRouteSegments,
+              abortController.signal,
+            );
+
+      void elevationRequest
         .then((summary) => {
           if (!abortController.signal.aborted) {
             setRouteElevation(summary);
@@ -2582,7 +2660,12 @@ export default function App() {
       window.clearTimeout(requestTimer);
       abortController.abort();
     };
-  }, [routeCoordinates, routeDistanceMeters]);
+  }, [
+    activeRouteSegments,
+    importedRouteElevationSummary,
+    routeCoordinates.length,
+    routeDistanceMeters,
+  ]);
 
   /**
    * Registers the route-click interaction only while editing is active. Network
@@ -3018,7 +3101,7 @@ export default function App() {
         />
       )}
 
-      {routeCoordinates.length >= 2 && (
+      {activeRouteSegments.length > 0 && (
         <RouteStatistics
           distanceMeters={routeDistanceMeters}
           elevationStatus={routeElevationStatus}
