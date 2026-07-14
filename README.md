@@ -20,7 +20,7 @@ time.
 | Area | Available functionality |
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints that can be moved or inserted by dragging the route, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, and route deletion |
+| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, and complete route deletion |
 | Route information | Distance, ascent, descent, estimated walking time, and a collapsible elevation profile |
 | Import and export | Read-only GPX reference loading and named GPX export with smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
@@ -50,15 +50,16 @@ http://localhost:5173/
 1. Use the **Layers** button to choose a background and enable or disable
    information overlays.
 2. Activate route creation, then click or tap the map to add waypoints. Drag
-   an existing red waypoint to move it, or drag a section of the red line to
-   insert a new waypoint there. Only the affected sections are recalculated
-   after release.
+   an existing red waypoint to move it, click it to delete it, or drag a section
+   of the red line to insert a new waypoint there. Contextual labels describe
+   these actions when a mouse or hover-capable pointer is used. Only the affected
+   sections are recalculated after an edit.
 3. Keep snapping enabled to follow available swissTLM3D roads and paths, or
    disable it to create straight segments. A section also falls back to a
    straight line when no routable path can be resolved.
 4. Use the route controls to undo, redo, reverse, delete, or export the current
-   itinerary. A waypoint move or insertion is restored as one complete
-   undoable edit.
+   itinerary. A waypoint move, insertion, or individual deletion is restored as
+   one complete undoable edit.
 5. Load a GPX file to display it as an independent purple, read-only reference
    while planning a new red route.
 6. Outside route-creation mode, click visible closures, danger zones, or public
@@ -79,7 +80,6 @@ Current limitations:
 - dynamic swissTLM3D routing is experimental and runs entirely in the browser;
 - closures and danger zones are informational and do not automatically change
   route calculation;
-- individual waypoint deletion is not yet available;
 - imported GPX routes are read-only;
 - routes are not persisted locally or remotely;
 - external map, elevation, routing, and timetable services can be temporarily

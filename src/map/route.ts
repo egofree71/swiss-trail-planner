@@ -2,8 +2,8 @@
  * Business context: owns the OpenLayers representation and direct drag
  * interaction for the route currently edited by the user. Route history stays
  * immutable React data, while this module rebuilds the lightweight red route
- * layer and lets users move existing waypoints or pull a new waypoint from an
- * existing route section.
+ * layer and lets users move or delete existing waypoints, or pull a new
+ * waypoint from an existing route section.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import Feature from 'ol/Feature.js';
@@ -69,6 +69,9 @@ export type RouteDragTarget =
       coordinate: Coordinate;
     };
 
+/** Route element exposed to contextual hover guidance. */
+export type RouteHoverTarget = RouteDragTarget['type'];
+
 /** Closest selectable route section under one pointer pixel. */
 export interface RouteSegmentHit {
   /** Destination step whose incoming geometry contains the hit. */
@@ -87,11 +90,14 @@ export interface RouteDragCallbacks {
   onStart: (target: RouteDragTarget) => void;
   /** Called for visual previews while the pointer moves. */
   onDrag: (target: RouteDragTarget, coordinate: Coordinate) => void;
+  /** Reports the route element under a hover-capable pointer. */
+  onHover: (target: RouteHoverTarget | null, pixel: Pixel | null) => void;
   /** Called once on release so the application can recalculate affected sections. */
   onEnd: (
     target: RouteDragTarget,
     coordinate: Coordinate,
     didDrag: boolean,
+    pixel: Pixel,
   ) => void;
 }
 
@@ -105,8 +111,8 @@ const DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
 /** Route-line tolerance in screen pixels, matching the white casing around the red line. */
 const ROUTE_SEGMENT_HIT_TOLERANCE_PX = 7;
-/** Minimum screen movement that turns a press on the route line into insertion. */
-const ROUTE_INSERT_DRAG_DISTANCE_PX = 3;
+/** Minimum screen movement that distinguishes a drag edit from a click. */
+const ROUTE_EDIT_DRAG_DISTANCE_PX = 3;
 
 /**
  * Route line styles in screen pixels. The 11 px white casing separates the
@@ -470,6 +476,7 @@ export function createRouteDragInteraction(
 
       startPixel = [...event.pixel];
       maximumPixelDistanceSquared = 0;
+      callbacks.onHover(null, null);
       updateRouteDragCursor(event.map, false, true);
       callbacks.onStart(dragTarget);
       return true;
@@ -491,7 +498,13 @@ export function createRouteDragInteraction(
       callbacks.onDrag(dragTarget, [...event.coordinate]);
     },
     handleMoveEvent: (event: MapBrowserEvent) => {
-      if (!callbacks.canStart()) {
+      const pointerType = (event.originalEvent as PointerEvent).pointerType;
+
+      if (
+        !callbacks.canStart() ||
+        (pointerType && pointerType !== 'mouse' && pointerType !== 'pen')
+      ) {
+        callbacks.onHover(null, null);
         updateRouteDragCursor(event.map, false, false);
         return;
       }
@@ -510,11 +523,18 @@ export function createRouteDragInteraction(
             )
           : null;
 
-      updateRouteDragCursor(
-        event.map,
-        waypointIndex !== null || segmentHit !== null,
-        false,
+      const hoverTarget: RouteHoverTarget | null =
+        waypointIndex !== null
+          ? 'waypoint'
+          : segmentHit !== null
+            ? 'segment'
+            : null;
+
+      callbacks.onHover(
+        hoverTarget,
+        hoverTarget ? [...event.pixel] : null,
       );
+      updateRouteDragCursor(event.map, hoverTarget !== null, false);
     },
     handleUpEvent: (event: MapBrowserEvent) => {
       if (!dragTarget) {
@@ -523,13 +543,19 @@ export function createRouteDragInteraction(
 
       const releasedTarget = dragTarget;
       const didDrag =
-        maximumPixelDistanceSquared >= ROUTE_INSERT_DRAG_DISTANCE_PX ** 2;
+        maximumPixelDistanceSquared >= ROUTE_EDIT_DRAG_DISTANCE_PX ** 2;
 
       dragTarget = null;
       startPixel = null;
       maximumPixelDistanceSquared = 0;
+      callbacks.onHover(null, null);
       updateRouteDragCursor(event.map, false, false);
-      callbacks.onEnd(releasedTarget, [...event.coordinate], didDrag);
+      callbacks.onEnd(
+        releasedTarget,
+        [...event.coordinate],
+        didDrag,
+        [...event.pixel],
+      );
       return false;
     },
     stopDown: (handled) => handled,

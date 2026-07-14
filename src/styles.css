@@ -68,6 +68,27 @@ select {
   cursor: progress;
 }
 
+.route-context-hint {
+  position: absolute;
+  z-index: 24;
+  max-width: min(24rem, calc(100vw - 1.5rem));
+  padding: 0.42rem 0.62rem;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 3px;
+  color: #ffffff;
+  background: rgb(16 20 24 / 94%);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 30%);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  pointer-events: none;
+  text-align: center;
+  transform: translate(-50%, calc(-100% - 0.75rem));
+}
+
+.route-context-hint--below {
+  transform: translate(-50%, 0.75rem);
+}
+
 .location-search {
   position: absolute;
   z-index: 20;

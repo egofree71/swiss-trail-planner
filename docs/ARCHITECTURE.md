@@ -2,8 +2,9 @@
 
 > Documented state: selectable raster backgrounds, hiking, closure, military
 > shooting-danger, and public-transport overlays,
-> search, geolocation, fullscreen, manual route creation with draggable and
-> insertable waypoints, route statistics, elevation profile, GPX export, and experimental
+> search, geolocation, fullscreen, manual route creation with draggable,
+> insertable, and individually removable waypoints, route statistics, elevation
+> profile, GPX export, and experimental
 > on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
@@ -48,7 +49,9 @@ It can:
 - enter a visual route-creation mode with a crosshair map cursor;
 - add ordered route waypoints by clicking or tapping the map;
 - drag an existing waypoint and recalculate only its adjacent sections after release;
+- click an existing waypoint to remove it and reconnect its neighbours;
 - drag an existing route section to insert a new waypoint and reshape that section;
+- show contextual hover guidance for waypoint and route-section editing;
 - create straight segments when snapping is disabled or a snapped section cannot be resolved;
 - load swissTLM3D road and hiking geometries dynamically around selected waypoints;
 - build a regional walkable graph and calculate snapped sections with A*;
@@ -74,7 +77,6 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - automatic avoidance of officially closed sections during routing;
-- individual waypoint deletion;
 - local or remote persistence;
 - an application server.
 
@@ -104,8 +106,9 @@ The project evolves through independent functional layers:
 13. optional public-transport stop overlay and localized stop information;
 14. draggable waypoint editing;
 15. route-section dragging for waypoint insertion;
-16. repeatable routing-data preparation;
-17. reliable national hiking routing.
+16. individual waypoint deletion with contextual hover guidance;
+17. repeatable routing-data preparation;
+18. reliable national hiking routing.
 
 Each milestone should remain testable and usable before the next one begins.
 
@@ -454,7 +457,7 @@ contains:
 - the section mode (`straight` or `network`).
 
 `RouteHistory` also stores stacks of complete prior and undone step arrays.
-Adding, moving, or inserting a waypoint, or reversing the route, creates one
+Adding, moving, inserting, or deleting a waypoint, or reversing the route, creates one
 snapshot-based edit. Undo and redo exchange complete immutable states, so exact
 geometry is restored without recalculation or another network request. A new
 edit clears the redo states. Complete deletion intentionally clears all route
@@ -512,8 +515,12 @@ updates its incoming and outgoing sections. An inserted point replaces one
 section with two sections that inherit the original routing intent. Straight
 sections remain direct; network sections call the dynamic router and
 independently fall back to a straight segment if coverage or connectivity is
-missing. The edit is committed only after a genuine drag, and one press without
-movement restores the original geometry.
+missing. The insertion edit is committed only after a genuine drag, while a click on an
+existing waypoint removes it. Endpoint deletion is local. Intermediate deletion
+reconnects the surrounding waypoints directly when both sections were straight;
+otherwise it recalculates one network section and falls back to a straight
+connector when no path is available. Hover-capable pointers receive a compact,
+localized contextual label for both waypoint and route-section actions.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from snapshot history state. The snap button selects network or
@@ -871,8 +878,9 @@ blue hydrography.
 Defines the immutable route-step shape, flattens stored section geometry,
 reverses complete routes without recalculation, creates the route vector layer,
 and rebuilds its line and indexed waypoint features. It also owns waypoint and
-route-section hit detection, the focused drag interaction, cursor state, and
-straight preview rendering for moved or temporarily inserted waypoints. It does
+route-section hit detection, the focused click/drag interaction, contextual
+hover target reporting, cursor state, and straight preview rendering for moved
+or temporarily inserted waypoints. It does
 not own immutable route history or network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
@@ -977,7 +985,8 @@ messages, and OpenLayers control placement.
 21. A disconnected or empty corridor is retried once with a wider cell radius.
 22. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-23. Pressing an existing waypoint starts a move sequence and prevents map panning.
+23. Pressing an existing waypoint starts a potential move or deletion sequence
+    and prevents map panning; a click deletes it, while a drag moves it.
 24. Pressing the route line outside a waypoint selects the closest stored incoming
     section and starts a potential insertion sequence.
 25. Pointer movement draws straight previews only: adjacent sections for a moved
@@ -987,8 +996,9 @@ messages, and OpenLayers control placement.
 27. Releasing a dragged route section after a genuine movement replaces that
     section with two sections through the new waypoint; each half inherits and
     independently resolves the original straight or network routing intent.
-28. Every addition, waypoint move, waypoint insertion, or reversal records the
-    previous complete immutable route state and clears obsolete redo states.
+28. Every addition, waypoint move, waypoint insertion, waypoint deletion, or
+    reversal records the previous complete immutable route state and clears
+    obsolete redo states.
 29. Updating the committed route state rebuilds the route line and indexed
     waypoint features.
 30. Distance is recalculated locally from the flattened route geometry.
@@ -1102,8 +1112,8 @@ architecture description.
 
 The main product scope is implemented. Further work should be driven by observed
 usage or validation results rather than by a fixed feature roadmap. Possible
-follow-ups include individual waypoint deletion, focused automated regression
-tests, conservative timetable refresh, and a preprocessed routing graph or
+follow-ups include focused automated regression tests, conservative timetable
+refresh, and a preprocessed routing graph or
 backend only if measured browser-routing limits justify that complexity.
 
 ## 21. When to evolve the architecture

@@ -48,14 +48,20 @@ and locations over broad but unstructured exploration.
       or two adjacent sections after release.
 - [ ] Dragging the route line away from existing points inserts one new waypoint,
       replaces only the selected section, and does not pan the map.
+- [ ] Hovering a waypoint or route section with a mouse shows the correct contextual
+      action label without obstructing dragging.
+- [ ] Clicking the first, an intermediate, the final, and the only waypoint deletes
+      exactly that point and never appends a replacement endpoint.
+- [ ] Deleting an intermediate waypoint joins two straight sections directly, while
+      any routed neighbour triggers one recalculation with straight fallback.
 - [ ] Pressing the route line without a genuine drag restores the original route
       and does not append a new endpoint.
 - [ ] An inserted point splits a straight section into two straight sections;
       a routed section recalculates both halves and falls back independently.
 - [ ] Straight adjacent sections remain straight; routed sections are recalculated
       and fall back independently when no network path is available.
-- [ ] Undo and redo restore complete route states, including waypoint moves and
-      insertions, without another routing request.
+- [ ] Undo and redo restore complete route states, including waypoint moves,
+      insertions, and deletions, without another routing request.
 - [ ] Reversal preserves the complete geometry in the opposite direction and can
       be undone as one edit.
 - [ ] Deletion clears the editable route and its statistics.
@@ -152,7 +158,8 @@ logic would benefit most from focused automated tests:
 - transport-stop filtering, mode classification, and feature deduplication;
 - stationboard validation, prediction-time sorting, date grouping, and caching;
 - GPX import validation and export serialization;
-- route-state undo/redo, waypoint move and insertion rebuilding, reversal, and geometry flattening;
+- route-state undo/redo, waypoint move, insertion and deletion rebuilding,
+  reversal, and geometry flattening;
 - route distance, ascent, descent, and duration calculations;
 - selected routing cost and topology helpers where representative fixtures can
   be kept small.
