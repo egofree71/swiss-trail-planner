@@ -85,6 +85,13 @@ and locations over broad but unstructured exploration.
 - [ ] Deletion clears the editable route and its statistics.
 - [ ] Distance, ascent, descent, duration, and the elevation profile refresh
       after route changes.
+- [ ] A nearly flat route with only a few metres of elevation variation uses at
+      least a 40-metre vertical chart range and therefore appears visually flat
+      rather than filling the profile height.
+- [ ] A route with more than 40 metres of elevation variation keeps automatic
+      scaling with visible space above and below its real extrema.
+- [ ] The profile header continues to show the real minimum and maximum altitude,
+      while the axis labels may use wider rounded display bounds.
 
 ### GPX
 

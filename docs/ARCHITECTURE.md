@@ -588,10 +588,14 @@ dashes for the remaining values if the external profile request fails. Walking
 time follows the Swiss rule of thumb and is rounded to five minutes because it
 is an estimate excluding breaks.
 
-`src/components/RouteElevationProfile.tsx` draws the ordered GeoAdmin samples
+`src/components/RouteElevationProfile.tsx` draws the ordered elevation samples
 as a lightweight responsive SVG above the summary bar. It scales cumulative
 distance horizontally and elevation vertically, uses the route red for the
-profile line, and performs no extra network request.
+profile line, and performs no extra network request. The header keeps the real
+minimum and maximum elevations, while the chart enforces a minimum 40-metre
+vertical range with rounded axis bounds so small local variations are not
+visually exaggerated. Larger profiles retain automatic scaling with a small
+margin around their extrema.
 
 Reversal uses `reverseRouteState()` to reverse waypoint order, normal sections,
 and the optional closing geometry without issuing another routing request. Loop
@@ -922,7 +926,8 @@ no network requests or geographic calculations.
 ### `src/components/RouteElevationProfile.tsx`
 
 Projects ordered distance/elevation samples into a compact responsive SVG with
-axis guides, minimum and maximum altitude, and a route-coloured profile line.
+axis guides, real minimum and maximum altitude in the header, rounded display
+bounds, a minimum 40-metre vertical range, and a route-coloured profile line.
 
 ### `src/metrics/routeMetrics.ts`
 
