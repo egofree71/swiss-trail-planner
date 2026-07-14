@@ -68,8 +68,20 @@ and locations over broad but unstructured exploration.
       and fall back independently when no network path is available.
 - [ ] Undo and redo restore complete route states, including waypoint moves,
       insertions, and deletions, without another routing request.
-- [ ] Reversal preserves the complete geometry in the opposite direction and can
-      be undone as one edit.
+- [ ] The loop button appears between reversal and deletion, becomes available
+      after two waypoints, and changes to an active/open-loop action after closing.
+- [ ] Closing with snapping enabled follows a plausible network route back to the
+      first waypoint; closing with snapping disabled adds a direct final section.
+- [ ] Closing creates no duplicate waypoint marker, includes the final section in
+      distance, elevation, duration, and profile calculations, and prevents empty-map
+      clicks from appending another endpoint until the loop is reopened.
+- [ ] Dragging the closing section inserts one waypoint into that section. Moving
+      or deleting the first or last waypoint rebuilds the closure around the
+      remaining route without changing unrelated sections.
+- [ ] Loop closure and reopening are each restored by undo and redo without another
+      routing request.
+- [ ] Reversal preserves the complete open or closed geometry in the opposite
+      direction and can be undone as one edit.
 - [ ] Deletion clears the editable route and its statistics.
 - [ ] Distance, ascent, descent, duration, and the elevation profile refresh
       after route changes.
@@ -77,7 +89,8 @@ and locations over broad but unstructured exploration.
 ### GPX
 
 - [ ] A named GPX export opens in at least one independent hiking application.
-- [ ] Exported geometry preserves routed bends and waypoint order.
+- [ ] Exported geometry preserves routed bends and waypoint order; a closed route
+      ends at exactly the same coordinate where it starts.
 - [ ] Elevation values are present when the profile request succeeded.
 - [ ] A valid GPX track or route loads as a separate purple read-only reference.
 - [ ] Invalid, empty, and oversized GPX files leave the existing routes unchanged.
@@ -187,7 +200,7 @@ logic would benefit most from focused automated tests:
 - stationboard validation, prediction-time sorting, date grouping, and caching;
 - GPX import validation and export serialization;
 - route-state undo/redo, waypoint move, insertion and deletion rebuilding,
-  reversal, and geometry flattening;
+  loop closure/reopening, reversal, and geometry flattening;
 - route distance, ascent, descent, and duration calculations;
 - selected routing cost and topology helpers where representative fixtures can
   be kept small.

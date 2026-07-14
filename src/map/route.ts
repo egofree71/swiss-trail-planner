@@ -42,6 +42,22 @@ export interface RouteStep {
   mode: RouteMode;
 }
 
+/** Optional final section that connects the last waypoint back to the first. */
+export interface RouteClosure {
+  /** Exact displayed geometry from the last waypoint to the first waypoint. */
+  segment: Coordinate[];
+  /** Whether the closing section is straight or network-routed. */
+  mode: RouteMode;
+}
+
+/** Complete immutable route geometry used by display and direct editing. */
+export interface RouteState {
+  /** Ordered user waypoints and their normal incoming sections. */
+  steps: RouteStep[];
+  /** Dedicated loop-closing section, without a duplicate waypoint marker. */
+  closure: RouteClosure | null;
+}
+
 /** OpenLayers resources used to render the current route. */
 export interface RouteDisplay {
   /** Vector layer inserted above map tiles and below transient markers. */
@@ -63,7 +79,10 @@ export type RouteDragTarget =
   | {
       /** Insert a waypoint into an existing incoming section. */
       type: 'segment';
-      /** Index of the destination step whose incoming section was selected. */
+      /**
+       * Index of the destination step whose incoming section was selected.
+       * `steps.length` represents the dedicated closing section.
+       */
       stepIndex: number;
       /** Closest coordinate on the stored section at pointer down. */
       coordinate: Coordinate;
@@ -74,7 +93,10 @@ export type RouteHoverTarget = RouteDragTarget['type'];
 
 /** Closest selectable route section under one pointer pixel. */
 export interface RouteSegmentHit {
-  /** Destination step whose incoming geometry contains the hit. */
+  /**
+   * Destination step whose incoming geometry contains the hit.
+   * `steps.length` represents the dedicated closing section.
+   */
   stepIndex: number;
   /** Nearest coordinate on the stored section. */
   coordinate: Coordinate;
@@ -85,7 +107,7 @@ export interface RouteDragCallbacks {
   /** Returns whether a new drag may begin at this moment. */
   canStart: () => boolean;
   /** Returns the current immutable route state for line hit detection. */
-  getSteps: () => RouteStep[];
+  getRouteState: () => RouteState;
   /** Called once when an existing waypoint or route section is pressed. */
   onStart: (target: RouteDragTarget) => void;
   /** Called for visual previews while the pointer moves. */
@@ -245,7 +267,10 @@ function updateRouteDragCursor(
  * @param steps - Ordered immutable route history.
  * @returns Deduplicated route coordinates in display order.
  */
-export function collectRouteCoordinates(steps: RouteStep[]): Coordinate[] {
+export function collectRouteCoordinates(
+  steps: RouteStep[],
+  closure: RouteClosure | null = null,
+): Coordinate[] {
   const coordinates: Coordinate[] = [];
 
   for (const step of steps) {
@@ -255,6 +280,12 @@ export function collectRouteCoordinates(steps: RouteStep[]): Coordinate[] {
       }
     } else {
       appendCoordinate(coordinates, step.waypoint);
+    }
+  }
+
+  if (closure?.segment && closure.segment.length >= 2) {
+    for (const coordinate of closure.segment) {
+      appendCoordinate(coordinates, coordinate);
     }
   }
 
@@ -303,6 +334,26 @@ export function reverseRouteSteps(steps: RouteStep[]): RouteStep[] {
   }
 
   return reversedSteps;
+}
+
+
+/** Reverses an open or closed route without recalculating any geometry. */
+export function reverseRouteState(state: RouteState): RouteState {
+  const reversedSteps = reverseRouteSteps(state.steps);
+  const reversedClosure = state.closure
+    ? {
+        segment: state.closure.segment
+          .slice()
+          .reverse()
+          .map((coordinate): Coordinate => [...coordinate]),
+        mode: state.closure.mode,
+      }
+    : null;
+
+  return {
+    steps: reversedSteps,
+    closure: reversedClosure,
+  };
 }
 
 /**
@@ -363,13 +414,15 @@ export function getRouteWaypointIndexAtPixel(
  * precedence over the line around section endpoints.
  *
  * @param map - OpenLayers map used to convert pixel tolerance to map units.
- * @param steps - Current immutable route state.
+ * @param steps - Current immutable route steps.
+ * @param closure - Optional final section from the last waypoint to the first.
  * @param pixel - Screen pixel from an OpenLayers browser event.
  * @param hitTolerance - Maximum distance from the visible route in pixels.
  */
 export function getRouteSegmentHitAtPixel(
   map: Map,
   steps: RouteStep[],
+  closure: RouteClosure | null,
   pixel: Pixel,
   hitTolerance = ROUTE_SEGMENT_HIT_TOLERANCE_PX,
 ): RouteSegmentHit | null {
@@ -384,13 +437,7 @@ export function getRouteSegmentHitAtPixel(
   let closestHit: RouteSegmentHit | null = null;
   let closestDistanceSquared = Number.POSITIVE_INFINITY;
 
-  for (let stepIndex = 1; stepIndex < steps.length; stepIndex += 1) {
-    const segment = steps[stepIndex].segment;
-
-    if (!segment || segment.length < 2) {
-      continue;
-    }
-
+  const inspectSegment = (segment: Coordinate[], stepIndex: number) => {
     for (
       let coordinateIndex = 1;
       coordinateIndex < segment.length;
@@ -410,6 +457,18 @@ export function getRouteSegmentHitAtPixel(
         };
       }
     }
+  };
+
+  for (let stepIndex = 1; stepIndex < steps.length; stepIndex += 1) {
+    const segment = steps[stepIndex].segment;
+
+    if (segment && segment.length >= 2) {
+      inspectSegment(segment, stepIndex);
+    }
+  }
+
+  if (closure?.segment && closure.segment.length >= 2) {
+    inspectSegment(closure.segment, steps.length);
   }
 
   return closestDistanceSquared <= toleranceSquared ? closestHit : null;
@@ -445,7 +504,7 @@ export function createRouteDragInteraction(
       );
 
       if (waypointIndex !== null) {
-        const step = callbacks.getSteps()[waypointIndex];
+        const step = callbacks.getRouteState().steps[waypointIndex];
 
         if (!step) {
           return false;
@@ -457,9 +516,11 @@ export function createRouteDragInteraction(
           coordinate: [...step.waypoint],
         };
       } else {
+        const routeState = callbacks.getRouteState();
         const segmentHit = getRouteSegmentHitAtPixel(
           event.map,
-          callbacks.getSteps(),
+          routeState.steps,
+          routeState.closure,
           event.pixel,
         );
 
@@ -516,11 +577,15 @@ export function createRouteDragInteraction(
       );
       const segmentHit =
         waypointIndex === null
-          ? getRouteSegmentHitAtPixel(
-              event.map,
-              callbacks.getSteps(),
-              event.pixel,
-            )
+          ? (() => {
+              const routeState = callbacks.getRouteState();
+              return getRouteSegmentHitAtPixel(
+                event.map,
+                routeState.steps,
+                routeState.closure,
+                event.pixel,
+              );
+            })()
           : null;
 
       const hoverTarget: RouteHoverTarget | null =
@@ -575,16 +640,18 @@ export function clearRouteDragCursor(map: Map): void {
  * redo does not repeat network requests and cannot produce a different route.
  *
  * @param display - OpenLayers route resources to update in place.
- * @param steps - Current ordered route history.
+ * @param steps - Current ordered route steps.
+ * @param closure - Optional final section from the last waypoint to the first.
  * @param activeWaypointIndex - Optional waypoint highlighted during a drag preview.
  */
 export function updateRouteDisplay(
   display: RouteDisplay,
   steps: RouteStep[],
+  closure: RouteClosure | null = null,
   activeWaypointIndex: number | null = null,
 ): void {
   const features: Feature[] = [];
-  const routeCoordinates = collectRouteCoordinates(steps);
+  const routeCoordinates = collectRouteCoordinates(steps, closure);
 
   if (routeCoordinates.length >= 2) {
     const line = new Feature({
@@ -621,11 +688,12 @@ export function updateRouteDisplay(
 export function updateRouteWaypointDragPreview(
   display: RouteDisplay,
   steps: RouteStep[],
+  closure: RouteClosure | null,
   waypointIndex: number,
   coordinate: Coordinate,
 ): void {
   if (waypointIndex < 0 || waypointIndex >= steps.length) {
-    updateRouteDisplay(display, steps);
+    updateRouteDisplay(display, steps, closure);
     return;
   }
 
@@ -651,7 +719,32 @@ export function updateRouteWaypointDragPreview(
     };
   }
 
-  updateRouteDisplay(display, previewSteps, waypointIndex);
+  let previewClosure = closure;
+
+  if (
+    closure &&
+    steps.length >= 2 &&
+    (waypointIndex === 0 || waypointIndex === steps.length - 1)
+  ) {
+    const firstWaypoint =
+      waypointIndex === 0 ? previewCoordinate : previewSteps[0].waypoint;
+    const lastWaypoint =
+      waypointIndex === steps.length - 1
+        ? previewCoordinate
+        : previewSteps[previewSteps.length - 1].waypoint;
+
+    previewClosure = {
+      ...closure,
+      segment: [[...lastWaypoint], [...firstWaypoint]],
+    };
+  }
+
+  updateRouteDisplay(
+    display,
+    previewSteps,
+    previewClosure,
+    waypointIndex,
+  );
 }
 
 /**
@@ -664,18 +757,43 @@ export function updateRouteWaypointDragPreview(
 export function updateRouteInsertionDragPreview(
   display: RouteDisplay,
   steps: RouteStep[],
+  closure: RouteClosure | null,
   stepIndex: number,
   coordinate: Coordinate,
 ): void {
+  const insertedCoordinate: Coordinate = [...coordinate];
+
+  if (stepIndex === steps.length && closure && steps.length >= 2) {
+    const previousStep = steps[steps.length - 1];
+    const firstStep = steps[0];
+    const insertedStep: RouteStep = {
+      waypoint: insertedCoordinate,
+      segment: [[...previousStep.waypoint], insertedCoordinate],
+      mode: closure.mode,
+    };
+    const previewSteps = [...steps, insertedStep];
+    const previewClosure: RouteClosure = {
+      ...closure,
+      segment: [insertedCoordinate, [...firstStep.waypoint]],
+    };
+
+    updateRouteDisplay(
+      display,
+      previewSteps,
+      previewClosure,
+      steps.length,
+    );
+    return;
+  }
+
   const destinationStep = steps[stepIndex];
   const previousStep = steps[stepIndex - 1];
 
   if (!destinationStep || !previousStep || stepIndex < 1) {
-    updateRouteDisplay(display, steps);
+    updateRouteDisplay(display, steps, closure);
     return;
   }
 
-  const insertedCoordinate: Coordinate = [...coordinate];
   const insertedStep: RouteStep = {
     waypoint: insertedCoordinate,
     segment: [[...previousStep.waypoint], insertedCoordinate],
@@ -692,5 +810,10 @@ export function updateRouteInsertionDragPreview(
     ...steps.slice(stepIndex + 1),
   ];
 
-  updateRouteDisplay(display, previewSteps, stepIndex);
+  updateRouteDisplay(
+    display,
+    previewSteps,
+    closure,
+    stepIndex,
+  );
 }

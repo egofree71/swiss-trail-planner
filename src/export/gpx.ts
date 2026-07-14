@@ -10,6 +10,7 @@ import { toLonLat } from 'ol/proj.js';
 import { getDistance } from 'ol/sphere.js';
 import {
   collectRouteCoordinates,
+  type RouteClosure,
   type RouteStep,
 } from '../map/route';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
@@ -344,6 +345,7 @@ function serializeTrackPoint(point: GpxTrackPoint): string {
  * @param generatedAt - Timestamp written to GPX metadata.
  * @param routeName - Localized track name written to metadata and track nodes.
  * @param elevationPoints - Optional smoothed profile samples to embed as `<ele>` values.
+ * @param closure - Optional dedicated section returning the last waypoint to the first.
  * @returns Complete UTF-8 XML document.
  * @throws {Error} If the route does not contain at least two coordinates.
  */
@@ -352,8 +354,9 @@ export function createRouteGpx(
   generatedAt: Date = new Date(),
   routeName = 'Swiss Trail Planner route',
   elevationPoints: RouteElevationPoint[] = [],
+  closure: RouteClosure | null = null,
 ): string {
-  const coordinates = collectRouteCoordinates(steps);
+  const coordinates = collectRouteCoordinates(steps, closure);
 
   if (coordinates.length < 2) {
     throw new Error('A GPX route requires at least two coordinates.');
@@ -393,12 +396,14 @@ ${serializedTrackPoints}
  * @param steps - Applied route steps in display order.
  * @param routeName - Localized track name written into the GPX document.
  * @param elevationPoints - Optional smoothed profile samples embedded in track points.
+ * @param closure - Optional dedicated section returning the last waypoint to the first.
  * @throws {Error} If the route is too short to export.
  */
 export function downloadRouteGpx(
   steps: RouteStep[],
   routeName = 'Swiss Trail Planner route',
   elevationPoints: RouteElevationPoint[] = [],
+  closure: RouteClosure | null = null,
 ): void {
   const generatedAt = new Date();
   const gpxDocument = createRouteGpx(
@@ -406,6 +411,7 @@ export function downloadRouteGpx(
     generatedAt,
     routeName,
     elevationPoints,
+    closure,
   );
   const blob = new Blob([gpxDocument], {
     type: 'application/gpx+xml;charset=utf-8',

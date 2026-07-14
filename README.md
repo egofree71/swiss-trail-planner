@@ -20,7 +20,7 @@ time.
 | Area | Available functionality |
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, and complete route deletion |
+| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, estimated walking time, and a collapsible elevation profile |
 | Import and export | Read-only GPX reference loading and named GPX export with smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
@@ -57,8 +57,8 @@ http://localhost:5173/
 3. Keep snapping enabled to follow available swissTLM3D roads and paths, or
    disable it to create straight segments. A section also falls back to a
    straight line when no routable path can be resolved.
-4. Use the route controls to undo, redo, reverse, delete, or export the current
-   itinerary. A waypoint move, insertion, or individual deletion is restored as
+4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
+   or export the current itinerary. A waypoint move, insertion, or individual deletion is restored as
    one complete undoable edit.
 5. Load a GPX file to display it as an independent purple, read-only reference
    while planning a new red route.

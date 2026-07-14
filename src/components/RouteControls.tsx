@@ -1,7 +1,7 @@
 /**
  * Business context: renders the compact route-editing toolbar without taking
  * permanent space away from the map. It exposes route-mode state, undo/redo,
- * the straight-versus-network choice, route reversal, deletion, and GPX export.
+ * the straight-versus-network choice, route reversal, loop closure, deletion, and GPX export.
  */
 import { useI18n } from '../i18n/I18nContext';
 
@@ -21,6 +21,10 @@ interface RouteControlsProps {
   canRedo: boolean;
   /** Whether the route contains enough waypoints to reverse direction. */
   canReverse: boolean;
+  /** Whether the route contains enough waypoints to close or reopen its loop. */
+  canToggleLoop: boolean;
+  /** Whether a dedicated closing section currently returns to the first point. */
+  isLoopClosed: boolean;
   /** Whether a current route exists and can be cleared. */
   canDelete: boolean;
   /** Whether the route contains enough geometry for GPX export. */
@@ -35,6 +39,8 @@ interface RouteControlsProps {
   onToggleSnap: () => void;
   /** Reverses waypoint and segment order. */
   onReverse: () => void;
+  /** Adds or removes the dedicated section back to the first waypoint. */
+  onToggleLoop: () => void;
   /** Clears the complete route. */
   onDelete: () => void;
   /** Downloads the complete route as GPX. */
@@ -53,6 +59,8 @@ export default function RouteControls({
   canUndo,
   canRedo,
   canReverse,
+  canToggleLoop,
+  isLoopClosed,
   canDelete,
   canExport,
   onToggle,
@@ -60,6 +68,7 @@ export default function RouteControls({
   onRedo,
   onToggleSnap,
   onReverse,
+  onToggleLoop,
   onDelete,
   onExport,
 }: RouteControlsProps) {
@@ -73,6 +82,9 @@ export default function RouteControls({
     : isSnapEnabled
       ? t('route.followPaths')
       : t('route.straightSegments');
+  const loopLabel = isLoopClosed
+    ? t('route.openLoop')
+    : t('route.closeLoop');
 
   return (
     <div
@@ -150,6 +162,35 @@ export default function RouteControls({
               <path d="m14 4 4 3-4 3" />
               <path d="M19 17H7" />
               <path d="m10 14-4 3 4 3" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            className={[
+              'map-control-button',
+              'map-control-button--route-action',
+              isLoopClosed ? 'map-control-button--route-active' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            aria-label={loopLabel}
+            aria-pressed={isLoopClosed}
+            title={loopLabel}
+            disabled={!canToggleLoop}
+            onClick={onToggleLoop}
+          >
+            <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <path
+                fill="currentColor"
+                stroke="none"
+                d="M20 14a1 1 0 0 1-.7-.3l-4-4a1 1 0 0 1 0-1.4l4-4a1 1 0 0 1 1.4 1.4L17.4 9l3.3 3.3A1 1 0 0 1 20 14Z"
+              />
+              <path
+                fill="currentColor"
+                stroke="none"
+                d="M22 24H10a8 8 0 0 1 0-16h2a1 1 0 0 1 0 2h-2a6 6 0 0 0 0 12h12a6 6 0 0 0 0-12h-6a1 1 0 0 1 0-2h6a8 8 0 0 1 0 16Z"
+              />
             </svg>
           </button>
 

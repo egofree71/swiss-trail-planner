@@ -89,10 +89,13 @@ import {
   createRouteDisplay,
   getRouteSegmentHitAtPixel,
   getRouteWaypointIndexAtPixel,
-  reverseRouteSteps,
+  reverseRouteState,
+  type RouteClosure,
   type RouteDragTarget,
   type RouteDisplay,
   type RouteHoverTarget,
+  type RouteMode,
+  type RouteState,
   type RouteStep,
   updateRouteDisplay,
   updateRouteInsertionDragPreview,
@@ -128,13 +131,11 @@ type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
 type RouteMessageType = 'info' | 'error';
 
 /** Immutable undo/redo state for route editing. */
-interface RouteHistory {
-  /** Applied route steps in display order. */
-  steps: RouteStep[];
+interface RouteHistory extends RouteState {
   /** Complete prior route states stored in chronological order. */
-  undoStates: RouteStep[][];
+  undoStates: RouteState[];
   /** Complete undone route states stored in reverse restoration order. */
-  redoStates: RouteStep[][];
+  redoStates: RouteState[];
 }
 
 /** Contextual route-editing label shown only for hover-capable pointers. */
@@ -164,7 +165,7 @@ type RouteDragState =
       /** Original waypoint coordinate used to ignore click-only interactions. */
       startCoordinate: Coordinate;
       /** Route state that owns the preview and must still be current on release. */
-      expectedSteps: RouteStep[];
+      expectedState: RouteState;
     }
   | {
       /** Incoming section split by the new waypoint. */
@@ -173,8 +174,27 @@ type RouteDragState =
       /** Closest original line coordinate used to require a genuine drag. */
       startCoordinate: Coordinate;
       /** Route state that owns the preview and must still be current on release. */
-      expectedSteps: RouteStep[];
+      expectedState: RouteState;
     };
+
+/** Returns the immutable route portion of a history entry without its stacks. */
+function getRouteState(history: RouteHistory): RouteState {
+  return {
+    steps: history.steps,
+    closure: history.closure,
+  };
+}
+
+/** Checks whether an asynchronous edit still owns the displayed route state. */
+function routeStateMatches(
+  history: RouteHistory,
+  expectedState: RouteState,
+): boolean {
+  return (
+    history.steps === expectedState.steps &&
+    history.closure === expectedState.closure
+  );
+}
 
 /** Duration in milliseconds for transient geolocation feedback. */
 const LOCATION_MESSAGE_DURATION_MS = 6_000;
@@ -322,31 +342,86 @@ function connectRoutedSegmentEndpoint(
   }
 }
 
+/** Creates a direct loop-closing section between the last and first waypoints. */
+function createStraightRouteClosure(steps: RouteStep[]): RouteClosure | null {
+  const firstStep = steps[0];
+  const lastStep = steps[steps.length - 1];
+
+  if (!firstStep || !lastStep || steps.length < 2) {
+    return null;
+  }
+
+  return {
+    segment: [[...lastStep.waypoint], [...firstStep.waypoint]],
+    mode: 'straight',
+  };
+}
+
+/** Resolves one section whose start and end waypoints must remain exact. */
+async function rebuildFixedRouteSection(
+  startCoordinate: Coordinate,
+  endCoordinate: Coordinate,
+  intendedMode: RouteMode,
+  routingLoader: DynamicRoutingNetworkLoader,
+  signal: AbortSignal,
+): Promise<RouteClosure> {
+  if (intendedMode === 'network') {
+    const routedPath = await routingLoader.route(
+      startCoordinate,
+      endCoordinate,
+      signal,
+    );
+
+    if (routedPath && routedPath.coordinates.length >= 2) {
+      const segment = routedPath.coordinates.map(
+        (coordinate): Coordinate => [...coordinate],
+      );
+      connectRoutedSegmentEndpoint(segment, startCoordinate, 'start');
+      connectRoutedSegmentEndpoint(segment, endCoordinate, 'end');
+
+      return {
+        segment,
+        mode: 'network',
+      };
+    }
+  }
+
+  return {
+    segment: [[...startCoordinate], [...endCoordinate]],
+    mode: 'straight',
+  };
+}
+
 /**
  * Recalculates only the sections adjacent to a moved waypoint.
  *
- * Straight sections remain straight. Network sections are routed again after
- * release and fall back independently to a direct segment when swissTLM3D has
- * no usable path. All non-adjacent steps retain their exact stored geometry.
+ * A closed route also recalculates its dedicated final section when the first
+ * or last waypoint moves. All unrelated sections retain their exact geometry.
  */
 async function rebuildRouteAfterWaypointMove(
-  steps: RouteStep[],
+  state: RouteState,
   waypointIndex: number,
   targetCoordinate: Coordinate,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
-): Promise<RouteStep[]> {
+): Promise<RouteState> {
+  const { steps, closure } = state;
   const nextSteps = steps.slice();
   const originalStep = steps[waypointIndex];
 
   if (!originalStep) {
-    return steps;
+    return state;
   }
 
   let movedWaypoint: Coordinate;
 
   if (waypointIndex === 0) {
-    if (originalStep.mode === 'network') {
+    const shouldSnapFirstWaypoint =
+      originalStep.mode === 'network' ||
+      closure?.mode === 'network' ||
+      steps[1]?.mode === 'network';
+
+    if (shouldSnapFirstWaypoint) {
       const snappedCoordinate = await routingLoader.snap(
         targetCoordinate,
         signal,
@@ -421,66 +496,111 @@ async function rebuildRouteAfterWaypointMove(
 
   const nextStep = steps[waypointIndex + 1];
 
-  if (!nextStep) {
-    return nextSteps;
-  }
-
-  if (nextStep.mode === 'network') {
-    const routedPath = await routingLoader.route(
+  if (nextStep) {
+    const rebuiltSection = await rebuildFixedRouteSection(
       movedWaypoint,
       nextStep.waypoint,
+      nextStep.mode,
+      routingLoader,
       signal,
     );
-
-    if (routedPath && routedPath.coordinates.length >= 2) {
-      const segment = routedPath.coordinates.map(
-        (coordinate): Coordinate => [...coordinate],
-      );
-      connectRoutedSegmentEndpoint(segment, movedWaypoint, 'start');
-      // Only the selected waypoint may move. Preserve the following waypoint
-      // exactly even if the routing graph snaps a few centimetres away from it.
-      connectRoutedSegmentEndpoint(segment, nextStep.waypoint, 'end');
-      nextSteps[waypointIndex + 1] = {
-        ...nextStep,
-        segment,
-        mode: 'network',
-      };
-    } else {
-      nextSteps[waypointIndex + 1] = {
-        ...nextStep,
-        segment: [movedWaypoint, [...nextStep.waypoint]],
-        mode: 'straight',
-      };
-    }
-  } else {
     nextSteps[waypointIndex + 1] = {
       ...nextStep,
-      segment: [movedWaypoint, [...nextStep.waypoint]],
+      segment: rebuiltSection.segment,
+      mode: rebuiltSection.mode,
     };
   }
 
-  return nextSteps;
+  let nextClosure = closure;
+
+  if (
+    closure &&
+    steps.length >= 2 &&
+    (waypointIndex === 0 || waypointIndex === steps.length - 1)
+  ) {
+    nextClosure = await rebuildFixedRouteSection(
+      nextSteps[nextSteps.length - 1].waypoint,
+      nextSteps[0].waypoint,
+      closure.mode,
+      routingLoader,
+      signal,
+    );
+  }
+
+  return {
+    steps: nextSteps,
+    closure: nextClosure,
+  };
 }
 
 /**
- * Splits one existing incoming section by inserting a dragged waypoint.
- *
- * Both resulting sections inherit the selected section's routing intent.
- * Network halves are recalculated independently and may each fall back to a
- * straight segment, while every unrelated step keeps its exact geometry.
+ * Splits one normal or loop-closing section by inserting a dragged waypoint.
+ * Both halves inherit the selected section's routing intent and may fall back
+ * independently to straight geometry.
  */
 async function rebuildRouteAfterWaypointInsertion(
-  steps: RouteStep[],
+  state: RouteState,
   stepIndex: number,
   targetCoordinate: Coordinate,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
-): Promise<RouteStep[]> {
+): Promise<RouteState> {
+  const { steps, closure } = state;
+
+  if (stepIndex === steps.length && closure && steps.length >= 2) {
+    const previousStep = steps[steps.length - 1];
+    let insertedStep: RouteStep;
+
+    if (closure.mode === 'network') {
+      const routedPath = await routingLoader.route(
+        previousStep.waypoint,
+        targetCoordinate,
+        signal,
+      );
+
+      if (routedPath && routedPath.coordinates.length >= 2) {
+        const segment = routedPath.coordinates.map(
+          (coordinate): Coordinate => [...coordinate],
+        );
+        connectRoutedSegmentEndpoint(
+          segment,
+          previousStep.waypoint,
+          'start',
+        );
+        insertedStep = {
+          waypoint: [...segment[segment.length - 1]],
+          segment,
+          mode: 'network',
+        };
+      } else {
+        insertedStep = createStraightRouteStep(
+          previousStep,
+          targetCoordinate,
+        );
+      }
+    } else {
+      insertedStep = createStraightRouteStep(previousStep, targetCoordinate);
+    }
+
+    const nextClosure = await rebuildFixedRouteSection(
+      insertedStep.waypoint,
+      steps[0].waypoint,
+      closure.mode,
+      routingLoader,
+      signal,
+    );
+
+    return {
+      steps: [...steps, insertedStep],
+      closure: nextClosure,
+    };
+  }
+
   const destinationStep = steps[stepIndex];
   const previousStep = steps[stepIndex - 1];
 
   if (!destinationStep || !previousStep || stepIndex < 1) {
-    return steps;
+    return state;
   }
 
   let insertedStep: RouteStep;
@@ -512,84 +632,71 @@ async function rebuildRouteAfterWaypointInsertion(
     insertedStep = createStraightRouteStep(previousStep, targetCoordinate);
   }
 
-  let updatedDestinationStep: RouteStep;
+  const rebuiltDestinationSection = await rebuildFixedRouteSection(
+    insertedStep.waypoint,
+    destinationStep.waypoint,
+    destinationStep.mode,
+    routingLoader,
+    signal,
+  );
+  const updatedDestinationStep: RouteStep = {
+    ...destinationStep,
+    segment: rebuiltDestinationSection.segment,
+    mode: rebuiltDestinationSection.mode,
+  };
 
-  if (destinationStep.mode === 'network') {
-    const routedPath = await routingLoader.route(
-      insertedStep.waypoint,
-      destinationStep.waypoint,
-      signal,
-    );
-
-    if (routedPath && routedPath.coordinates.length >= 2) {
-      const segment = routedPath.coordinates.map(
-        (coordinate): Coordinate => [...coordinate],
-      );
-      connectRoutedSegmentEndpoint(segment, insertedStep.waypoint, 'start');
-      connectRoutedSegmentEndpoint(
-        segment,
-        destinationStep.waypoint,
-        'end',
-      );
-      updatedDestinationStep = {
-        ...destinationStep,
-        segment,
-        mode: 'network',
-      };
-    } else {
-      updatedDestinationStep = {
-        ...destinationStep,
-        segment: [
-          [...insertedStep.waypoint],
-          [...destinationStep.waypoint],
-        ],
-        mode: 'straight',
-      };
-    }
-  } else {
-    updatedDestinationStep = {
-      ...destinationStep,
-      segment: [
-        [...insertedStep.waypoint],
-        [...destinationStep.waypoint],
-      ],
-      mode: 'straight',
-    };
-  }
-
-  return [
-    ...steps.slice(0, stepIndex),
-    insertedStep,
-    updatedDestinationStep,
-    ...steps.slice(stepIndex + 1),
-  ];
+  return {
+    steps: [
+      ...steps.slice(0, stepIndex),
+      insertedStep,
+      updatedDestinationStep,
+      ...steps.slice(stepIndex + 1),
+    ],
+    closure,
+  };
 }
 
 /**
  * Removes one waypoint and reconnects its neighbours when necessary.
- *
- * Removing an endpoint is local. Removing an intermediate point joins the
- * surrounding sections directly when both were straight; otherwise it tries
- * one fresh swissTLM3D route and falls back to a straight connector.
+ * Closed-route endpoint deletion rebuilds the loop around the remaining points.
  */
 async function rebuildRouteAfterWaypointDeletion(
-  steps: RouteStep[],
+  state: RouteState,
   waypointIndex: number,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
-): Promise<RouteStep[]> {
+): Promise<RouteState> {
+  const { steps, closure } = state;
+
   if (waypointIndex < 0 || waypointIndex >= steps.length) {
-    return steps;
+    return state;
   }
 
   if (steps.length === 1) {
-    return [];
+    return {
+      steps: [],
+      closure: null,
+    };
+  }
+
+  if (closure && steps.length === 2) {
+    const remainingStep = steps[waypointIndex === 0 ? 1 : 0];
+
+    return {
+      steps: [
+        {
+          ...remainingStep,
+          waypoint: [...remainingStep.waypoint],
+          segment: null,
+        },
+      ],
+      closure: null,
+    };
   }
 
   if (waypointIndex === 0) {
     const nextFirstStep = steps[1];
-
-    return [
+    const nextSteps = [
       {
         ...nextFirstStep,
         waypoint: [...nextFirstStep.waypoint],
@@ -597,67 +704,89 @@ async function rebuildRouteAfterWaypointDeletion(
       },
       ...steps.slice(2),
     ];
+
+    if (!closure) {
+      return {
+        steps: nextSteps,
+        closure: null,
+      };
+    }
+
+    const intendedMode: RouteMode =
+      closure.mode === 'network' || nextFirstStep.mode === 'network'
+        ? 'network'
+        : 'straight';
+    const nextClosure = await rebuildFixedRouteSection(
+      nextSteps[nextSteps.length - 1].waypoint,
+      nextSteps[0].waypoint,
+      intendedMode,
+      routingLoader,
+      signal,
+    );
+
+    return {
+      steps: nextSteps,
+      closure: nextClosure,
+    };
   }
 
   if (waypointIndex === steps.length - 1) {
-    return steps.slice(0, -1);
+    const nextSteps = steps.slice(0, -1);
+
+    if (!closure) {
+      return {
+        steps: nextSteps,
+        closure: null,
+      };
+    }
+
+    const removedStep = steps[waypointIndex];
+    const intendedMode: RouteMode =
+      closure.mode === 'network' || removedStep.mode === 'network'
+        ? 'network'
+        : 'straight';
+    const nextClosure = await rebuildFixedRouteSection(
+      nextSteps[nextSteps.length - 1].waypoint,
+      nextSteps[0].waypoint,
+      intendedMode,
+      routingLoader,
+      signal,
+    );
+
+    return {
+      steps: nextSteps,
+      closure: nextClosure,
+    };
   }
 
   const previousStep = steps[waypointIndex - 1];
   const removedStep = steps[waypointIndex];
   const destinationStep = steps[waypointIndex + 1];
-  const shouldRoute =
-    removedStep.mode === 'network' || destinationStep.mode === 'network';
-  let updatedDestinationStep: RouteStep;
+  const intendedMode: RouteMode =
+    removedStep.mode === 'network' || destinationStep.mode === 'network'
+      ? 'network'
+      : 'straight';
+  const rebuiltDestinationSection = await rebuildFixedRouteSection(
+    previousStep.waypoint,
+    destinationStep.waypoint,
+    intendedMode,
+    routingLoader,
+    signal,
+  );
+  const updatedDestinationStep: RouteStep = {
+    ...destinationStep,
+    segment: rebuiltDestinationSection.segment,
+    mode: rebuiltDestinationSection.mode,
+  };
 
-  if (shouldRoute) {
-    const routedPath = await routingLoader.route(
-      previousStep.waypoint,
-      destinationStep.waypoint,
-      signal,
-    );
-
-    if (routedPath && routedPath.coordinates.length >= 2) {
-      const segment = routedPath.coordinates.map(
-        (coordinate): Coordinate => [...coordinate],
-      );
-      connectRoutedSegmentEndpoint(segment, previousStep.waypoint, 'start');
-      connectRoutedSegmentEndpoint(
-        segment,
-        destinationStep.waypoint,
-        'end',
-      );
-      updatedDestinationStep = {
-        ...destinationStep,
-        segment,
-        mode: 'network',
-      };
-    } else {
-      updatedDestinationStep = {
-        ...destinationStep,
-        segment: [
-          [...previousStep.waypoint],
-          [...destinationStep.waypoint],
-        ],
-        mode: 'straight',
-      };
-    }
-  } else {
-    updatedDestinationStep = {
-      ...destinationStep,
-      segment: [
-        [...previousStep.waypoint],
-        [...destinationStep.waypoint],
-      ],
-      mode: 'straight',
-    };
-  }
-
-  return [
-    ...steps.slice(0, waypointIndex),
-    updatedDestinationStep,
-    ...steps.slice(waypointIndex + 2),
-  ];
+  return {
+    steps: [
+      ...steps.slice(0, waypointIndex),
+      updatedDestinationStep,
+      ...steps.slice(waypointIndex + 2),
+    ],
+    closure,
+  };
 }
 
 /** Root application component and sole owner of the OpenLayers Map instance. */
@@ -686,6 +815,7 @@ export default function App() {
   const routeMessageTimerRef = useRef<number | null>(null);
   const routeHistoryRef = useRef<RouteHistory>({
     steps: [],
+    closure: null,
     undoStates: [],
     redoStates: [],
   });
@@ -744,8 +874,8 @@ export default function App() {
   const [routeElevation, setRouteElevation] =
     useState<RouteElevationSummary | null>(null);
   const routeCoordinates = useMemo(
-    () => collectRouteCoordinates(routeHistory.steps),
-    [routeHistory.steps],
+    () => collectRouteCoordinates(routeHistory.steps, routeHistory.closure),
+    [routeHistory.steps, routeHistory.closure],
   );
   const routeDistanceMeters = useMemo(
     () => calculateRouteDistance(routeCoordinates),
@@ -794,12 +924,15 @@ export default function App() {
   };
 
   /** Records one complete route mutation and clears obsolete redo states. */
-  const commitRouteMutation = (nextSteps: RouteStep[]) => {
+  const commitRouteMutation = (nextState: RouteState) => {
     const currentHistory = routeHistoryRef.current;
 
     commitRouteHistory({
-      steps: nextSteps,
-      undoStates: [...currentHistory.undoStates, currentHistory.steps],
+      ...nextState,
+      undoStates: [
+        ...currentHistory.undoStates,
+        getRouteState(currentHistory),
+      ],
       redoStates: [],
     });
   };
@@ -809,28 +942,31 @@ export default function App() {
    * editing session are still current.
    */
   const commitAsyncRouteMutation = (
-    expectedSteps: RouteStep[],
-    nextSteps: RouteStep[],
+    expectedState: RouteState,
+    nextState: RouteState,
   ): boolean => {
     const currentHistory = routeHistoryRef.current;
 
     if (
-      currentHistory.steps !== expectedSteps ||
+      !routeStateMatches(currentHistory, expectedState) ||
       !routeCreationActiveRef.current
     ) {
       return false;
     }
 
-    commitRouteMutation(nextSteps);
+    commitRouteMutation(nextState);
     return true;
   };
 
   /** Appends one generated route step as a normal undoable mutation. */
   const appendRouteStep = (
-    expectedSteps: RouteStep[],
+    expectedState: RouteState,
     step: RouteStep,
   ): boolean =>
-    commitAsyncRouteMutation(expectedSteps, [...expectedSteps, step]);
+    commitAsyncRouteMutation(expectedState, {
+      steps: [...expectedState.steps, step],
+      closure: null,
+    });
 
   /** Restores the complete route state preceding the latest edit. */
   const undoRoutePoint = () => {
@@ -844,13 +980,16 @@ export default function App() {
       return;
     }
 
-    const previousSteps =
+    const previousState =
       currentHistory.undoStates[currentHistory.undoStates.length - 1];
 
     commitRouteHistory({
-      steps: previousSteps,
+      ...previousState,
       undoStates: currentHistory.undoStates.slice(0, -1),
-      redoStates: [...currentHistory.redoStates, currentHistory.steps],
+      redoStates: [
+        ...currentHistory.redoStates,
+        getRouteState(currentHistory),
+      ],
     });
   };
 
@@ -866,29 +1005,130 @@ export default function App() {
       return;
     }
 
-    const restoredSteps =
+    const restoredState =
       currentHistory.redoStates[currentHistory.redoStates.length - 1];
 
     commitRouteHistory({
-      steps: restoredSteps,
-      undoStates: [...currentHistory.undoStates, currentHistory.steps],
+      ...restoredState,
+      undoStates: [
+        ...currentHistory.undoStates,
+        getRouteState(currentHistory),
+      ],
       redoStates: currentHistory.redoStates.slice(0, -1),
     });
   };
 
-  /** Reverses the exact geometry as one undoable route edit. */
+  /** Reverses the exact open or closed geometry as one undoable route edit. */
   const reverseRoute = () => {
     if (routeOperationPendingRef.current) {
       return;
     }
 
-    const currentSteps = routeHistoryRef.current.steps;
+    const currentHistory = routeHistoryRef.current;
 
-    if (currentSteps.length < 2) {
+    if (currentHistory.steps.length < 2) {
       return;
     }
 
-    commitRouteMutation(reverseRouteSteps(currentSteps));
+    commitRouteMutation(reverseRouteState(getRouteState(currentHistory)));
+  };
+
+  /** Closes an open route or removes its dedicated closing section. */
+  const toggleRouteLoop = () => {
+    const currentHistory = routeHistoryRef.current;
+
+    if (
+      routeOperationPendingRef.current ||
+      currentHistory.steps.length < 2
+    ) {
+      return;
+    }
+
+    const expectedState = getRouteState(currentHistory);
+
+    if (expectedState.closure) {
+      commitRouteMutation({
+        steps: expectedState.steps,
+        closure: null,
+      });
+      return;
+    }
+
+    if (!isRouteSnapEnabled) {
+      commitRouteMutation({
+        steps: expectedState.steps,
+        closure: createStraightRouteClosure(expectedState.steps),
+      });
+      return;
+    }
+
+    const routeCreationSession = routeCreationSessionRef.current;
+    routeOperationPendingRef.current = true;
+    setIsRouteOperationPending(true);
+    setRouteContextHint(null);
+
+    const abortController = new AbortController();
+    routingAbortControllerRef.current = abortController;
+
+    void (async () => {
+      clearRouteMessageTimer();
+      setRouteMessage('');
+
+      try {
+        const routingLoader = routingLoaderRef.current;
+        const firstStep = expectedState.steps[0];
+        const lastStep = expectedState.steps[expectedState.steps.length - 1];
+
+        if (!routingLoader || !firstStep || !lastStep) {
+          throw new Error('The dynamic routing loader is unavailable.');
+        }
+
+        const closure = await rebuildFixedRouteSection(
+          lastStep.waypoint,
+          firstStep.waypoint,
+          'network',
+          routingLoader,
+          abortController.signal,
+        );
+
+        if (
+          routeCreationSessionRef.current !== routeCreationSession ||
+          !routeStateMatches(routeHistoryRef.current, expectedState)
+        ) {
+          return;
+        }
+
+        commitAsyncRouteMutation(expectedState, {
+          steps: expectedState.steps,
+          closure,
+        });
+      } catch (error) {
+        if (isAbortedRequest(error, abortController.signal)) {
+          return;
+        }
+
+        if (routeCreationSessionRef.current !== routeCreationSession) {
+          return;
+        }
+
+        if (error instanceof RoutingAreaTooLargeError) {
+          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
+          return;
+        }
+
+        console.error('Unable to close the route loop.', error);
+        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
+      } finally {
+        const ownsCurrentOperation =
+          routingAbortControllerRef.current === abortController;
+
+        if (ownsCurrentOperation) {
+          routingAbortControllerRef.current = null;
+          routeOperationPendingRef.current = false;
+          setIsRouteOperationPending(false);
+        }
+      }
+    })();
   };
 
   /** Clears the complete route and its edit history while keeping creation active. */
@@ -902,6 +1142,7 @@ export default function App() {
 
     commitRouteHistory({
       steps: [],
+      closure: null,
       undoStates: [],
       redoStates: [],
     });
@@ -935,6 +1176,7 @@ export default function App() {
         routeHistoryRef.current.steps,
         routeName,
         routeElevation?.points ?? [],
+        routeHistoryRef.current.closure,
       );
       setIsRouteExportDialogOpen(false);
     } catch (error) {
@@ -1057,12 +1299,16 @@ export default function App() {
   ) => {
     if (
       routeOperationPendingRef.current ||
-      routeHistoryRef.current.steps !== dragState.expectedSteps
+      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
       const display = routeDisplayRef.current;
 
       if (display) {
-        updateRouteDisplay(display, routeHistoryRef.current.steps);
+        updateRouteDisplay(
+          display,
+          routeHistoryRef.current.steps,
+          routeHistoryRef.current.closure,
+        );
       }
       return;
     }
@@ -1086,8 +1332,8 @@ export default function App() {
           throw new Error('The dynamic routing loader is unavailable.');
         }
 
-        const nextSteps = await rebuildRouteAfterWaypointMove(
-          dragState.expectedSteps,
+        const nextState = await rebuildRouteAfterWaypointMove(
+          dragState.expectedState,
           dragState.waypointIndex,
           targetCoordinate,
           routingLoader,
@@ -1096,12 +1342,12 @@ export default function App() {
 
         if (
           routeCreationSessionRef.current !== routeCreationSession ||
-          routeHistoryRef.current.steps !== dragState.expectedSteps
+          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
         ) {
           return;
         }
 
-        commitAsyncRouteMutation(dragState.expectedSteps, nextSteps);
+        commitAsyncRouteMutation(dragState.expectedState, nextState);
       } catch (error) {
         if (isAbortedRequest(error, abortController.signal)) {
           return;
@@ -1114,7 +1360,11 @@ export default function App() {
         const display = routeDisplayRef.current;
 
         if (display) {
-          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          updateRouteDisplay(
+            display,
+            routeHistoryRef.current.steps,
+            routeHistoryRef.current.closure,
+          );
         }
 
         if (error instanceof RoutingAreaTooLargeError) {
@@ -1144,12 +1394,16 @@ export default function App() {
   ) => {
     if (
       routeOperationPendingRef.current ||
-      routeHistoryRef.current.steps !== dragState.expectedSteps
+      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
       const display = routeDisplayRef.current;
 
       if (display) {
-        updateRouteDisplay(display, routeHistoryRef.current.steps);
+        updateRouteDisplay(
+          display,
+          routeHistoryRef.current.steps,
+          routeHistoryRef.current.closure,
+        );
       }
       return;
     }
@@ -1173,8 +1427,8 @@ export default function App() {
           throw new Error('The dynamic routing loader is unavailable.');
         }
 
-        const nextSteps = await rebuildRouteAfterWaypointInsertion(
-          dragState.expectedSteps,
+        const nextState = await rebuildRouteAfterWaypointInsertion(
+          dragState.expectedState,
           dragState.stepIndex,
           targetCoordinate,
           routingLoader,
@@ -1183,12 +1437,12 @@ export default function App() {
 
         if (
           routeCreationSessionRef.current !== routeCreationSession ||
-          routeHistoryRef.current.steps !== dragState.expectedSteps
+          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
         ) {
           return;
         }
 
-        commitAsyncRouteMutation(dragState.expectedSteps, nextSteps);
+        commitAsyncRouteMutation(dragState.expectedState, nextState);
       } catch (error) {
         if (isAbortedRequest(error, abortController.signal)) {
           return;
@@ -1201,7 +1455,11 @@ export default function App() {
         const display = routeDisplayRef.current;
 
         if (display) {
-          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          updateRouteDisplay(
+            display,
+            routeHistoryRef.current.steps,
+            routeHistoryRef.current.closure,
+          );
         }
 
         if (error instanceof RoutingAreaTooLargeError) {
@@ -1230,12 +1488,16 @@ export default function App() {
   ) => {
     if (
       routeOperationPendingRef.current ||
-      routeHistoryRef.current.steps !== dragState.expectedSteps
+      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
       const display = routeDisplayRef.current;
 
       if (display) {
-        updateRouteDisplay(display, routeHistoryRef.current.steps);
+        updateRouteDisplay(
+          display,
+          routeHistoryRef.current.steps,
+          routeHistoryRef.current.closure,
+        );
       }
       return;
     }
@@ -1259,8 +1521,8 @@ export default function App() {
           throw new Error('The dynamic routing loader is unavailable.');
         }
 
-        const nextSteps = await rebuildRouteAfterWaypointDeletion(
-          dragState.expectedSteps,
+        const nextState = await rebuildRouteAfterWaypointDeletion(
+          dragState.expectedState,
           dragState.waypointIndex,
           routingLoader,
           abortController.signal,
@@ -1268,12 +1530,12 @@ export default function App() {
 
         if (
           routeCreationSessionRef.current !== routeCreationSession ||
-          routeHistoryRef.current.steps !== dragState.expectedSteps
+          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
         ) {
           return;
         }
 
-        commitAsyncRouteMutation(dragState.expectedSteps, nextSteps);
+        commitAsyncRouteMutation(dragState.expectedState, nextState);
       } catch (error) {
         if (isAbortedRequest(error, abortController.signal)) {
           return;
@@ -1286,7 +1548,11 @@ export default function App() {
         const display = routeDisplayRef.current;
 
         if (display) {
-          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          updateRouteDisplay(
+            display,
+            routeHistoryRef.current.steps,
+            routeHistoryRef.current.closure,
+          );
         }
 
         if (error instanceof RoutingAreaTooLargeError) {
@@ -2037,15 +2303,19 @@ export default function App() {
       return;
     }
 
-    updateRouteDisplay(routeDisplay, routeHistory.steps);
-  }, [routeHistory.steps]);
+    updateRouteDisplay(
+      routeDisplay,
+      routeHistory.steps,
+      routeHistory.closure,
+    );
+  }, [routeHistory.steps, routeHistory.closure]);
 
   /**
    * Enables direct route shaping only while route creation is active.
    *
-   * Existing waypoints can be moved, while dragging a route section creates a
-   * temporary inserted point. Pointer movement stays local; routing begins only
-   * once the edit is released.
+   * Existing waypoints can be moved, while dragging a normal or loop-closing
+   * section creates a temporary inserted point. Pointer movement stays local;
+   * routing begins only once the edit is released.
    */
   useEffect(() => {
     const map = mapRef.current;
@@ -2060,12 +2330,13 @@ export default function App() {
         routeCreationActiveRef.current &&
         !routeOperationPendingRef.current &&
         routeHistoryRef.current.steps.length > 0,
-      getSteps: () => routeHistoryRef.current.steps,
+      getRouteState: () => getRouteState(routeHistoryRef.current),
       onStart: (target: RouteDragTarget) => {
-        const expectedSteps = routeHistoryRef.current.steps;
+        const expectedState = getRouteState(routeHistoryRef.current);
+        const { steps, closure } = expectedState;
 
         if (target.type === 'waypoint') {
-          const step = expectedSteps[target.waypointIndex];
+          const step = steps[target.waypointIndex];
 
           if (!step) {
             return;
@@ -2075,22 +2346,29 @@ export default function App() {
             type: 'waypoint',
             waypointIndex: target.waypointIndex,
             startCoordinate: [...step.waypoint],
-            expectedSteps,
+            expectedState,
           };
           updateRouteWaypointDragPreview(
             display,
-            expectedSteps,
+            steps,
+            closure,
             target.waypointIndex,
             step.waypoint,
           );
           return;
         }
 
-        if (
-          target.stepIndex < 1 ||
-          !expectedSteps[target.stepIndex] ||
-          !expectedSteps[target.stepIndex - 1]
-        ) {
+        const isNormalSegment =
+          target.stepIndex >= 1 &&
+          target.stepIndex < steps.length &&
+          Boolean(steps[target.stepIndex]) &&
+          Boolean(steps[target.stepIndex - 1]);
+        const isClosingSegment =
+          target.stepIndex === steps.length &&
+          steps.length >= 2 &&
+          closure !== null;
+
+        if (!isNormalSegment && !isClosingSegment) {
           return;
         }
 
@@ -2098,11 +2376,12 @@ export default function App() {
           type: 'segment',
           stepIndex: target.stepIndex,
           startCoordinate: [...target.coordinate],
-          expectedSteps,
+          expectedState,
         };
         updateRouteInsertionDragPreview(
           display,
-          expectedSteps,
+          steps,
+          closure,
           target.stepIndex,
           target.coordinate,
         );
@@ -2142,7 +2421,7 @@ export default function App() {
         if (
           !dragState ||
           dragState.type !== target.type ||
-          routeHistoryRef.current.steps !== dragState.expectedSteps
+          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
         ) {
           return;
         }
@@ -2154,7 +2433,8 @@ export default function App() {
         ) {
           updateRouteWaypointDragPreview(
             display,
-            dragState.expectedSteps,
+            dragState.expectedState.steps,
+            dragState.expectedState.closure,
             dragState.waypointIndex,
             coordinate,
           );
@@ -2168,7 +2448,8 @@ export default function App() {
         ) {
           updateRouteInsertionDragPreview(
             display,
-            dragState.expectedSteps,
+            dragState.expectedState.steps,
+            dragState.expectedState.closure,
             dragState.stepIndex,
             coordinate,
           );
@@ -2199,9 +2480,13 @@ export default function App() {
         if (
           !dragState ||
           !targetMatchesState ||
-          routeHistoryRef.current.steps !== dragState.expectedSteps
+          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
         ) {
-          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          updateRouteDisplay(
+            display,
+            routeHistoryRef.current.steps,
+            routeHistoryRef.current.closure,
+          );
           return;
         }
 
@@ -2218,7 +2503,11 @@ export default function App() {
           ) <= ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED ||
           (dragState.type === 'segment' && !didDrag)
         ) {
-          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          updateRouteDisplay(
+            display,
+            routeHistoryRef.current.steps,
+            routeHistoryRef.current.closure,
+          );
           return;
         }
 
@@ -2243,7 +2532,11 @@ export default function App() {
       routeDragStateRef.current = null;
       routeInteractionReleaseRef.current = null;
       setRouteContextHint(null);
-      updateRouteDisplay(display, routeHistoryRef.current.steps);
+      updateRouteDisplay(
+        display,
+        routeHistoryRef.current.steps,
+        routeHistoryRef.current.closure,
+      );
     };
   }, [isRouteCreationActive, language]);
 
@@ -2330,14 +2623,25 @@ export default function App() {
       }
 
       const display = routeDisplayRef.current;
-      const expectedSteps = routeHistoryRef.current.steps;
+      const expectedState = getRouteState(routeHistoryRef.current);
+      const { steps: expectedSteps, closure: expectedClosure } = expectedState;
+
+      // A closed route must be reopened explicitly before another endpoint is added.
+      if (expectedClosure) {
+        return;
+      }
 
       // A press on the current route belongs to the drag interaction and must
       // never append a new endpoint, even when no movement occurred.
       if (
         display &&
         (getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null ||
-          getRouteSegmentHitAtPixel(map, expectedSteps, event.pixel) !== null)
+          getRouteSegmentHitAtPixel(
+            map,
+            expectedSteps,
+            expectedClosure,
+            event.pixel,
+          ) !== null)
       ) {
         return;
       }
@@ -2350,7 +2654,7 @@ export default function App() {
       // shape as network mode.
       if (!isRouteSnapEnabled) {
         appendRouteStep(
-          expectedSteps,
+          expectedState,
           createStraightRouteStep(previousStep, clickedCoordinate),
         );
         return;
@@ -2440,12 +2744,12 @@ export default function App() {
           if (
             !routeCreationActiveRef.current ||
             routeCreationSessionRef.current !== routeCreationSession ||
-            routeHistoryRef.current.steps !== expectedSteps
+            !routeStateMatches(routeHistoryRef.current, expectedState)
           ) {
             return;
           }
 
-          appendRouteStep(expectedSteps, step);
+          appendRouteStep(expectedState, step);
         } catch (error) {
           // Cancellation is an expected control-flow path when the user leaves route mode.
           if (error instanceof DOMException && error.name === 'AbortError') {
@@ -2561,6 +2865,10 @@ export default function App() {
           canReverse={
             !isRouteOperationPending && routeHistory.steps.length > 1
           }
+          canToggleLoop={
+            !isRouteOperationPending && routeHistory.steps.length > 1
+          }
+          isLoopClosed={routeHistory.closure !== null}
           canDelete={
             !isRouteOperationPending && routeHistory.steps.length > 0
           }
@@ -2574,6 +2882,7 @@ export default function App() {
             setIsRouteSnapEnabled((isSnapEnabled) => !isSnapEnabled)
           }
           onReverse={reverseRoute}
+          onToggleLoop={toggleRouteLoop}
           onDelete={deleteRoute}
           onExport={requestRouteExport}
         />

@@ -3,8 +3,8 @@
 > Documented state: selectable raster backgrounds, hiking, closure, military
 > shooting-danger, and public-transport overlays,
 > search, geolocation, fullscreen, manual route creation with draggable,
-> insertable, and individually removable waypoints, route statistics, elevation
-> profile, GPX export, and experimental
+> insertable, and individually removable waypoints, optional loop closure, route
+> statistics, elevation profile, GPX export, and experimental
 > on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
@@ -58,13 +58,14 @@ It can:
 - prefer official hiking-trail sections through routing costs;
 - undo and redo complete route edits with their exact stored geometry;
 - reverse the complete route without recalculating sections;
+- close the route with a dedicated final section back to the first waypoint, or reopen it without losing the normal route;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
 - load one external GPX track or route as an independent read-only reference;
 - fit the map to imported GPX geometry without changing editable route history;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal or hide a compact elevation profile from the summary bar;
-- reveal a compact route action strip for snap mode, reversal, deletion, and export;
+- reveal a compact route action strip for snap mode, reversal, loop closure, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
 - display a metric scale and swisstopo attribution;
@@ -477,19 +478,24 @@ OpenLayers recalculates its canvas and visible tile area.
 the visible controls, and whether the OpenLayers `singleclick` listener is
 attached.
 
-The current route is an immutable ordered array of `RouteStep` objects. A step
-contains:
+The current route is an immutable `RouteState`. Its ordered `RouteStep` array
+stores:
 
 - the displayed waypoint;
 - the exact section geometry created from the preceding waypoint;
 - the section mode (`straight` or `network`).
 
-`RouteHistory` also stores stacks of complete prior and undone step arrays.
-Adding, moving, inserting, or deleting a waypoint, or reversing the route, creates one
-snapshot-based edit. Undo and redo exchange complete immutable states, so exact
-geometry is restored without recalculation or another network request. A new
-edit clears the redo states. Complete deletion intentionally clears all route
-history.
+A closed route additionally stores one optional `RouteClosure`: the exact final
+section from the last waypoint back to the first and its routing mode. The
+closure deliberately has no second waypoint marker, so the start remains a
+single editable point.
+
+`RouteHistory` stores stacks of complete prior and undone route states. Adding,
+moving, inserting, or deleting a waypoint, reversing the route, and closing or
+reopening the loop each create one snapshot-based edit. Undo and redo exchange
+complete immutable states, so exact geometry is restored without recalculation
+or another network request. A new edit clears the redo states. Complete deletion
+intentionally clears all route history.
 
 When snapping is disabled, the new section is the direct line between the two
 waypoints. When snapping is enabled, the first click loads a 3 × 3 group of
@@ -523,14 +529,15 @@ A* then calculates a section between the snapped start and end positions. The
 heuristic uses a lower bound below every configured cost factor so it remains
 admissible.
 
-`src/map/route.ts` owns the OpenLayers representation. It concatenates stored
-section geometries into one red `LineString` with a white casing and creates one
-red-outlined `Point` feature per waypoint. Red is used deliberately so planned
-routes do not resemble blue hydrographic features. Waypoint features carry
-their route index for hit detection.
+`src/map/route.ts` owns the OpenLayers representation. It concatenates normal
+stored sections and the optional closing section into one red `LineString` with
+a white casing, while creating exactly one red-outlined `Point` feature per
+waypoint. Red is used deliberately so planned routes do not resemble blue
+hydrographic features. Waypoint features carry their route index for hit
+detection.
 
 The same module creates one focused OpenLayers pointer interaction for existing
-waypoints and route sections. A 12-pixel point tolerance keeps small waypoints
+waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
 usable on touch screens, while a narrower line tolerance selects the closest
 stored incoming section. Pressing either target stops map panning. Moving an
 existing point draws an immediate preview with only its adjacent sections
@@ -539,12 +546,14 @@ splits the selected section into two straight previews. No network request runs
 during either drag.
 
 On release, `App.tsx` recalculates only the affected sections. A moved point
-updates its incoming and outgoing sections. An inserted point replaces one
-section with two sections that inherit the original routing intent. Straight
-sections remain direct; network sections call the dynamic router and
-independently fall back to a straight segment if coverage or connectivity is
-missing. The insertion edit is committed only after a genuine drag, while a click on an
-existing waypoint removes it. Endpoint deletion is local. Intermediate deletion
+updates its incoming and outgoing sections; moving the first or last point of a
+closed route also refreshes the closing section. An inserted point replaces one
+normal or closing section with two sections that inherit the original routing
+intent. Straight sections remain direct; network sections call the dynamic
+router and independently fall back to a straight segment if coverage or
+connectivity is missing. The insertion edit is committed only after a genuine
+drag, while a click on an existing waypoint removes it. Closed-route endpoint
+deletion rebuilds the loop around the remaining points. Intermediate deletion
 reconnects the surrounding waypoints directly when both sections were straight;
 otherwise it recalculates one network section and falls back to a straight
 connector when no path is available. Hover-capable pointers receive a compact,
@@ -554,9 +563,14 @@ localized contextual label for both waypoint and route-section actions.
 are enabled from snapshot history state. The snap button selects network or
 straight creation; it becomes available after the first waypoint and is
 temporarily disabled while cells are loading or a route is being calculated.
+The loop button sits between reversal and deletion, uses the current snap mode
+to create the final section, shows an active state while closed, and reopens the
+route on a second press. Empty-map clicks do not append waypoints while a route
+is closed; reopening it makes the last waypoint the editable endpoint again.
 Disabled route actions use an opaque light-grey background so map details do not
 bleed through the toolbar. The route toggle displays a small animated spinner
-during asynchronous network work, including recalculation after a drag.
+during asynchronous network work, including recalculation after a drag or loop
+closure.
 
 `src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
 flattened route geometry. For altitude-dependent figures, it converts the route
@@ -578,11 +592,12 @@ as a lightweight responsive SVG above the summary bar. It scales cumulative
 distance horizontally and elevation vertically, uses the route red for the
 profile line, and performs no extra network request.
 
-Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
-stored section geometry without issuing another routing request. It is recorded
-as one snapshot edit and can therefore be undone exactly. Deletion clears the
-current route and all undo/redo states while keeping route-creation mode active. GPX
-export is enabled after two waypoints and first opens
+Reversal uses `reverseRouteState()` to reverse waypoint order, normal sections,
+and the optional closing geometry without issuing another routing request. Loop
+closure and reopening are each recorded as one snapshot edit and can therefore
+be undone exactly. Deletion clears the current route and all undo/redo states
+while keeping route-creation mode active. GPX export is enabled after two
+waypoints and first opens
 `src/components/RouteExportDialog.tsx`. The chosen name is then passed to
 `src/export/gpx.ts` for both GPX metadata and filename generation. The latest
 smoothed elevation samples are passed only when they belong to the current
@@ -742,7 +757,7 @@ Owns the OpenLayers map instance and coordinates map-level behavior.
 It creates the tile and vector layers, replaces the selected base-map source,
 handles map, geolocation, fullscreen, GPX reference loading, information-layer
 visibility and feature inspection, route-creation mode, immutable route edit
-snapshots, waypoint move and insertion recalculation, dynamic graph loading, route
+snapshots, waypoint move and insertion recalculation, loop closing and reopening, dynamic graph loading, route
 statistics, and temporary routing status. It
 reacts to selected search results and cleans up imperative resources and pending
 requests when React unmounts.
@@ -868,7 +883,7 @@ to clear.
 
 Renders the route-mode toggle and the contextual route action buttons. It is a
 controlled component: `App.tsx` supplies availability state and callbacks for
-snap, undo, redo, reversal, deletion, and GPX export.
+snap, undo, redo, reversal, loop closure, deletion, and GPX export.
 
 ### `src/components/RouteImportControl.tsx`
 
@@ -903,7 +918,7 @@ abortable so stale route histories cannot update the UI.
 
 ### `src/export/gpx.ts`
 
-Converts the complete displayed route geometry from Web Mercator to WGS 84,
+Converts the complete displayed route geometry, including an optional closing section, from Web Mercator to WGS 84,
 builds a GPX 1.1 track, and starts a browser download through a temporary object
 URL. The name entered in the export dialog is XML-escaped for metadata and the
 track node, sanitized for a portable filename, and used for both outputs. The
@@ -926,13 +941,14 @@ blue hydrography.
 
 ### `src/map/route.ts`
 
-Defines the immutable route-step shape, flattens stored section geometry,
-reverses complete routes without recalculation, creates the route vector layer,
-and rebuilds its line and indexed waypoint features. It also owns waypoint and
-route-section hit detection, the focused click/drag interaction, contextual
-hover target reporting, cursor state, and straight preview rendering for moved
-or temporarily inserted waypoints. It does
-not own immutable route history or network recalculation.
+Defines immutable route steps, the optional dedicated loop-closing section, and
+complete route state. It flattens normal and closing geometry, reverses complete
+routes without recalculation, creates the route vector layer, and rebuilds its
+line and indexed waypoint features. It also owns waypoint and normal/closing
+section hit detection, the focused click/drag interaction, contextual hover
+target reporting, cursor state, and straight preview rendering for moved or
+temporarily inserted waypoints. It does not own immutable route history or
+network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
 
@@ -1038,47 +1054,54 @@ messages, and OpenLayers control placement.
     straight fallback section while snap mode stays enabled.
 23. Pressing an existing waypoint starts a potential move or deletion sequence
     and prevents map panning; a click deletes it, while a drag moves it.
-24. Pressing the route line outside a waypoint selects the closest stored incoming
-    section and starts a potential insertion sequence.
+24. Pressing the route line outside a waypoint selects the closest stored normal
+    or closing section and starts a potential insertion sequence.
 25. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
     made during the drag.
-26. Releasing a moved point recalculates at most its two adjacent sections.
-27. Releasing a dragged route section after a genuine movement replaces that
-    section with two sections through the new waypoint; each half inherits and
-    independently resolves the original straight or network routing intent.
-28. Every addition, waypoint move, waypoint insertion, waypoint deletion, or
-    reversal records the previous complete immutable route state and clears
-    obsolete redo states.
-29. Updating the committed route state rebuilds the route line and indexed
+26. Releasing a moved point recalculates its affected normal sections and, for
+    the first or last point of a closed route, the closing section.
+27. Releasing a dragged normal or closing section after a genuine movement
+    replaces that section with two sections through the new waypoint; each half
+    inherits and independently resolves the original straight or network routing intent.
+28. The loop button creates one dedicated section from the final waypoint back
+    to the first using the current snap mode, or removes that section to reopen
+    the route. No duplicate start waypoint is created.
+29. While the loop is closed, empty-map clicks do not append another waypoint;
+    the closing section remains draggable and the first and last waypoints remain editable.
+30. Every addition, waypoint move, waypoint insertion, waypoint deletion,
+    reversal, loop closure, or reopening records the previous complete immutable
+    route state and clears obsolete redo states.
+31. Updating the committed route state rebuilds the route line and indexed
     waypoint features.
-30. Distance is recalculated locally from the flattened route geometry.
-31. After a short debounce, an abortable profile request refreshes ascent,
+32. Distance is recalculated locally from the flattened route geometry, including
+    the optional closing section.
+33. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-32. The profile button reveals or hides the SVG chart without another request.
-33. Undo and redo exchange complete stored route states without routing again.
-34. Reversal rebuilds immutable steps in the opposite order as one undoable edit.
-35. Deletion clears the current route and all undo/redo states and hides the summary.
-36. GPX export opens a modal naming form before any XML is generated.
-37. Confirming the form converts the flattened route to WGS 84, merges exact
+34. The profile button reveals or hides the SVG chart without another request.
+35. Undo and redo exchange complete stored route states without routing again.
+36. Reversal rebuilds normal and closing geometry in the opposite direction as
+    one undoable edit.
+37. Deletion clears the current route and all undo/redo states and hides the summary.
+38. GPX export opens a modal naming form before any XML is generated.
+39. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-38. Changing language updates interface text, number formatting, document
+40. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-39. Leaving route mode removes the route-click listener and drag interaction, aborts active network
-    work, and restores any uncommitted drag preview while keeping completed cells,
-    committed route geometry, and statistics available.
-40. The fullscreen button requests fullscreen for the root application element.
-41. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-42. Focusing the location-search field closes any stop, hiking-closure, or
+41. Leaving route mode removes the route-click listener and drag interaction,
+    aborts active network work, and restores any uncommitted drag preview while
+    keeping completed cells, committed route geometry, and statistics available.
+42. The fullscreen button requests fullscreen for the root application element.
+43. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+44. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
-43. On unmount, map listeners, interactions, timers, requests, references, and
+45. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-44. A push to `main` triggers the Pages workflow, which builds and deploys
-    `dist/`.
-
+46. A push to `main` triggers the Pages workflow, which builds and deploys
+    `dist`.
 
 
 ## 18. Error handling
