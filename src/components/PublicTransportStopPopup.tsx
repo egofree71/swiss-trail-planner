@@ -176,6 +176,9 @@ export default function PublicTransportStopPopup({
       }),
     [],
   );
+  const hasDelayedDepartures = departures.some(
+    (departure) => departure.delayMinutes !== null,
+  );
   const departureDateGroups = useMemo<DepartureDateGroup[]>(() => {
     const groups: DepartureDateGroup[] = [];
 
@@ -307,7 +310,13 @@ export default function PublicTransportStopPopup({
                   key={group.dateKey}
                 >
                   <h3>{group.dateLabel}</h3>
-                  <ol className="public-transport-departure-list">
+                  <ol
+                    className={
+                      hasDelayedDepartures
+                        ? 'public-transport-departure-list public-transport-departure-list--with-delay'
+                        : 'public-transport-departure-list'
+                    }
+                  >
                     {group.departures.map((departure) => (
                       <li key={departure.id}>
                         <span className="public-transport-departure-line">

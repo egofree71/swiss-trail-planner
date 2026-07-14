@@ -98,13 +98,17 @@ and locations over broad but unstructured exploration.
       labels. Its available modes appear below as sharp 20-pixel SVG pictograms,
       wrap cleanly for long multimodal names, and expose translated accessible
       labels and hover tooltips.
-- [ ] On desktop, the public-transport popup is wider than the other information
-      panels so long destinations are less often truncated, while narrow viewports
-      still constrain it to the available width.
-- [ ] Departure times remain vertically aligned when only some services have a
-      positive delay; delay values occupy their own right-aligned column with a
-      compact gap that neither reduces nor shifts the time column. Delayed
-      predicted times use the same red emphasis as the visible `+X min` value,
+- [ ] On desktop, the public-transport popup stays near 23 rem for short
+      destinations and expands only as useful timetable content requires, up to
+      29 rem. Long destinations then truncate cleanly, while long stop names wrap
+      without widening the panel. Neither the header nor the CFF action labels force
+      expansion, and narrow viewports still use only the available width.
+- [ ] When at least one displayed service has a positive delay, departure times
+      remain vertically aligned and delay values occupy their own right-aligned
+      column with a compact gap. When no displayed service is delayed, the unused
+      column disappears. In both layouts, the final time or delay column keeps a
+      small inset from the panel's right edge. Delayed predicted times and the visible
+      `+X min` value use pure red,
       while on-time departures remain in the default text colour.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.

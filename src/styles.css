@@ -683,11 +683,15 @@ select {
 }
 
 .public-transport-stop-popup {
-  width: min(29rem, calc(100vw - 2rem));
+  width: fit-content;
+  min-width: 23rem;
+  max-width: min(29rem, calc(100vw - 2rem));
 }
 
 .public-transport-stop-popup .map-information-popup-header {
   align-items: flex-start;
+  /* Timetable rows, not a long stop name, determine intrinsic popup width. */
+  contain: inline-size;
 }
 
 .public-transport-stop-heading {
@@ -699,6 +703,7 @@ select {
 }
 
 .public-transport-stop-heading strong {
+  overflow-wrap: anywhere;
   font-weight: 700;
 }
 
@@ -752,10 +757,15 @@ select {
 .public-transport-departure-list li {
   display: grid;
   min-height: 2.65rem;
-  grid-template-columns: 3.4rem minmax(0, 1fr) 3.15rem 3.5rem;
+  grid-template-columns: 3.4rem minmax(0, 1fr) 3.15rem;
   align-items: center;
   gap: 0.35rem;
+  padding-right: 0.75rem;
   border-bottom: 1px solid rgb(32 47 60 / 11%);
+}
+
+.public-transport-departure-list--with-delay li {
+  grid-template-columns: 3.4rem minmax(0, 1fr) 3.15rem 3.5rem;
 }
 
 .public-transport-departure-list li:first-child {
@@ -790,11 +800,11 @@ select {
 }
 
 .public-transport-departure-time--delayed {
-  color: #c22b2b;
+  color: #ff0000;
 }
 
 .public-transport-departure-delay {
-  color: #c22b2b;
+  color: #ff0000;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -806,6 +816,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  /* Timetable content, not the fixed action labels, determines popup width. */
+  contain: inline-size;
 }
 
 .public-transport-stop-links a {
@@ -1236,6 +1248,11 @@ select {
     left: 0.75rem;
     width: calc(100vw - 5.25rem);
     max-height: calc(100vh - 5rem);
+  }
+
+  .public-transport-stop-popup {
+    min-width: 0;
+    max-width: none;
   }
 
   .map-information-popup-body {

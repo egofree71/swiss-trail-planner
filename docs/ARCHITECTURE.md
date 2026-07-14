@@ -334,13 +334,21 @@ the `transport.opendata.ch` stationboard client. Results are validated,
 deduplicated, sorted by predicted departure time, and cached for 45 seconds.
 The UI groups departures by their localized calendar date in the
 `Europe/Zurich` time zone and shows the line, destination, predicted time, and
-positive delay when available. The transport panel uses a wider desktop-only
-width than the other information panels so destination names retain useful space.
-Fixed timetable columns reserve independent space for the line, time, and delay,
-with a compact gap between time and delay so delayed services do not shift the
-time column relative to on-time departures. A predicted departure with a positive
-delay uses the same red emphasis as its explicit delay value, while the numeric
-`+X min` indicator remains visible so the status is not conveyed by colour alone.
+positive delay when available. On desktop, the transport panel uses intrinsic
+sizing between 23 and 29 rem: short destination lists remain compact, while longer
+names can expand the panel before ellipsis is required. The stop-name header and
+fixed CFF action labels are excluded from intrinsic sizing so timetable content
+determines the width; a long stop name wraps within that result instead of expanding
+the panel. Narrow viewports still use the available responsive width.
+When at least one displayed service has a positive delay, fixed timetable columns
+reserve independent space for the line, time, and delay, with a compact gap between
+time and delay so delayed services do not shift the time column relative to on-time
+departures. When no displayed service is delayed, the unused delay column is removed.
+The final time or delay column keeps a small inset from the panel edge in both layouts,
+so the timetable remains aligned without looking cramped. A predicted departure with a
+positive delay uses the same pure-red emphasis as its explicit delay value, while
+the numeric `+X min` indicator remains visible so the status is not conveyed by
+colour alone.
 The date heading includes the weekday so
 sparse or weekend timetables do not make a next-day departure look like a
 same-day service. Requests are aborted when another stop is selected or the popup is
@@ -773,8 +781,14 @@ SVG pictograms used on the map. Translated alternative text and tooltips preserv
 mode identification without repeating labels inside long or already qualified
 stop names. The component aborts superseded stationboard requests, groups the
 next departures by Swiss local date, formats dates and times in the active locale,
-and keeps time and delay values in separate aligned columns inside a wider
-desktop panel with compact column spacing. It also keeps
+and conditionally adds a separate aligned delay column only when at least one
+visible service is delayed. Otherwise the departure times use the freed space. Its
+popup width follows the longest useful timetable content between compact desktop
+minimum and maximum bounds, without letting the stop-name header or CFF action labels
+force expansion. Long stop names wrap inside the timetable-driven width. In both
+layouts, the final numeric column keeps a small right-side inset rather than
+sitting flush against the panel edge. The adaptive desktop panel retains compact
+column spacing. It also keeps
 localized links that prefill the stop as departure or destination on the
 official SBB/CFF/FFS timetable.
 
