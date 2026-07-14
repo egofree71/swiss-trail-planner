@@ -18,13 +18,13 @@ import Fill from 'ol/style/Fill.js';
 import Icon from 'ol/style/Icon.js';
 import Stroke from 'ol/style/Stroke.js';
 import Style from 'ol/style/Style.js';
-import boatIconUrl from '../assets/public-transport-stops/boat.png';
-import busIconUrl from '../assets/public-transport-stops/bus.png';
-import cableCarIconUrl from '../assets/public-transport-stops/cable-car.png';
-import chairliftIconUrl from '../assets/public-transport-stops/chairlift.png';
-import funicularIconUrl from '../assets/public-transport-stops/funicular.png';
-import trainIconUrl from '../assets/public-transport-stops/train.png';
-import tramIconUrl from '../assets/public-transport-stops/tram.png';
+import boatIconUrl from '../assets/public-transport-stops/boat.svg';
+import busIconUrl from '../assets/public-transport-stops/bus.svg';
+import cableCarIconUrl from '../assets/public-transport-stops/cable-car.svg';
+import chairliftIconUrl from '../assets/public-transport-stops/chairlift.svg';
+import funicularIconUrl from '../assets/public-transport-stops/funicular.svg';
+import trainIconUrl from '../assets/public-transport-stops/train.svg';
+import tramIconUrl from '../assets/public-transport-stops/tram.svg';
 import type { Language } from '../i18n/translations';
 
 /** Technical GeoAdmin identifier for official public-transport stops. */
@@ -54,6 +54,33 @@ const IDENTIFY_DPI = 96;
 
 /** Web Mercator ground resolution at zoom level zero, in map units per pixel. */
 const WEB_MERCATOR_INITIAL_RESOLUTION = 156543.03392804097;
+
+/** Compact symbol size used at broad urban and regional scales. */
+const STOP_ICON_OVERVIEW_SIZE_PIXELS = 20;
+
+/** Intermediate symbol size used before detailed street-level planning. */
+const STOP_ICON_MEDIUM_SIZE_PIXELS = 23;
+
+/** Symbol size used once individual streets and paths become prominent. */
+const STOP_ICON_DETAILED_SIZE_PIXELS = 29;
+
+/** Symbol size used when building and path detail becomes visually dominant. */
+const STOP_ICON_VERY_DETAILED_SIZE_PIXELS = 33;
+
+/** Final symbol size used at the closest hiking-planning scales. */
+const STOP_ICON_CLOSE_SIZE_PIXELS = 37;
+
+/** First zoom level at which overview symbols receive a modest size increase. */
+const STOP_ICON_MEDIUM_ZOOM = 15;
+
+/** First zoom level at which stop symbols receive a detailed-scale boost. */
+const STOP_ICON_DETAILED_ZOOM = 17;
+
+/** First zoom level at which stop symbols receive a second size increase. */
+const STOP_ICON_VERY_DETAILED_ZOOM = 18;
+
+/** First zoom level at which stop symbols receive the final close-scale boost. */
+const STOP_ICON_CLOSE_ZOOM = 19;
 
 /**
  * GeoAdmin exposes operational sub-points such as platform numbers at the
@@ -127,6 +154,47 @@ const STOP_OVERLAP_DISPLAY_RADIUS_PIXELS = 17;
  * no longer needed and every stop returns to its true map position.
  */
 const STOP_OVERLAP_RELEASE_RADIUS_PIXELS = 14;
+
+/**
+ * Returns the discrete stop-symbol size for the current Web Mercator scale.
+ * The overlay stays compact at medium zooms, then gains readability as the
+ * background exposes increasingly detailed streets, buildings, and paths.
+ */
+function getStopIconSize(resolution: number): number {
+  if (!Number.isFinite(resolution) || resolution <= 0) {
+    return STOP_ICON_OVERVIEW_SIZE_PIXELS;
+  }
+
+  const zoom = Math.log2(WEB_MERCATOR_INITIAL_RESOLUTION / resolution);
+
+  if (zoom >= STOP_ICON_CLOSE_ZOOM) {
+    return STOP_ICON_CLOSE_SIZE_PIXELS;
+  }
+
+  if (zoom >= STOP_ICON_VERY_DETAILED_ZOOM) {
+    return STOP_ICON_VERY_DETAILED_SIZE_PIXELS;
+  }
+
+  if (zoom >= STOP_ICON_DETAILED_ZOOM) {
+    return STOP_ICON_DETAILED_SIZE_PIXELS;
+  }
+
+  if (zoom >= STOP_ICON_MEDIUM_ZOOM) {
+    return STOP_ICON_MEDIUM_SIZE_PIXELS;
+  }
+
+  return STOP_ICON_OVERVIEW_SIZE_PIXELS;
+}
+
+/** Keeps the fan-out radius tied directly to the rendered symbol radius. */
+function getStopOverlapDisplayRadius(iconSize: number): number {
+  return iconSize / 2 + 4.5;
+}
+
+/** Releases displacement once real positions leave only a small icon overlap. */
+function getStopOverlapReleaseRadius(iconSize: number): number {
+  return iconSize / 2 + 1.5;
+}
 
 /** Passenger stop displayed on the map and in the compact information popup. */
 export interface PublicTransportStop {
@@ -571,6 +639,7 @@ function calculateStopDisplacement(
   coordinate: Coordinate,
   layout: StopOverlapLayout | null,
   resolution: number,
+  iconSize: number,
 ): Coordinate {
   if (!layout || !Number.isFinite(resolution) || resolution <= 0) {
     return [0, 0];
@@ -578,7 +647,7 @@ function calculateStopDisplacement(
 
   if (
     layout.radiusMapUnits / resolution >=
-    STOP_OVERLAP_RELEASE_RADIUS_PIXELS
+    getStopOverlapReleaseRadius(iconSize)
   ) {
     return [0, 0];
   }
@@ -587,10 +656,13 @@ function calculateStopDisplacement(
     (coordinate[0] - layout.center[0]) / resolution,
     (coordinate[1] - layout.center[1]) / resolution,
   ];
+  const targetRadiusScale =
+    getStopOverlapDisplayRadius(iconSize) /
+    STOP_OVERLAP_DISPLAY_RADIUS_PIXELS;
 
   return [
-    layout.targetOffsetPixels[0] - naturalOffsetPixels[0],
-    layout.targetOffsetPixels[1] - naturalOffsetPixels[1],
+    layout.targetOffsetPixels[0] * targetRadiusScale - naturalOffsetPixels[0],
+    layout.targetOffsetPixels[1] * targetRadiusScale - naturalOffsetPixels[1],
   ];
 }
 
@@ -728,9 +800,10 @@ export async function loadPublicTransportStops(
 }
 
 /**
- * Official GeoAdmin legend symbols bundled locally for reliable client-side
- * filtering. The original WMTS layer used these clearer mode-specific icons,
- * but raster tiles could not hide out-of-service operating points.
+ * Locally bundled vector symbols keep the familiar Swiss public-transport
+ * map language while remaining sharp on high-density displays. The official
+ * WMTS portrayal cannot be filtered after tile rendering, so the client uses
+ * equivalent SVG pictograms for passenger-relevant stops only.
  */
 const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
   train: trainIconUrl,
@@ -744,39 +817,21 @@ const MODE_ICON_URLS: Record<PublicTransportMode, string> = {
   funicular: funicularIconUrl,
 };
 
-/** Shared immutable OpenLayers styles for symbols at their real position. */
-const MODE_STYLES = new Map<PublicTransportMode, Style>(
-  MODE_PRIORITY.map((mode) => [
-    mode,
-    new Style({
-      image: new Icon({
-        src: MODE_ICON_URLS[mode],
-        // All bundled legend crops share a 28 px transparent canvas.
-        scale: 25 / 28,
-      }),
-    }),
-  ]),
-);
+/** Cached icon variants keyed by mode, close-stop displacement, and size. */
+const MODE_STYLES = new Map<string, Style>();
 
-/** Cached displaced variants used only for the few close-symbol groups. */
-const DISPLACED_MODE_STYLES = new Map<string, Style>();
-
-/** Returns a mode style whose symbol follows one rounded pixel displacement. */
+/** Returns a zoom-aware mode style with one rounded pixel displacement. */
 function getModeStyle(
   mode: PublicTransportMode,
   displacement: Coordinate,
+  iconSize: number,
 ): Style {
   const roundedDisplacement: Coordinate = [
     Math.round(displacement[0]),
     Math.round(displacement[1]),
   ];
-
-  if (roundedDisplacement[0] === 0 && roundedDisplacement[1] === 0) {
-    return MODE_STYLES.get(mode)!;
-  }
-
-  const key = `${mode}:${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
-  const cached = DISPLACED_MODE_STYLES.get(key);
+  const key = `${mode}:${iconSize}:${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
+  const cached = MODE_STYLES.get(key);
 
   if (cached) {
     return cached;
@@ -785,24 +840,28 @@ function getModeStyle(
   const style = new Style({
     image: new Icon({
       src: MODE_ICON_URLS[mode],
-      scale: 25 / 28,
+      width: iconSize,
+      height: iconSize,
       displacement: roundedDisplacement,
     }),
   });
-  DISPLACED_MODE_STYLES.set(key, style);
+  MODE_STYLES.set(key, style);
   return style;
 }
 
 /** Cached selection-halo variants aligned with displaced stop symbols. */
 const SELECTED_STOP_STYLES = new Map<string, Style>();
 
-/** Returns the selected-stop halo for one rounded symbol displacement. */
-function getSelectedStopStyle(displacement: Coordinate): Style {
+/** Returns the selected-stop halo for one rounded displacement and icon size. */
+function getSelectedStopStyle(
+  displacement: Coordinate,
+  iconSize: number,
+): Style {
   const roundedDisplacement: Coordinate = [
     Math.round(displacement[0]),
     Math.round(displacement[1]),
   ];
-  const key = `${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
+  const key = `${iconSize}:${roundedDisplacement[0]}:${roundedDisplacement[1]}`;
   const cached = SELECTED_STOP_STYLES.get(key);
 
   if (cached) {
@@ -811,7 +870,7 @@ function getSelectedStopStyle(displacement: Coordinate): Style {
 
   const style = new Style({
     image: new CircleStyle({
-      radius: 17,
+      radius: iconSize / 2 + 4.5,
       displacement: roundedDisplacement,
       fill: new Fill({ color: 'rgba(255, 255, 255, 0.88)' }),
       stroke: new Stroke({ color: '#1769e0', width: 3 }),
@@ -837,6 +896,7 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
     minZoom: PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
     zIndex: 14,
     style: (feature, resolution) => {
+      const iconSize = getStopIconSize(resolution);
       const geometry = feature.getGeometry();
       const coordinate = geometry instanceof Point
         ? geometry.getCoordinates()
@@ -846,9 +906,10 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
             coordinate,
             getStopOverlapLayout(feature),
             resolution,
+            iconSize,
           )
         : [0, 0];
-      return getSelectedStopStyle(displacement);
+      return getSelectedStopStyle(displacement, iconSize);
     },
   });
   const layer = new VectorLayer({
@@ -862,12 +923,18 @@ export function createPublicTransportStopsDisplay(): PublicTransportStopsDisplay
         return undefined;
       }
 
+      const iconSize = getStopIconSize(resolution);
       const displacement = calculateStopDisplacement(
         stop.coordinate,
         getStopOverlapLayout(feature),
         resolution,
+        iconSize,
       );
-      return getModeStyle(getPrimaryMode(stop.modes), displacement);
+      return getModeStyle(
+        getPrimaryMode(stop.modes),
+        displacement,
+        iconSize,
+      );
     },
   });
 

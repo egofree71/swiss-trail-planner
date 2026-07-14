@@ -209,7 +209,7 @@ selected route section.
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
 | GeoAdmin HTML popup API | Localized official closure and military danger-zone metadata |
 | GeoAdmin WMS | Official server-rendered closure, detour, and military danger-zone symbology |
-| OpenLayers vector styling | Filtered public-transport stop symbols by normalized mode |
+| OpenLayers vector styling | Filtered public-transport stops with locally bundled SVG symbols by normalized mode |
 | transport.opendata.ch | Documented JSON stationboard for on-demand next departures |
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
 | Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
@@ -313,6 +313,13 @@ normalized name or distance: one official feature may already expose several
 recognized transport modes, while two different identifiers can represent
 neighbouring facilities with different names, timetables, or CFF deep links. A
 multimodal feature receives one marker using the highest-priority mode symbol.
+Symbols use 20 pixels at broad urban and regional scales, 23 pixels at zooms
+15 and 16, then grow progressively to 29 pixels at zoom 17, 33 pixels at zoom
+18, and 37 pixels from zoom 19. This keeps dense city views readable while
+preserving clear symbols during detailed hiking planning. Locally bundled SVG
+pictograms use a darker Swiss-map
+blue and remain sharp when OpenLayers renders them on high-density displays.
+Selection halos and close-stop fan-out spacing scale with the same size changes.
 When distinct official features would overlap at medium zoom, a deterministic
 pixel displacement fans them apart; the displacement is removed once their real
 coordinates are visually distinct at a closer zoom. The layer is disabled by
@@ -647,6 +654,9 @@ swiss-trail-planner/
 │   ├── ARCHITECTURE.md
 │   └── VALIDATION.md
 ├── src/
+│   ├── assets/
+│   │   └── public-transport-stops/
+│   │       └── boat, bus, cable-car, chairlift, funicular, train, and tram SVG symbols
 │   ├── closures/
 │   │   └── trailClosures.ts
 │   ├── dangers/
@@ -776,7 +786,15 @@ out-of-service, empty-mode, or unsupported-mode points, explicit accepted-mode
 classification, narrowly scoped name-qualifier fallback, strict deduplication by
 official feature identifier, preservation of multimodal metadata on one official
 stop, close-symbol fan layouts for distinct neighbouring stops, vector-layer
-creation, selection highlighting, and client-side symbol styling.
+creation, zoom-responsive symbol sizing, proportional selection highlighting,
+and client-side SVG symbol styling.
+
+### `src/assets/public-transport-stops/*.svg`
+
+Defines the locally bundled transport-mode pictograms used by the filtered stop
+overlay. The common 24-unit vector canvas, dark-blue `#2D327D` background, white
+transport silhouettes, and explicit geometry keep the symbols recognizable and
+sharp at every supported map zoom and browser pixel density.
 
 ### `src/transport/stationBoard.ts`
 

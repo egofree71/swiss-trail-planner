@@ -85,6 +85,11 @@ and locations over broad but unstructured exploration.
 - [ ] Shooting danger zones are semi-transparent, remain above closures and
       transport symbols, and visibly highlight the selected polygon.
 - [ ] Public-transport stops display only recognized passenger modes.
+- [ ] Public-transport SVG symbols use the shared dark-blue-and-white visual set,
+      render at 20 pixels in broad dense views, 23 pixels at zooms 15 and 16,
+      then grow to 29, 33, and 37 pixels at zooms 17, 18, and 19 respectively,
+      stay sharp on standard and high-density displays, and keep their selection
+      halo correctly aligned.
 - [ ] Distinct nearby official stops remain separate and can both be selected.
 - [ ] Departure dates appear when results extend beyond the current service day.
 - [ ] Closing a popup or disabling its layer clears the associated selection and
@@ -120,6 +125,7 @@ They should remain part of routine regression testing.
 | Lausanne-Triage B | The operating-only point is not displayed as a passenger stop |
 | Plan-Francey / Moléson | Nearby funicular and cable-car stops remain distinct and both icons are accessible |
 | Biel/Bienne Magglingenbahn | Bus and funicular remain separate; one popup never borrows the other stop's departures |
+| Bois de Sauvabelin | Dark-blue SVG bus symbols grow progressively from zoom 17 through zoom 19, remain sharp and readable through zoom 20 on standard and high-density displays, and keep aligned selection halos |
 | Petit Hongrin / Col des Mosses | Adjacent danger zones are visible above other overlays and the selected polygon is unambiguous |
 | A rural stop with few departures | Results spanning more than one day are grouped under explicit localized dates |
 
