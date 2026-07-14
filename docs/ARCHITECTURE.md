@@ -2,9 +2,9 @@
 
 > Documented state: selectable raster backgrounds, hiking, closure, military
 > shooting-danger, and public-transport overlays,
-> search, geolocation, fullscreen, manual route creation, route statistics,
-> elevation profile, GPX export, and experimental on-demand swissTLM3D routing
-> around user-selected positions.
+> search, geolocation, fullscreen, manual route creation with draggable
+> waypoints, route statistics, elevation profile, GPX export, and experimental
+> on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
 repository. It should be updated whenever a structural dependency, major
@@ -47,11 +47,12 @@ It can:
 - enter and leave browser fullscreen mode;
 - enter a visual route-creation mode with a crosshair map cursor;
 - add ordered route waypoints by clicking or tapping the map;
+- drag an existing waypoint and recalculate only its adjacent sections after release;
 - create straight segments when snapping is disabled or a snapped section cannot be resolved;
 - load swissTLM3D road and hiking geometries dynamically around selected waypoints;
 - build a regional walkable graph and calculate snapped sections with A*;
 - prefer official hiking-trail sections through routing costs;
-- undo and redo exact straight or routed route steps;
+- undo and redo complete route edits with their exact stored geometry;
 - reverse the complete route without recalculating sections;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
@@ -72,7 +73,7 @@ It does not yet include:
 - direct feature inspection or a visible raw-network debug layer;
 - validated topology for all junction, bridge, and tunnel cases;
 - automatic avoidance of officially closed sections during routing;
-- waypoint movement, insertion, or individual deletion;
+- waypoint insertion or individual deletion;
 - local or remote persistence;
 - an application server.
 
@@ -100,7 +101,7 @@ The project evolves through independent functional layers:
 11. official hiking-closure overlay and localized feature information;
 12. official military shooting-danger overlay and localized feature information;
 13. optional public-transport stop overlay and localized stop information;
-14. waypoint editing;
+14. draggable waypoint editing;
 15. repeatable routing-data preparation;
 16. reliable national hiking routing.
 
@@ -110,13 +111,14 @@ Each milestone should remain testable and usable before the next one begins.
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
-controls are separate presentational components. Editable and imported route
-displays stay in dedicated map modules instead of adding a broader
-map-controller abstraction before drag and selection interactions require one.
+controls are separate presentational components. Editable route rendering and
+its focused waypoint pointer interaction remain together in `src/map/route.ts`;
+the imported route stays in its own map module. A broader map-controller
+abstraction is still unnecessary for one bounded editing interaction.
 
 OpenLayers map ownership remains in `App.tsx` because there is still only one
 map view. Network fetching and graph algorithms are isolated under
-`src/routing/`; more extensive drawing interactions may later justify a
+`src/routing/`; several additional drawing interactions may later justify a
 dedicated hook or map-controller module.
 
 ### 3.4 Comments explain decisions
@@ -142,12 +144,12 @@ Browser
    │      │      └── geo.admin.ch SearchServer
    │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
-   │      ├── route history, imported-GPX state, statistics, and temporary routing status
+   │      ├── route edit snapshots, imported-GPX state, statistics, and temporary routing status
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── owns OpenLayers lifecycle and route-editing state
+   │      ├── owns OpenLayers lifecycle, route-editing state, and adjacent-section recalculation
    │      ├── requests dynamic routing cells for snapped clicks
    │      └── refreshes elevation statistics after route changes
    │
@@ -196,7 +198,7 @@ selected route section.
 |---|---|
 | React 19 | UI components, search state, status messages, and language context |
 | TypeScript 5 | Static typing and compile-time verification |
-| OpenLayers 10 | Map, view, layers, projections, markers, and controls |
+| OpenLayers 10 | Map, view, layers, projections, markers, controls, and waypoint pointer interaction |
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
@@ -442,16 +444,19 @@ OpenLayers recalculates its canvas and visible tile area.
 the visible controls, and whether the OpenLayers `singleclick` listener is
 attached.
 
-Route history is immutable and consists of ordered `RouteStep` objects. A step
+The current route is an immutable ordered array of `RouteStep` objects. A step
 contains:
 
 - the displayed waypoint;
 - the exact section geometry created from the preceding waypoint;
-- the creation mode (`straight` or `network`).
+- the section mode (`straight` or `network`).
 
-Undo moves the last complete step to a redo stack. Redo restores the stored
-step without recalculating it or issuing another network request. Adding a new
-step clears the redo stack.
+`RouteHistory` also stores stacks of complete prior and undone step arrays.
+Adding a waypoint, moving a waypoint, or reversing the route creates one
+snapshot-based edit. Undo and redo exchange complete immutable states, so exact
+geometry is restored without recalculation or another network request. A new
+edit clears the redo states. Complete deletion intentionally clears all route
+history.
 
 When snapping is disabled, the new section is the direct line between the two
 waypoints. When snapping is enabled, the first click loads a 3 × 3 group of
@@ -488,16 +493,27 @@ admissible.
 `src/map/route.ts` owns the OpenLayers representation. It concatenates stored
 section geometries into one red `LineString` with a white casing and creates one
 red-outlined `Point` feature per waypoint. Red is used deliberately so planned
-routes do not resemble blue hydrographic features. Rebuilding remains
-intentionally simple while routes are small and waypoints are not draggable.
+routes do not resemble blue hydrographic features. Waypoint features carry
+their route index for hit detection.
+
+The same module creates a focused OpenLayers pointer interaction for existing
+waypoints. A 12-pixel hit tolerance makes small points usable on touch screens.
+Pressing a point stops map panning; pointer movement draws an immediate preview
+with only the adjacent sections replaced by straight lines. No network request
+runs during the drag. On release, `App.tsx` recalculates the incoming and outgoing
+sections only. Each section preserves its stored mode: straight sections remain
+direct, while network sections call the dynamic router and independently fall
+back to a straight segment if coverage or connectivity is missing. The first
+and final waypoints therefore require at most one adjacent route calculation,
+while an intermediate waypoint requires at most two.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
-are enabled from history state. The snap button selects network or straight
-creation; it becomes available after the first waypoint and is temporarily
-disabled while cells are loading or a route is being calculated. Disabled
-route actions use an opaque light-grey background so map details do not bleed
-through the toolbar. The route toggle displays a small animated spinner during
-asynchronous network work.
+are enabled from snapshot history state. The snap button selects network or
+straight creation; it becomes available after the first waypoint and is
+temporarily disabled while cells are loading or a route is being calculated.
+Disabled route actions use an opaque light-grey background so map details do not
+bleed through the toolbar. The route toggle displays a small animated spinner
+during asynchronous network work, including recalculation after a drag.
 
 `src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
 flattened route geometry. For altitude-dependent figures, it converts the route
@@ -520,9 +536,9 @@ distance horizontally and elevation vertically, uses the route red for the
 profile line, and performs no extra network request.
 
 Reversal uses `reverseRouteSteps()` to reverse both waypoint order and every
-stored section geometry without issuing another routing request. The redo stack
-is cleared because its entries belong to the previous direction. Deletion clears
-the applied and redo histories while keeping route-creation mode active. GPX
+stored section geometry without issuing another routing request. It is recorded
+as one snapshot edit and can therefore be undone exactly. Deletion clears the
+current route and all undo/redo states while keeping route-creation mode active. GPX
 export is enabled after two waypoints and first opens
 `src/components/RouteExportDialog.tsx`. The chosen name is then passed to
 `src/export/gpx.ts` for both GPX metadata and filename generation. The latest
@@ -679,8 +695,9 @@ Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the tile and vector layers, replaces the selected base-map source,
 handles map, geolocation, fullscreen, GPX reference loading, information-layer
-visibility and feature inspection, route-creation mode, immutable route history,
-dynamic graph loading, route statistics, and temporary routing status. It
+visibility and feature inspection, route-creation mode, immutable route edit
+snapshots, waypoint-release recalculation, dynamic graph loading, route
+statistics, and temporary routing status. It
 reacts to selected search results and cleans up imperative resources and pending
 requests when React unmounts.
 
@@ -845,8 +862,9 @@ blue hydrography.
 
 Defines the immutable route-step shape, flattens stored section geometry,
 reverses complete routes without recalculation, creates the route vector layer,
-and rebuilds its line and waypoint features. It owns route geometry helpers and
-styling but not route history or UI state.
+and rebuilds its line and indexed waypoint features. It also owns waypoint hit
+detection, the focused drag interaction, cursor state, and straight preview
+rendering. It does not own immutable route history or network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
 
@@ -936,9 +954,9 @@ messages, and OpenLayers control placement.
 12. Selecting a GPX parses it locally, replaces the read-only reference layer,
     and fits the map to the imported geometry.
 13. The route button toggles route-creation mode and the crosshair cursor.
-14. Entering route mode attaches a map `singleclick` listener and reveals the
-    route toolbar.
-15. With snapping disabled, a click stores a direct section immediately.
+14. Entering route mode attaches the route-click listener, the focused waypoint
+    pointer interaction, and the contextual toolbar.
+15. With snapping disabled, a map click stores a direct section immediately.
 16. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
 17. Dense identify requests are subdivided when either layer reaches 200 results.
@@ -950,28 +968,38 @@ messages, and OpenLayers control placement.
 21. A disconnected or empty corridor is retried once with a wider cell radius.
 22. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-23. Updating route history rebuilds the route line and waypoint features.
-24. Distance is recalculated locally from the flattened route geometry.
-25. After a short debounce, an abortable profile request refreshes ascent,
+23. Pressing an existing waypoint starts a drag sequence and prevents map panning.
+24. Pointer movement enlarges the active waypoint and draws straight previews for
+    only the incoming and outgoing sections; no routing request is made yet.
+25. Releasing the point recalculates at most the two adjacent sections according
+    to their stored straight or network modes. Unchanged route sections retain
+    their exact geometry.
+26. Every addition, waypoint move, or reversal records the previous complete
+    immutable route state and clears obsolete redo states.
+27. Updating the committed route state rebuilds the route line and indexed
+    waypoint features.
+28. Distance is recalculated locally from the flattened route geometry.
+29. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-26. The profile button reveals or hides the SVG chart without another request.
-27. Undo moves the last complete step to redo; redo restores it without routing.
-28. Reversal rebuilds immutable steps in the opposite order and clears redo.
-29. Deletion clears both applied and redo histories and hides the summary.
-30. GPX export opens a modal naming form before any XML is generated.
-31. Confirming the form converts the flattened route to WGS 84, merges exact
+30. The profile button reveals or hides the SVG chart without another request.
+31. Undo and redo exchange complete stored route states without routing again.
+32. Reversal rebuilds immutable steps in the opposite order as one undoable edit.
+33. Deletion clears the current route and all undo/redo states and hides the summary.
+34. GPX export opens a modal naming form before any XML is generated.
+35. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-32. Changing language updates interface text, number formatting, document
+36. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-33. Leaving route mode removes the click listener and aborts active network work
-    while keeping completed cells, route geometry, and statistics available.
-34. The fullscreen button requests fullscreen for the root application element.
-35. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-36. Location search and browser geolocation continue to operate independently.
-37. On unmount, map listeners, timers, requests, references, and the map target
-    are cleaned up by their owning components.
-38. A push to `main` triggers the Pages workflow, which builds and deploys
+37. Leaving route mode removes both editing interactions, aborts active network
+    work, and restores any uncommitted drag preview while keeping completed cells,
+    committed route geometry, and statistics available.
+38. The fullscreen button requests fullscreen for the root application element.
+39. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+40. Location search and browser geolocation continue to operate independently.
+41. On unmount, map listeners, interactions, timers, requests, references, and
+    the map target are cleaned up by their owning components.
+42. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist/`.
 
 
@@ -992,12 +1020,15 @@ retried by clicking the button again.
 Missing nearby segments, empty coverage, and disconnected graphs are normal
 routing outcomes rather than blocking errors. After one wider-corridor retry,
 the editor silently stores a free first waypoint or a straight incoming
-section. Snap mode remains enabled for the next click.
+section. The same rule applies independently to sections recalculated around a
+moved waypoint. Snap mode remains enabled for the next click.
 
 Overly large single sections, GeoAdmin transport or parsing failures, and
-result-limit overflow remain errors; they do not modify the existing route. An
-active operation is aborted when route mode is left or the application unmounts.
-There is no persistent logging or general retry mechanism yet.
+result-limit overflow remain errors; they do not modify the existing route. A
+failed waypoint recalculation discards the temporary preview and restores the
+last committed route state. An active operation is aborted when route mode is
+left or the application unmounts. There is no persistent logging or general
+retry mechanism yet.
 
 Information-layer loading, identify, and popup failures do not affect map
 navigation or route state. Closure and military danger-zone panels report a
@@ -1030,7 +1061,8 @@ GPX handling performs no network request.
 - Keep route controls compact and expose active modes through both color and
   cursor changes.
 - Keep route history immutable so undo and redo remain predictable.
-- Store generated section geometry instead of recalculating it during redo.
+- Store complete immutable route states so undo and redo never recalculate geometry.
+- Defer network work during waypoint dragging until release and recalculate only adjacent sections.
 - Keep experimental identify requests geographically bounded and abortable.
 - Preserve available swissTLM3D elevation when identifying graph nodes.
 - Keep elevation-profile requests abortable and independent from route editing.
@@ -1055,7 +1087,7 @@ architecture description.
 
 The main product scope is implemented. Further work should be driven by observed
 usage or validation results rather than by a fixed feature roadmap. Possible
-follow-ups include waypoint movement or insertion, focused automated regression
+follow-ups include waypoint insertion or individual deletion, focused automated regression
 tests, conservative timetable refresh, and a preprocessed routing graph or
 backend only if measured browser-routing limits justify that complexity.
 

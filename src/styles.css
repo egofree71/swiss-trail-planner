@@ -53,6 +53,16 @@ select {
   cursor: crosshair;
 }
 
+.app--route-creation .map--route-waypoint-hover,
+.app--route-creation .map--route-waypoint-hover .ol-viewport {
+  cursor: grab;
+}
+
+.app--route-creation .map--route-waypoint-dragging,
+.app--route-creation .map--route-waypoint-dragging .ol-viewport {
+  cursor: grabbing;
+}
+
 .app--route-busy .map,
 .app--route-busy .ol-viewport {
   cursor: progress;

@@ -42,9 +42,16 @@ and locations over broad but unstructured exploration.
       obvious false connection.
 - [ ] A missing or disconnected network section falls back to a straight segment
       without disabling snapping for the next click.
-- [ ] Undo and redo restore the exact stored geometry without another routing
-      request.
-- [ ] Reversal preserves the complete geometry in the opposite direction.
+- [ ] The first, an intermediate, and the final waypoint can be dragged without
+      panning the map or adding an accidental new point.
+- [ ] Dragging shows an immediate straight preview and recalculates only the one
+      or two adjacent sections after release.
+- [ ] Straight adjacent sections remain straight; routed sections are recalculated
+      and fall back independently when no network path is available.
+- [ ] Undo and redo restore complete route states, including waypoint moves,
+      without another routing request.
+- [ ] Reversal preserves the complete geometry in the opposite direction and can
+      be undone as one edit.
 - [ ] Deletion clears the editable route and its statistics.
 - [ ] Distance, ascent, descent, duration, and the elevation profile refresh
       after route changes.
@@ -114,7 +121,7 @@ Recommended minimum manual coverage:
 | Current Chromium desktop browser | Complete smoke checklist and developer-console review |
 | Current Firefox desktop browser | Map interaction, fullscreen, file import, and popups |
 | Narrow mobile-sized viewport | Control spacing, popup fit, route actions, and elevation profile |
-| Touch-capable device or emulator | Map taps, route creation, menus, and popup closing |
+| Touch-capable device or emulator | Map taps, waypoint dragging with an enlarged hit area, route creation, menus, and popup closing |
 
 Also verify keyboard interaction for location search, Layers menu closing with
 Escape, export-dialog confirmation and cancellation, and browser fullscreen
@@ -139,7 +146,7 @@ logic would benefit most from focused automated tests:
 - transport-stop filtering, mode classification, and feature deduplication;
 - stationboard validation, prediction-time sorting, date grouping, and caching;
 - GPX import validation and export serialization;
-- route-step reversal and geometry flattening;
+- route-state undo/redo, waypoint-move rebuilding, reversal, and geometry flattening;
 - route distance, ascent, descent, and duration calculations;
 - selected routing cost and topology helpers where representative fixtures can
   be kept small.

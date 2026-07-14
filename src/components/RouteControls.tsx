@@ -15,9 +15,9 @@ interface RouteControlsProps {
   isBusy: boolean;
   /** Whether the route already contains at least one waypoint. */
   hasRoute: boolean;
-  /** Whether at least one applied route step can be undone. */
+  /** Whether at least one complete route edit can be undone. */
   canUndo: boolean;
-  /** Whether at least one previously undone step can be restored. */
+  /** Whether at least one previously undone route state can be restored. */
   canRedo: boolean;
   /** Whether the route contains enough waypoints to reverse direction. */
   canReverse: boolean;
@@ -27,9 +27,9 @@ interface RouteControlsProps {
   canExport: boolean;
   /** Enters or leaves route-creation mode. */
   onToggle: () => void;
-  /** Removes the latest applied route step. */
+  /** Restores the route state before the latest edit. */
   onUndo: () => void;
-  /** Restores the latest undone route step. */
+  /** Restores the latest undone route state. */
   onRedo: () => void;
   /** Switches between network routing and direct segments. */
   onToggleSnap: () => void;

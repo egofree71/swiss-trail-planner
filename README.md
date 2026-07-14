@@ -20,7 +20,7 @@ time.
 | Area | Available functionality |
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, and route deletion |
+| Route planning | Ordered and draggable waypoints, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, and route deletion |
 | Route information | Distance, ascent, descent, estimated walking time, and a collapsible elevation profile |
 | Import and export | Read-only GPX reference loading and named GPX export with smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
@@ -49,12 +49,14 @@ http://localhost:5173/
 
 1. Use the **Layers** button to choose a background and enable or disable
    information overlays.
-2. Activate route creation, then click or tap the map to add waypoints.
+2. Activate route creation, then click or tap the map to add waypoints. Drag
+   an existing red waypoint to adjust it; adjacent sections are recalculated
+   after release.
 3. Keep snapping enabled to follow available swissTLM3D roads and paths, or
    disable it to create straight segments. A section also falls back to a
    straight line when no routable path can be resolved.
 4. Use the route controls to undo, redo, reverse, delete, or export the current
-   itinerary.
+   itinerary. A waypoint move is restored as one complete undoable edit.
 5. Load a GPX file to display it as an independent purple, read-only reference
    while planning a new red route.
 6. Outside route-creation mode, click visible closures, danger zones, or public
@@ -75,7 +77,7 @@ Current limitations:
 - dynamic swissTLM3D routing is experimental and runs entirely in the browser;
 - closures and danger zones are informational and do not automatically change
   route calculation;
-- waypoint movement, insertion, and individual deletion are not yet available;
+- waypoint insertion and individual deletion are not yet available;
 - imported GPX routes are read-only;
 - routes are not persisted locally or remotely;
 - external map, elevation, routing, and timetable services can be temporarily

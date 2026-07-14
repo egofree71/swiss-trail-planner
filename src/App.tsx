@@ -82,12 +82,16 @@ import {
   updateImportedRouteDisplay,
 } from './map/importedRoute';
 import {
+  clearRouteWaypointDragCursor,
   collectRouteCoordinates,
   createRouteDisplay,
+  createRouteWaypointDragInteraction,
+  getRouteWaypointIndexAtPixel,
   reverseRouteSteps,
   type RouteDisplay,
   type RouteStep,
   updateRouteDisplay,
+  updateRouteWaypointDragPreview,
 } from './map/route';
 import {
   createSearchResultMarker,
@@ -118,12 +122,24 @@ type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
 /** Severity of a temporary route-editing message. */
 type RouteMessageType = 'info' | 'error';
 
-/** Immutable undo/redo state for route creation. */
+/** Immutable undo/redo state for route editing. */
 interface RouteHistory {
   /** Applied route steps in display order. */
   steps: RouteStep[];
-  /** Undone steps stored in reverse restoration order. */
-  redoSteps: RouteStep[];
+  /** Complete prior route states stored in chronological order. */
+  undoStates: RouteStep[][];
+  /** Complete undone route states stored in reverse restoration order. */
+  redoStates: RouteStep[][];
+}
+
+/** Imperative drag session kept outside React renders for pointer responsiveness. */
+interface RouteWaypointDragState {
+  /** Index of the waypoint being moved. */
+  waypointIndex: number;
+  /** Original waypoint coordinate used to ignore click-only interactions. */
+  startCoordinate: Coordinate;
+  /** Route state that owns the preview and must still be current on release. */
+  expectedSteps: RouteStep[];
 }
 
 /** Duration in milliseconds for transient geolocation feedback. */
@@ -132,6 +148,8 @@ const LOCATION_MESSAGE_DURATION_MS = 6_000;
 const ROUTE_MESSAGE_DURATION_MS = 7_000;
 /** Squared distance in square map units below which a route connector is unnecessary. */
 const ROUTE_CONNECTOR_DISTANCE_SQUARED = 0.01;
+/** Minimum one-metre waypoint movement needed before recalculation begins. */
+const ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED = 1;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 /** Browser preference key for the safety-information overlay. */
@@ -242,6 +260,168 @@ function createStraightRouteStep(
   };
 }
 
+/** Adds an exact endpoint connector when network snapping leaves a small gap. */
+function connectRoutedSegmentEndpoint(
+  segment: Coordinate[],
+  coordinate: Coordinate,
+  position: 'start' | 'end',
+): void {
+  const endpoint = position === 'start' ? segment[0] : segment[segment.length - 1];
+
+  if (
+    coordinateDistanceSquared(coordinate, endpoint) <=
+    ROUTE_CONNECTOR_DISTANCE_SQUARED
+  ) {
+    return;
+  }
+
+  if (position === 'start') {
+    segment.unshift([...coordinate]);
+  } else {
+    segment.push([...coordinate]);
+  }
+}
+
+/**
+ * Recalculates only the sections adjacent to a moved waypoint.
+ *
+ * Straight sections remain straight. Network sections are routed again after
+ * release and fall back independently to a direct segment when swissTLM3D has
+ * no usable path. All non-adjacent steps retain their exact stored geometry.
+ */
+async function rebuildRouteAfterWaypointMove(
+  steps: RouteStep[],
+  waypointIndex: number,
+  targetCoordinate: Coordinate,
+  routingLoader: DynamicRoutingNetworkLoader,
+  signal: AbortSignal,
+): Promise<RouteStep[]> {
+  const nextSteps = steps.slice();
+  const originalStep = steps[waypointIndex];
+
+  if (!originalStep) {
+    return steps;
+  }
+
+  let movedWaypoint: Coordinate;
+
+  if (waypointIndex === 0) {
+    if (originalStep.mode === 'network') {
+      const snappedCoordinate = await routingLoader.snap(
+        targetCoordinate,
+        signal,
+      );
+
+      if (snappedCoordinate) {
+        movedWaypoint = [...snappedCoordinate];
+        nextSteps[0] = {
+          ...originalStep,
+          waypoint: movedWaypoint,
+          segment: null,
+          mode: 'network',
+        };
+      } else {
+        movedWaypoint = [...targetCoordinate];
+        nextSteps[0] = {
+          ...originalStep,
+          waypoint: movedWaypoint,
+          segment: null,
+          mode: 'straight',
+        };
+      }
+    } else {
+      movedWaypoint = [...targetCoordinate];
+      nextSteps[0] = {
+        ...originalStep,
+        waypoint: movedWaypoint,
+        segment: null,
+      };
+    }
+  } else {
+    const previousStep = steps[waypointIndex - 1];
+
+    if (originalStep.mode === 'network') {
+      const routedPath = await routingLoader.route(
+        previousStep.waypoint,
+        targetCoordinate,
+        signal,
+      );
+
+      if (routedPath && routedPath.coordinates.length >= 2) {
+        const segment = routedPath.coordinates.map(
+          (coordinate): Coordinate => [...coordinate],
+        );
+        connectRoutedSegmentEndpoint(
+          segment,
+          previousStep.waypoint,
+          'start',
+        );
+        movedWaypoint = [...segment[segment.length - 1]];
+        nextSteps[waypointIndex] = {
+          ...originalStep,
+          waypoint: movedWaypoint,
+          segment,
+          mode: 'network',
+        };
+      } else {
+        movedWaypoint = [...targetCoordinate];
+        nextSteps[waypointIndex] = createStraightRouteStep(
+          previousStep,
+          movedWaypoint,
+        );
+      }
+    } else {
+      movedWaypoint = [...targetCoordinate];
+      nextSteps[waypointIndex] = createStraightRouteStep(
+        previousStep,
+        movedWaypoint,
+      );
+    }
+  }
+
+  const nextStep = steps[waypointIndex + 1];
+
+  if (!nextStep) {
+    return nextSteps;
+  }
+
+  if (nextStep.mode === 'network') {
+    const routedPath = await routingLoader.route(
+      movedWaypoint,
+      nextStep.waypoint,
+      signal,
+    );
+
+    if (routedPath && routedPath.coordinates.length >= 2) {
+      const segment = routedPath.coordinates.map(
+        (coordinate): Coordinate => [...coordinate],
+      );
+      connectRoutedSegmentEndpoint(segment, movedWaypoint, 'start');
+      // Only the selected waypoint may move. Preserve the following waypoint
+      // exactly even if the routing graph snaps a few centimetres away from it.
+      connectRoutedSegmentEndpoint(segment, nextStep.waypoint, 'end');
+      nextSteps[waypointIndex + 1] = {
+        ...nextStep,
+        segment,
+        mode: 'network',
+      };
+    } else {
+      nextSteps[waypointIndex + 1] = {
+        ...nextStep,
+        segment: [movedWaypoint, [...nextStep.waypoint]],
+        mode: 'straight',
+      };
+    }
+  } else {
+    nextSteps[waypointIndex + 1] = {
+      ...nextStep,
+      segment: [movedWaypoint, [...nextStep.waypoint]],
+    };
+  }
+
+  return nextSteps;
+}
+
 /** Root application component and sole owner of the OpenLayers Map instance. */
 export default function App() {
   const { language, t } = useI18n();
@@ -268,8 +448,11 @@ export default function App() {
   const routeMessageTimerRef = useRef<number | null>(null);
   const routeHistoryRef = useRef<RouteHistory>({
     steps: [],
-    redoSteps: [],
+    undoStates: [],
+    redoStates: [],
   });
+  const routeWaypointDragStateRef =
+    useRef<RouteWaypointDragState | null>(null);
   const routeCreationActiveRef = useRef(false);
   const routeCreationSessionRef = useRef(0);
   const routeOperationPendingRef = useRef(false);
@@ -369,13 +552,24 @@ export default function App() {
     setRouteElevationStatus('loading');
   };
 
+  /** Records one complete route mutation and clears obsolete redo states. */
+  const commitRouteMutation = (nextSteps: RouteStep[]) => {
+    const currentHistory = routeHistoryRef.current;
+
+    commitRouteHistory({
+      steps: nextSteps,
+      undoStates: [...currentHistory.undoStates, currentHistory.steps],
+      redoStates: [],
+    });
+  };
+
   /**
-   * Commits an asynchronously generated route step only if history and editing
-   * mode still match the state captured when the operation began.
+   * Commits an asynchronous route mutation only if its captured state and
+   * editing session are still current.
    */
-  const appendRouteStep = (
+  const commitAsyncRouteMutation = (
     expectedSteps: RouteStep[],
-    step: RouteStep,
+    nextSteps: RouteStep[],
   ): boolean => {
     const currentHistory = routeHistoryRef.current;
 
@@ -386,14 +580,18 @@ export default function App() {
       return false;
     }
 
-    commitRouteHistory({
-      steps: [...currentHistory.steps, step],
-      redoSteps: [],
-    });
+    commitRouteMutation(nextSteps);
     return true;
   };
 
-  /** Moves the latest applied step to the redo stack without recomputing geometry. */
+  /** Appends one generated route step as a normal undoable mutation. */
+  const appendRouteStep = (
+    expectedSteps: RouteStep[],
+    step: RouteStep,
+  ): boolean =>
+    commitAsyncRouteMutation(expectedSteps, [...expectedSteps, step]);
+
+  /** Restores the complete route state preceding the latest edit. */
   const undoRoutePoint = () => {
     if (routeOperationPendingRef.current) {
       return;
@@ -401,19 +599,21 @@ export default function App() {
 
     const currentHistory = routeHistoryRef.current;
 
-    if (currentHistory.steps.length === 0) {
+    if (currentHistory.undoStates.length === 0) {
       return;
     }
 
-    const lastStep = currentHistory.steps[currentHistory.steps.length - 1];
+    const previousSteps =
+      currentHistory.undoStates[currentHistory.undoStates.length - 1];
 
     commitRouteHistory({
-      steps: currentHistory.steps.slice(0, -1),
-      redoSteps: [...currentHistory.redoSteps, lastStep],
+      steps: previousSteps,
+      undoStates: currentHistory.undoStates.slice(0, -1),
+      redoStates: [...currentHistory.redoStates, currentHistory.steps],
     });
   };
 
-  /** Restores the latest undone step with the exact geometry stored in history. */
+  /** Restores the complete route state removed by the latest undo. */
   const redoRoutePoint = () => {
     if (routeOperationPendingRef.current) {
       return;
@@ -421,39 +621,36 @@ export default function App() {
 
     const currentHistory = routeHistoryRef.current;
 
-    if (currentHistory.redoSteps.length === 0) {
+    if (currentHistory.redoStates.length === 0) {
       return;
     }
 
-    const restoredStep =
-      currentHistory.redoSteps[currentHistory.redoSteps.length - 1];
+    const restoredSteps =
+      currentHistory.redoStates[currentHistory.redoStates.length - 1];
 
     commitRouteHistory({
-      steps: [...currentHistory.steps, restoredStep],
-      redoSteps: currentHistory.redoSteps.slice(0, -1),
+      steps: restoredSteps,
+      undoStates: [...currentHistory.undoStates, currentHistory.steps],
+      redoStates: currentHistory.redoStates.slice(0, -1),
     });
   };
 
-  /** Reverses the exact stored route geometry and starts future edits at its former beginning. */
+  /** Reverses the exact geometry as one undoable route edit. */
   const reverseRoute = () => {
     if (routeOperationPendingRef.current) {
       return;
     }
 
-    const currentHistory = routeHistoryRef.current;
+    const currentSteps = routeHistoryRef.current.steps;
 
-    if (currentHistory.steps.length < 2) {
+    if (currentSteps.length < 2) {
       return;
     }
 
-    commitRouteHistory({
-      steps: reverseRouteSteps(currentHistory.steps),
-      // Redo entries belong to the old direction and cannot be applied safely.
-      redoSteps: [],
-    });
+    commitRouteMutation(reverseRouteSteps(currentSteps));
   };
 
-  /** Clears the complete route while leaving route-creation mode ready for a new start. */
+  /** Clears the complete route and its edit history while keeping creation active. */
   const deleteRoute = () => {
     if (
       routeOperationPendingRef.current ||
@@ -464,7 +661,8 @@ export default function App() {
 
     commitRouteHistory({
       steps: [],
-      redoSteps: [],
+      undoStates: [],
+      redoStates: [],
     });
     clearRouteMessageTimer();
     setRouteMessage('');
@@ -609,6 +807,92 @@ export default function App() {
       setRouteMessage('');
       routeMessageTimerRef.current = null;
     }, ROUTE_MESSAGE_DURATION_MS);
+  };
+
+  /** Recalculates the one or two sections touching a released waypoint. */
+  const moveRouteWaypoint = (
+    dragState: RouteWaypointDragState,
+    targetCoordinate: Coordinate,
+  ) => {
+    if (
+      routeOperationPendingRef.current ||
+      routeHistoryRef.current.steps !== dragState.expectedSteps
+    ) {
+      const display = routeDisplayRef.current;
+
+      if (display) {
+        updateRouteDisplay(display, routeHistoryRef.current.steps);
+      }
+      return;
+    }
+
+    const routeCreationSession = routeCreationSessionRef.current;
+    routeOperationPendingRef.current = true;
+    setIsRouteOperationPending(true);
+
+    const abortController = new AbortController();
+    routingAbortControllerRef.current = abortController;
+
+    void (async () => {
+      clearRouteMessageTimer();
+      setRouteMessage('');
+
+      try {
+        const routingLoader = routingLoaderRef.current;
+
+        if (!routingLoader) {
+          throw new Error('The dynamic routing loader is unavailable.');
+        }
+
+        const nextSteps = await rebuildRouteAfterWaypointMove(
+          dragState.expectedSteps,
+          dragState.waypointIndex,
+          targetCoordinate,
+          routingLoader,
+          abortController.signal,
+        );
+
+        if (
+          routeCreationSessionRef.current !== routeCreationSession ||
+          routeHistoryRef.current.steps !== dragState.expectedSteps
+        ) {
+          return;
+        }
+
+        commitAsyncRouteMutation(dragState.expectedSteps, nextSteps);
+      } catch (error) {
+        if (isAbortedRequest(error, abortController.signal)) {
+          return;
+        }
+
+        if (routeCreationSessionRef.current !== routeCreationSession) {
+          return;
+        }
+
+        const display = routeDisplayRef.current;
+
+        if (display) {
+          updateRouteDisplay(display, routeHistoryRef.current.steps);
+        }
+
+        if (error instanceof RoutingAreaTooLargeError) {
+          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
+          return;
+        }
+
+        console.error('Unable to recalculate the moved route waypoint.', error);
+        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
+      } finally {
+        const ownsCurrentOperation =
+          routingAbortControllerRef.current === abortController;
+
+        if (ownsCurrentOperation) {
+          routingAbortControllerRef.current = null;
+          routeOperationPendingRef.current = false;
+          setIsRouteOperationPending(false);
+        }
+      }
+    })();
   };
 
   const changeZoom = (delta: number) => {
@@ -1343,6 +1627,93 @@ export default function App() {
   }, [routeHistory.steps]);
 
   /**
+   * Enables direct waypoint movement only while route creation is active.
+   * Pointer movement stays local; routing begins once the waypoint is released.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    const display = routeDisplayRef.current;
+
+    if (!map || !display || !isRouteCreationActive) {
+      return;
+    }
+
+    const interaction = createRouteWaypointDragInteraction(display, {
+      canStart: () =>
+        routeCreationActiveRef.current &&
+        !routeOperationPendingRef.current &&
+        routeHistoryRef.current.steps.length > 0,
+      onStart: (waypointIndex) => {
+        const expectedSteps = routeHistoryRef.current.steps;
+        const step = expectedSteps[waypointIndex];
+
+        if (!step) {
+          return;
+        }
+
+        routeWaypointDragStateRef.current = {
+          waypointIndex,
+          startCoordinate: [...step.waypoint],
+          expectedSteps,
+        };
+        updateRouteWaypointDragPreview(
+          display,
+          expectedSteps,
+          waypointIndex,
+          step.waypoint,
+        );
+      },
+      onDrag: (waypointIndex, coordinate) => {
+        const dragState = routeWaypointDragStateRef.current;
+
+        if (
+          !dragState ||
+          dragState.waypointIndex !== waypointIndex ||
+          routeHistoryRef.current.steps !== dragState.expectedSteps
+        ) {
+          return;
+        }
+
+        updateRouteWaypointDragPreview(
+          display,
+          dragState.expectedSteps,
+          waypointIndex,
+          coordinate,
+        );
+      },
+      onEnd: (waypointIndex, coordinate) => {
+        const dragState = routeWaypointDragStateRef.current;
+        routeWaypointDragStateRef.current = null;
+
+        if (
+          !dragState ||
+          dragState.waypointIndex !== waypointIndex ||
+          routeHistoryRef.current.steps !== dragState.expectedSteps ||
+          !containsCoordinate(MAP_EXTENT, coordinate) ||
+          coordinateDistanceSquared(
+            dragState.startCoordinate,
+            coordinate,
+          ) <= ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED
+        ) {
+          updateRouteDisplay(display, routeHistoryRef.current.steps);
+          return;
+        }
+
+        moveRouteWaypoint(dragState, coordinate);
+      },
+    });
+
+    map.addInteraction(interaction);
+
+    return () => {
+      map.removeInteraction(interaction);
+      clearRouteWaypointDragCursor(map);
+      routeWaypointDragStateRef.current = null;
+      updateRouteDisplay(display, routeHistoryRef.current.steps);
+    };
+  }, [isRouteCreationActive, language]);
+
+  /**
    * Retrieves a fresh elevation profile after route history settles. Previous
    * requests are aborted so rapid undo/redo actions cannot publish stale data.
    */
@@ -1398,9 +1769,20 @@ export default function App() {
       return;
     }
 
-    const handleRouteClick = (event: { coordinate: Coordinate }) => {
+    const handleRouteClick = (event: MapBrowserEvent) => {
       // Ignore extra clicks while the current endpoint is still being resolved.
       if (routeOperationPendingRef.current) {
+        return;
+      }
+
+      const display = routeDisplayRef.current;
+
+      // A click on an existing waypoint belongs to the drag interaction and
+      // must never append a new endpoint, even when no movement occurred.
+      if (
+        display &&
+        getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null
+      ) {
         return;
       }
 
@@ -1593,10 +1975,10 @@ export default function App() {
           isBusy={isRouteOperationPending}
           hasRoute={routeHistory.steps.length > 0}
           canUndo={
-            !isRouteOperationPending && routeHistory.steps.length > 0
+            !isRouteOperationPending && routeHistory.undoStates.length > 0
           }
           canRedo={
-            !isRouteOperationPending && routeHistory.redoSteps.length > 0
+            !isRouteOperationPending && routeHistory.redoStates.length > 0
           }
           canReverse={
             !isRouteOperationPending && routeHistory.steps.length > 1
