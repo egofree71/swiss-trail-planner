@@ -1,7 +1,8 @@
 # Swiss Trail Planner Architecture
 
-> Documented state: selectable raster backgrounds, hiking, closure, military
-> shooting-danger, and public-transport overlays,
+> Documented state: native LV95 (`EPSG:2056`) map rendering with selectable
+> raster backgrounds, hiking, closure, military shooting-danger, and
+> public-transport overlays,
 > search, geolocation, fullscreen, manual route creation with draggable,
 > insertable, and individually removable waypoints, optional loop closure, route
 > statistics, elevation profile, GPX export, and experimental
@@ -160,9 +161,9 @@ Browser
    │      ├── requests dynamic routing cells for snapped clicks
    │      └── refreshes elevation statistics after editable-route or imported-GPX changes
    │
-   ├── OpenLayers Map / View
-   │      ├── TileLayer: national map (JPEG)
-   │      ├── TileLayer: hiking trails (transparent PNG)
+   ├── OpenLayers Map / View (`EPSG:2056`)
+   │      ├── WMTS TileLayer: national map in the native LV95 grid
+   │      ├── WMTS TileLayer: hiking trails in the native LV95 grid
    │      ├── TileLayer: military shooting danger zones (transparent WMS)
    │      ├── VectorLayer: selected military danger-zone polygon
    │      ├── TileLayer: hiking closures and detours (transparent WMS)
@@ -205,7 +206,8 @@ selected route section.
 |---|---|
 | React 19 | UI components, search state, status messages, and language context |
 | TypeScript 5 | Static typing and compile-time verification |
-| OpenLayers 10 | Map, view, layers, projections, markers, controls, and route-shaping pointer interaction |
+| OpenLayers 10 | Map, native LV95 view, layers, projections, markers, controls, and route-shaping pointer interaction |
+| proj4 | EPSG:2056 definition and OpenLayers transformation registration |
 | Vite 8 | Development server, production build, and Pages base path |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
@@ -226,20 +228,31 @@ selected route section.
 
 ## 6. Map services
 
-The selectable backgrounds and hiking overlay use direct XYZ-compatible WMTS
-URLs in `EPSG:3857`.
+The selectable backgrounds and rendered hiking overlay use the official WMTS
+service directly in the native Swiss LV95 grid (`EPSG:2056`).
+`src/map/projection.ts` contains the published resolution pyramid, matrix sizes,
+and projection registration; `src/map/config.ts` builds explicit OpenLayers
+`WMTSTileGrid` instances rather than relying on an XYZ/Web-Mercator shortcut.
 
-The single OpenLayers base layer swaps between three official JPEG sources:
+The view exposes native matrix levels 0 through 28 and may interpolate smoothly
+between them. Matrix 24 belongs to the documented pyramid but is not requested
+because the service does not expose it. Ordinary national-map and overlay
+sources request matrices 0 through 23, 25, and 26. SWISSIMAGE additionally
+requests matrices 27 and 28; ordinary sources are allowed to stretch their
+finest published tiles at those two client zoom levels.
+
+The single OpenLayers base layer swaps between three official sources:
 
 - `ch.swisstopo.pixelkarte-farbe` for the color national map;
 - `ch.swisstopo.pixelkarte-grau` for the mixed-scale grey national map;
 - `ch.swisstopo.landeskarte-grau-10` for detailed grey rendering at close zooms;
 - `ch.swisstopo.swissimage` for the current SWISSIMAGE aerial orthophoto mosaic.
 
-Changing the source preserves the view and every overlay. The hiking overlay
-uses transparent PNG tiles and has `minZoom` set to 12. Because OpenLayers
-treats this boundary as exclusive, it normally appears at integer zoom level
-13. The overlay remains visible above all three backgrounds.
+Changing the source preserves the native LV95 view and every overlay. The
+hiking overlay uses transparent PNG tiles and has `minZoom` set to 18. Because
+OpenLayers treats this boundary as exclusive, it normally appears from native
+level 19, whose resolution is 20 metres per pixel. The overlay remains visible
+above all three backgrounds.
 
 The hiking overlay is already rendered and therefore cannot expose individual
 trail geometries or attributes.
@@ -274,7 +287,7 @@ visibility choice is stored independently in local browser storage.
 
 When the layer is visible and route creation is inactive, the same map-click
 pipeline identifies a matching danger-zone polygon and asks GeoAdmin to return
-its geometry in EPSG:3857 GeoJSON. The official WMS and a small client-side
+its geometry in EPSG:2056 GeoJSON. The official WMS and a small client-side
 selection layer are rendered above hiking closures and public-transport stop
 symbols, while imported and editable routes remain above the safety overlay.
 The selected polygon uses a pale fill and orange outline. The highlight is
@@ -293,9 +306,10 @@ The source dataset also contains operational and retired points that are not
 useful when planning passenger access. At detailed zoom levels, an abortable
 viewport loader calls the GeoAdmin identify endpoint, recursively subdivides
 dense requests that reach the 200-result limit, and converts point geometry and
-selected attributes into client-side OpenLayers features. The identify scale is
-capped at the equivalent of Web Mercator zoom 17: closer portrayals expose
-technical sub-points such as platform numbers instead of stable passenger stops.
+selected attributes into client-side OpenLayers features. The identify scale
+is capped at native level 25 (1 metre per pixel): closer
+portrayals expose technical sub-points such as platform numbers instead of
+stable passenger stops.
 The real viewport still determines which geometry is requested.
 
 Entries without a stop name, numeric-only operating labels, and entries whose
@@ -315,9 +329,9 @@ normalized name or distance: one official feature may already expose several
 recognized transport modes, while two different identifiers can represent
 neighbouring facilities with different names, timetables, or CFF deep links. A
 multimodal feature receives one marker using the highest-priority mode symbol.
-Symbols use 20 pixels at broad urban and regional scales, 23 pixels at zooms
-15 and 16, then grow progressively to 29 pixels at zoom 17, 33 pixels at zoom
-18, and 37 pixels from zoom 19. This keeps dense city views readable while
+Symbols use 20 pixels at broad urban and regional scales, 23 pixels from native
+levels 21 through 24, then grow to 29 pixels at level 25, 33 pixels at level 26,
+and 37 pixels from level 27. This keeps dense city views readable while
 preserving clear symbols during detailed hiking planning. Locally bundled SVG
 pictograms use a darker Swiss-map
 blue and remain sharp when OpenLayers renders them on high-density displays.
@@ -366,7 +380,9 @@ For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
 - `ch.swisstopo.swisstlm3d-strassen` for roads and paths;
 - `ch.swisstopo.swisstlm3d-wanderwege` for official hiking routes.
 
-The dynamic loader uses regular 2.4 km routing cells. Each cell is internally
+The dynamic loader requests geometries directly in `EPSG:2056` and uses regular
+2.4 km routing cells whose dimensions are now true LV95 metres. Each cell is
+internally
 split into smaller identify requests, and a request that reaches the API's
 200-feature limit is recursively subdivided rather than silently accepting a
 truncated result. Empty cells are valid near borders, lakes, and areas outside
@@ -375,18 +391,24 @@ national bulk-data architecture.
 
 ## 7. Coordinate reference systems
 
-The OpenLayers view and tile layers use Web Mercator (`EPSG:3857`).
+The OpenLayers view, WMTS backgrounds, WMS overlays, vector features, editable
+route, imported-route display, and dynamic routing graph all use Swiss LV95
+(`EPSG:2056`). Keeping internal geometry in the national metric projection
+avoids browser reprojection of the swisstopo raster maps and gives routing,
+snapping, hit tolerances, and cell sizes a consistent metre-based coordinate
+system.
 
-Human-readable centers and bounds, browser geolocation, and SearchServer
-results use WGS 84 longitude/latitude (`EPSG:4326`). OpenLayers transforms those
-coordinates with `fromLonLat()` before displaying them.
+`src/map/projection.ts` defines EPSG:2056 through `proj4`, registers it with
+OpenLayers before map creation, publishes the official LV95 WMTS extent and
+resolution pyramid, and owns the two explicit WGS 84 boundary conversions.
 
-Downloaded swissTLM3D data is distributed in LV95 (`EPSG:2056`). The current
-dynamic routing prototype asks GeoAdmin to return geometries directly in
-`EPSG:3857` so
-they can be displayed and routed without a second client-side reprojection.
-When Z coordinates are returned, they are preserved in graph-node identity to
-avoid connecting vertically separated crossings.
+WGS 84 longitude/latitude (`EPSG:4326`) remains the exchange format for browser
+geolocation, SearchServer results, and GPX files. These coordinates are
+converted to LV95 when they enter the map and converted back only for GPX export
+or geodesic calculations. GeoAdmin identify requests use `sr=2056`, so closure,
+danger-zone, public-transport, and swissTLM3D geometries arrive directly in the
+map projection. When swissTLM3D Z coordinates are returned, elevation remains
+part of graph-node identity to avoid connecting vertically separated crossings.
 
 ## 8. Location search
 
@@ -422,8 +444,9 @@ The component supports mouse, touch, and keyboard interaction:
 - Escape closes the panel;
 - a pointer press outside closes the panel.
 
-Selecting a result transforms its longitude and latitude to `EPSG:3857`,
-updates a dedicated marker, and animates the view to zoom level 13.
+Selecting a result transforms its WGS 84 longitude and latitude to
+`EPSG:2056`, updates a dedicated marker, and animates the view to native level
+19 (20 metres per pixel).
 
 ### 8.1 Interface localization
 
@@ -453,8 +476,8 @@ The browser may display a permission prompt. The application does not request
 the position during startup and does not use continuous tracking.
 
 A successful position updates a dedicated vector marker, recenters the map, and
-raises the view to at least zoom level 17. Positions outside the configured map
-extent are rejected.
+raises the view to at least native level 21 (5 metres per pixel). Positions
+outside the configured map extent are rejected.
 
 Browser geolocation requires a secure context. Development on `localhost` is
 supported, while a deployed version must use HTTPS.
@@ -574,12 +597,10 @@ during asynchronous network work, including recalculation after a drag or loop
 closure.
 
 `src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
-flattened route geometry. For altitude-dependent figures, it converts the route
-from Web Mercator through WGS 84 to approximate LV95 coordinates and sends a
-bounded POST request to GeoAdmin's elevation-profile service. The official
-swisstopo approximation is sufficiently precise for terrain samples spaced at
-about 20 metres. The service applies a small moving-average offset before the
-client accumulates positive and negative elevation changes. The same ordered
+flattened LV95 route geometry. For altitude-dependent figures, it sends the
+native route coordinates directly in a bounded POST request to GeoAdmin's
+elevation-profile service. The service applies a small moving-average offset
+before the client accumulates positive and negative elevation changes. The same ordered
 samples feed the slope-sensitive hiking-time polynomial published by Schweizer
 Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020). Each
 consecutive sample contributes time from its horizontal distance and local
@@ -758,7 +779,9 @@ swiss-trail-planner/
 │   │   ├── geoAdminPopup.ts
 │   │   ├── config.ts
 │   │   ├── importedRoute.ts
+│   │   ├── projection.ts
 │   │   ├── route.ts
+│   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
 │   │   └── userLocation.ts
 │   ├── routing/
@@ -787,8 +810,9 @@ swiss-trail-planner/
 
 Owns the OpenLayers map instance and coordinates map-level behavior.
 
-It creates the tile and vector layers, replaces the selected base-map source,
-handles map, geolocation, fullscreen, single-current-itinerary GPX loading, information-layer
+It creates the native LV95 view, WMTS/WMS and vector layers, replaces the
+selected base-map source, and handles map, geolocation, fullscreen,
+single-current-itinerary GPX loading, information-layer
 visibility and feature inspection, route-creation mode, immutable route edit
 snapshots, waypoint move and insertion recalculation, loop closing and reopening, dynamic graph loading, route
 statistics, and temporary routing status. It
@@ -950,13 +974,13 @@ map state.
 
 Owns the transient map marker shown while the elevation profile is explored. It
 precomputes geodesic cumulative distances for each displayed route segment,
-interpolates the corresponding Web Mercator coordinate through a binary search,
-and never creates a connector across separate imported GPX segments.
+interpolates the corresponding LV95 coordinate through a binary search, and
+never creates a connector across separate imported GPX segments.
 
 ### `src/metrics/routeMetrics.ts`
 
-Calculates geodesic distance, converts route coordinates to LV95 for the
-official elevation-profile service, validates ordered distance/elevation
+Calculates geodesic distance from LV95 route geometry, sends native coordinates
+to the official elevation-profile service, validates ordered distance/elevation
 samples, accumulates ascent and descent, and applies the published Schweizer
 Wanderwege 15th-degree hiking-time model to each sampled section. The same
 samples feed the profile chart. Requests are
@@ -965,8 +989,8 @@ abortable so stale route histories cannot update the UI.
 ### `src/export/gpx.ts`
 
 Simplifies every normal or closing route section independently with iterative
-Ramer-Douglas-Peucker in a local metric plane, converts the retained Web
-Mercator geometry to WGS 84, builds a GPX 1.1 track, and starts a browser
+Ramer-Douglas-Peucker in a local metric plane, converts the retained LV95
+geometry to WGS 84, builds a GPX 1.1 track, and starts a browser
 download through a temporary object URL. Section endpoints are never removed,
 which preserves waypoint order and loop closure. The name entered in the export
 dialog is XML-escaped for metadata and the track node, sanitized for a portable
@@ -1002,8 +1026,9 @@ network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
 
-Fetches bounded road and hiking geometries from the GeoAdmin identify endpoint.
-It owns request tiling, recursive subdivision at result limits, response
+Fetches bounded road and hiking geometries from the GeoAdmin identify endpoint
+directly in EPSG:2056. It owns request tiling, recursive subdivision at result
+limits, response
 normalization, attribute extraction, deduplication, cancellation, and empty-cell
 handling.
 
@@ -1046,10 +1071,16 @@ Creates and updates the vector marker for the selected search result.
 
 Creates and updates the separate vector marker for browser geolocation.
 
+### `src/map/projection.ts`
+
+Registers EPSG:2056 through `proj4`, exposes the official LV95 WMTS extent,
+resolutions, matrix availability, and matrix sizes, and provides the only WGS 84
+to LV95 conversion helpers used at external data boundaries.
+
 ### `src/map/config.ts`
 
-Centralizes provider identifiers, attribution, map extent, zoom settings, and
-tile-source factories.
+Centralizes provider identifiers, attribution, native LV95 view constraints,
+zoom-level semantics, and explicit WMTS tile-grid/source factories.
 
 ### `src/styles.css`
 
@@ -1074,19 +1105,24 @@ messages, and OpenLayers control placement.
 
 ## 17. Runtime flow
 
-1. The browser loads the React application and resolves a stored or browser language.
+1. The browser registers EPSG:2056 through `proj4`, then resolves a stored or
+   browser language.
 2. The language provider updates document metadata and exposes localized strings.
-3. `App` creates the OpenLayers map, tile layers, marker layers, editable route layer, and imported-route layer.
-4. The default color base map begins loading from `wmts.geo.admin.ch`.
+3. `App` creates the native LV95 OpenLayers view, tile layers, marker layers,
+   editable route layer, and imported-route layer.
+4. The default color base map begins loading from the native `2056` WMTS
+   matrix set at `wmts.geo.admin.ch`.
 5. The Layers menu changes the base-map source or toggles information overlays.
-6. The rendered hiking overlay starts loading when zoom moves beyond level 12.
+6. The rendered hiking overlay starts loading when the native view moves
+   beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
 9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
 10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
 11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices.
-12. Selecting a valid GPX leaves route creation, clears editable route history,
-    replaces the previous imported itinerary, and fits the map to its geometry.
+12. Selecting a valid GPX converts its WGS 84 coordinates to LV95, leaves route
+    creation, clears editable route history, replaces the previous imported
+    itinerary, and fits the map to its geometry.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
@@ -1098,8 +1134,10 @@ messages, and OpenLayers control placement.
 17. With snapping disabled, a map click stores a direct section immediately.
 18. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
-19. Dense identify requests are subdivided when either layer reaches 200 results.
-20. Returned road vertices become graph nodes and edges; hiking geometry marks
+19. Dense EPSG:2056 identify requests are subdivided when either layer reaches
+    200 results.
+20. Returned LV95 road vertices become graph nodes and edges; hiking geometry
+    marks
     preferred edges through spatial matching.
 21. The first clicked point is snapped to the nearest walkable segment.
 22. Later clicks derive a corridor of cells between waypoints, load only missing
@@ -1142,7 +1180,7 @@ messages, and OpenLayers control placement.
     one undoable edit.
 40. Deletion clears the current route and all undo/redo states and hides the summary.
 41. GPX export opens a modal naming form before any XML is generated.
-42. Confirming the form converts the flattened route to WGS 84, merges exact
+42. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
 43. Changing language updates interface text, number formatting, document
@@ -1209,6 +1247,8 @@ to the normal GeoAdmin profile service.
 
 - Keep strict TypeScript enabled.
 - Centralize provider and geographic constants.
+- Keep internal map, overlay, editable-route, and routing geometry in EPSG:2056;
+  transform only at WGS 84 exchange boundaries.
 - Keep network contracts outside React components.
 - Keep every user-facing string in the typed translation dictionaries.
 - Keep search origins language-neutral and translate them in the UI layer.

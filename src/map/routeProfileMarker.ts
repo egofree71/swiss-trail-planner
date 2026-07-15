@@ -8,9 +8,9 @@ import type { Coordinate } from 'ol/coordinate.js';
 import Feature from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
 import VectorLayer from 'ol/layer/Vector.js';
-import { toLonLat } from 'ol/proj.js';
 import VectorSource from 'ol/source/Vector.js';
 import { getDistance } from 'ol/sphere.js';
+import { toWgs84 } from './projection';
 import {
   Circle as CircleStyle,
   Fill,
@@ -90,7 +90,7 @@ function measureSegment(coordinates: Coordinate[]): {
 } {
   const cumulativeDistancesMeters = [0];
   const lonLatCoordinates = coordinates.map((coordinate) =>
-    toLonLat(coordinate),
+    toWgs84(coordinate),
   );
 
   for (let index = 1; index < lonLatCoordinates.length; index += 1) {

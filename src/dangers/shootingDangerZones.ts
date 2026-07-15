@@ -17,6 +17,7 @@ import Stroke from 'ol/style/Stroke.js';
 import Style from 'ol/style/Style.js';
 import type { Language } from '../i18n/translations';
 import { sanitizeGeoAdminPopupHtml } from '../map/geoAdminPopup';
+import { MAP_PROJECTION_CODE } from '../map/projection';
 
 /** Technical GeoAdmin identifier for published shooting notices and danger zones. */
 export const SHOOTING_DANGER_ZONES_LAYER_ID = 'ch.vbs.schiessanzeigen';
@@ -55,9 +56,9 @@ interface IdentifyResponse {
 
 /** Map context required for a scale-aware identify request. */
 export interface ShootingDangerZoneIdentifyContext {
-  /** Click coordinate in the OpenLayers display projection (EPSG:3857). */
+  /** Click coordinate in the OpenLayers display projection (EPSG:2056). */
   coordinate: Coordinate;
-  /** Current visible map extent in EPSG:3857. */
+  /** Current visible map extent in EPSG:2056. */
   mapExtent: Extent;
   /** Current map canvas width and height in CSS pixels. */
   imageSize: [number, number];
@@ -97,10 +98,10 @@ function isIdentifyFeature(value: unknown): value is IdentifyFeature {
   );
 }
 
-/** GeoJSON reader configured for geometries already returned in EPSG:3857. */
+/** GeoJSON reader configured for geometries already returned in EPSG:2056. */
 const geoJsonReader = new GeoJSON({
-  dataProjection: 'EPSG:3857',
-  featureProjection: 'EPSG:3857',
+  dataProjection: MAP_PROJECTION_CODE,
+  featureProjection: MAP_PROJECTION_CODE,
 });
 
 /** Pale selection fill and orange outline inspired by the federal map viewer. */
@@ -193,7 +194,7 @@ export function createShootingDangerZonesSource(): TileWMS {
     },
     attributions: SHOOTING_DANGER_ZONES_ATTRIBUTION,
     crossOrigin: 'anonymous',
-    projection: 'EPSG:3857',
+    projection: MAP_PROJECTION_CODE,
     wrapX: false,
   });
 }
@@ -248,7 +249,7 @@ export async function identifyShootingDangerZone(
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     returnGeometry: 'true',
     geometryFormat: 'geojson',
-    sr: '3857',
+    sr: '2056',
     lang: context.language,
     limit: '5',
   });
@@ -292,7 +293,7 @@ export async function fetchShootingDangerZonePopup(
   const { context } = dangerZone;
   const parameters = new URLSearchParams({
     lang: context.language,
-    sr: '3857',
+    sr: '2056',
     mapExtent: context.mapExtent.join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     coord: `${context.coordinate[0]},${context.coordinate[1]}`,

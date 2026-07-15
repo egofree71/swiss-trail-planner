@@ -19,7 +19,7 @@ time.
 
 | Area | Available functionality |
 |---|---|
-| Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
+| Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations whose pointer position is mirrored on the map |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with sub-metre geometry simplification and smoothed elevations when available |
@@ -39,10 +39,10 @@ npm install
 npm run dev
 ```
 
-Vite then displays a local address, usually:
+Vite then displays the project address, usually:
 
 ```text
-http://localhost:5173/
+http://localhost:5173/swiss-trail-planner/
 ```
 
 ## Basic usage
@@ -77,7 +77,9 @@ pressed. Deployed geolocation requires HTTPS.
 The application uses official swisstopo backgrounds and swissTLM3D geodata,
 official hiking-closure and military danger-zone layers, Federal Office of
 Transport stop data, GeoAdmin services, and `transport.opendata.ch` departure
-data.
+data. The map, editable route, information layers, and routing graph use native
+Swiss LV95 coordinates (`EPSG:2056`); WGS 84 conversion is limited to browser
+geolocation, location-search results, and GPX input or output.
 Walking-time estimates apply the slope-sensitive model published by Schweizer
 Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 

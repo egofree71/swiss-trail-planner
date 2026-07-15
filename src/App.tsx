@@ -15,8 +15,7 @@ import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
 import TileLayer from 'ol/layer/Tile.js';
 import type TileWMS from 'ol/source/TileWMS.js';
-import type XYZ from 'ol/source/XYZ.js';
-import { fromLonLat } from 'ol/proj.js';
+import type WMTS from 'ol/source/WMTS.js';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
@@ -71,12 +70,18 @@ import {
   DEFAULT_MAP_CENTER,
   GRAY_DETAIL_MIN_ZOOM,
   HIKING_TRAILS_MIN_ZOOM,
+  IMPORTED_ROUTE_MAX_ZOOM,
   LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
   MAP_ZOOM,
   USER_LOCATION_ZOOM,
   type BaseMapStyle,
 } from './map/config';
+import {
+  fromWgs84,
+  LV95_VIEW_RESOLUTIONS,
+  MAP_PROJECTION_CODE,
+} from './map/projection';
 import {
   createImportedRouteDisplay,
   type ImportedRouteDisplay,
@@ -804,8 +809,8 @@ export default function App() {
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
-  const baseMapLayerRef = useRef<TileLayer<XYZ> | null>(null);
-  const grayDetailLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const baseMapLayerRef = useRef<TileLayer<WMTS> | null>(null);
+  const grayDetailLayerRef = useRef<TileLayer<WMTS> | null>(null);
   const trailClosuresLayerRef = useRef<TileLayer<TileWMS> | null>(null);
   const shootingDangerZonesLayerRef =
     useRef<TileLayer<TileWMS> | null>(null);
@@ -1260,7 +1265,7 @@ export default function App() {
       }
 
       const projectedSegments = importedRoute.segments.map((segment) =>
-        segment.coordinates.map((coordinate) => fromLonLat(coordinate)),
+        segment.coordinates.map((coordinate) => fromWgs84(coordinate)),
       );
       let embeddedElevationSummary: RouteElevationSummary | null = null;
 
@@ -1313,7 +1318,7 @@ export default function App() {
       if (importedExtent) {
         map.getView().fit(importedExtent, {
           duration: 600,
-          maxZoom: 16,
+          maxZoom: IMPORTED_ROUTE_MAX_ZOOM,
           padding: [80, 80, 180, 80],
         });
       }
@@ -1728,7 +1733,7 @@ export default function App() {
       return;
     }
 
-    const coordinate = fromLonLat([
+    const coordinate = fromWgs84([
       result.longitude,
       result.latitude,
     ]);
@@ -1768,7 +1773,7 @@ export default function App() {
 
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        const coordinate = fromLonLat([
+        const coordinate = fromWgs84([
           coords.longitude,
           coords.latitude,
         ]);
@@ -1841,10 +1846,10 @@ export default function App() {
     const importedRouteDisplay = createImportedRouteDisplay();
     const routeDisplay = createRouteDisplay();
     const routeProfileMarker = createRouteProfileMarker();
-    const baseMapLayer = new TileLayer<XYZ>({
+    const baseMapLayer = new TileLayer<WMTS>({
       source: rasterSource,
     });
-    const grayDetailLayer = new TileLayer<XYZ>({
+    const grayDetailLayer = new TileLayer<WMTS>({
       source: grayDetailSource,
       minZoom: GRAY_DETAIL_MIN_ZOOM,
       visible: false,
@@ -1932,6 +1937,8 @@ export default function App() {
         routeProfileMarker.layer,
       ],
       view: new View({
+        projection: MAP_PROJECTION_CODE,
+        resolutions: [...LV95_VIEW_RESOLUTIONS],
         center: DEFAULT_MAP_CENTER,
         zoom: MAP_ZOOM.initial,
         minZoom: MAP_ZOOM.minimum,

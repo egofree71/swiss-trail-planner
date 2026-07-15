@@ -1,5 +1,16 @@
-import { fromLonLat, transformExtent } from 'ol/proj.js';
-import XYZ from 'ol/source/XYZ.js';
+import { transformExtent } from 'ol/proj.js';
+import WMTS from 'ol/source/WMTS.js';
+import WMTSTileGrid from 'ol/tilegrid/WMTS.js';
+import {
+  fromWgs84,
+  LV95_FINE_SOURCE_MATRIX_INDICES,
+  LV95_MATRIX_SIZES,
+  LV95_STANDARD_SOURCE_MATRIX_INDICES,
+  LV95_VIEW_RESOLUTIONS,
+  LV95_WMTS_EXTENT,
+  MAP_PROJECTION_CODE,
+  WGS84_PROJECTION_CODE,
+} from './projection';
 
 /** Backgrounds available through the official swisstopo WMTS service. */
 export type BaseMapStyle = 'color' | 'gray' | 'aerial';
@@ -32,106 +43,112 @@ const SWISSTOPO_ATTRIBUTION =
  */
 const MAP_BOUNDS_WGS84 = [5.7, 45.65, 10.75, 47.95];
 
-export const DEFAULT_MAP_CENTER = fromLonLat([8.2275, 46.8182]);
+export const DEFAULT_MAP_CENTER = fromWgs84([8.2275, 46.8182]);
 
 export const MAP_EXTENT = transformExtent(
   MAP_BOUNDS_WGS84,
-  'EPSG:4326',
-  'EPSG:3857',
+  WGS84_PROJECTION_CODE,
+  MAP_PROJECTION_CODE,
 );
 
 /*
- * The fractional initial zoom keeps the whole country visible on typical
- * desktop viewports, including high-density displays with fewer CSS pixels.
+ * Zoom values are indices in swisstopo's native LV95 resolution pyramid.
+ * The view may interpolate between levels, while WMTS requests still use only
+ * matrices actually published by each source.
  */
 export const MAP_ZOOM = {
   initial: 6,
-  minimum: 5,
-  maximum: 20,
+  minimum: 0,
+  maximum: 28,
 } as const;
 
 /*
- * OpenLayers treats a layer's minZoom as an exclusive boundary. Setting the
- * value to 12 therefore makes the hiking overlay appear once the view zooms
- * beyond level 12, normally at level 13 with the standard zoom controls.
+ * OpenLayers treats a layer's minZoom as an exclusive boundary. Level 19 has
+ * a native resolution of 20 metres per pixel, matching the former detailed
+ * visibility threshold closely without reprojecting the portrayal.
  */
-export const HIKING_TRAILS_MIN_ZOOM = 12;
+export const HIKING_TRAILS_MIN_ZOOM = 18;
 
 /*
- * The 1:10,000 grey map is intended for the four most detailed map levels.
- * OpenLayers treats minZoom as exclusive, so 16 enables it at integer zoom
- * levels 17 through 20 while the mixed-scale grey map remains underneath.
+ * The 1:10,000 grey map supplements the national grey background from native
+ * level 25. Levels 27 and 28 are client zooms for this layer and stretch its
+ * finest published tile level, as documented by the WMTS service.
  */
-export const GRAY_DETAIL_MIN_ZOOM = 16;
+export const GRAY_DETAIL_MIN_ZOOM = 24;
 
-/*
- * Locating the user should reveal nearby streets and trails without zooming
- * all the way to the most detailed tile level.
- */
-export const USER_LOCATION_ZOOM = 15;
+/** Browser geolocation reveals nearby streets and trails at 5 m/px or closer. */
+export const USER_LOCATION_ZOOM = 21;
 
-/*
- * Selecting a locality should reveal useful street detail and make the hiking
- * overlay visible without zooming as closely as browser geolocation.
- */
-export const LOCATION_SEARCH_ZOOM = 13;
+/** Location search opens at the native 20 m/px planning level. */
+export const LOCATION_SEARCH_ZOOM = 19;
+
+/** GPX framing may zoom to the native 2.5 m/px level for short itineraries. */
+export const IMPORTED_ROUTE_MAX_ZOOM = 22;
 
 type SwissTopoTileFormat = 'jpeg' | 'png';
 
-function createSwissTopoXyzSource(
+type MatrixIndex = number;
+
+function createLv95TileGrid(matrixIndices: readonly MatrixIndex[]): WMTSTileGrid {
+  return new WMTSTileGrid({
+    extent: LV95_WMTS_EXTENT,
+    origin: [LV95_WMTS_EXTENT[0], LV95_WMTS_EXTENT[3]],
+    resolutions: matrixIndices.map((index) => LV95_VIEW_RESOLUTIONS[index]),
+    matrixIds: matrixIndices.map(String),
+    sizes: matrixIndices.map((index) => [...LV95_MATRIX_SIZES[index]]),
+    tileSize: 256,
+  });
+}
+
+const STANDARD_LV95_TILE_GRID = createLv95TileGrid(
+  LV95_STANDARD_SOURCE_MATRIX_INDICES,
+);
+const FINE_LV95_TILE_GRID = createLv95TileGrid(
+  LV95_FINE_SOURCE_MATRIX_INDICES,
+);
+
+function createSwissTopoWmtsSource(
   layerId: string,
   format: SwissTopoTileFormat,
-): XYZ {
-  return new XYZ({
-    url: `https://wmts.geo.admin.ch/1.0.0/${layerId}/default/current/3857/{z}/{x}/{y}.${format}`,
+  supportsFineMatrices = false,
+): WMTS {
+  return new WMTS({
+    url: `https://wmts.geo.admin.ch/1.0.0/${layerId}/default/current/2056/{TileMatrix}/{TileCol}/{TileRow}.${format}`,
+    layer: layerId,
+    matrixSet: '2056',
+    style: 'default',
+    format: `image/${format}`,
+    projection: MAP_PROJECTION_CODE,
+    requestEncoding: 'REST',
+    tileGrid: supportsFineMatrices
+      ? FINE_LV95_TILE_GRID
+      : STANDARD_LV95_TILE_GRID,
     attributions: SWISSTOPO_ATTRIBUTION,
     crossOrigin: 'anonymous',
-    projection: 'EPSG:3857',
-    maxZoom: MAP_ZOOM.maximum,
     wrapX: false,
   });
 }
 
-/**
- * Creates one official swisstopo background as JPEG WMTS tiles.
- *
- * The color and grey options use the national map. The aerial option uses the
- * current SWISSIMAGE orthophoto mosaic. All overlays remain independent of the
- * chosen background.
- *
- * @param style - Background selected by the user.
- * @returns A new XYZ source suitable for the single OpenLayers base layer.
- */
-export function createBaseMapSource(style: BaseMapStyle): XYZ {
-  return createSwissTopoXyzSource(
+/** Creates one official swisstopo background in the native LV95 WMTS grid. */
+export function createBaseMapSource(style: BaseMapStyle): WMTS {
+  return createSwissTopoWmtsSource(
     SWISSTOPO_BASE_MAP_LAYER_IDS[style],
     'jpeg',
+    style === 'aerial',
   );
 }
 
-
-/**
- * Creates the detailed 1:10,000 grey map used at close zoom levels.
- *
- * The mixed-scale `pixelkarte-grau` background becomes visibly enlarged at
- * close zooms. Swisstopo's own viewers supplement it with this PNG layer so
- * labels and linework retain their native cartographic resolution.
- */
-export function createGrayDetailMapSource(): XYZ {
-  return createSwissTopoXyzSource(
+/** Creates the detailed 1:10,000 grey map used at close zoom levels. */
+export function createGrayDetailMapSource(): WMTS {
+  return createSwissTopoWmtsSource(
     SWISSTOPO_GRAY_DETAIL_LAYER_ID,
     'png',
   );
 }
 
-/**
- * Creates the official hiking-trail overlay as transparent PNG tiles.
- *
- * This layer is a rendered WMTS representation of swissTLM3D. It is useful
- * for visualization, but it does not expose vector geometries for routing.
- */
-export function createHikingTrailsSource(): XYZ {
-  return createSwissTopoXyzSource(
+/** Creates the rendered official hiking-trail overlay in native LV95. */
+export function createHikingTrailsSource(): WMTS {
+  return createSwissTopoWmtsSource(
     SWISSTOPO_HIKING_TRAILS_LAYER_ID,
     'png',
   );

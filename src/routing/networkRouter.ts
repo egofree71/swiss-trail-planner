@@ -311,7 +311,7 @@ function coordinateDistance(
 
 /**
  * Creates a quantized 3D key for merging swissTLM3D vertices into graph nodes.
- * @param coordinate - Coordinate in EPSG:3857 with optional elevation in metres.
+ * @param coordinate - Coordinate in EPSG:2056 with optional elevation in metres.
  * @returns A stable key at the configured horizontal and vertical precision.
  */
 function nodeKey(coordinate: Coordinate): string {
@@ -661,7 +661,7 @@ export class RoutingNetwork {
 
   /**
    * Builds a routable graph from road geometries and the hiking overlay.
-   * @param extent - Loaded network extent in EPSG:3857 map coordinates.
+   * @param extent - Loaded network extent in EPSG:2056 map coordinates.
    * @param data - Normalized swissTLM3D road and hiking features.
    * @returns A fully indexed immutable routing network.
    * @throws {NoWalkableNetworkError} When no walkable segment can be produced from the supplied data.
@@ -785,7 +785,7 @@ export class RoutingNetwork {
 
   /**
    * Snaps a coordinate to the closest walkable segment.
-   * @param coordinate - User-selected point in EPSG:3857.
+   * @param coordinate - User-selected point in EPSG:2056.
    * @returns The projected network coordinate, or `null` outside the extent or snap tolerance.
    */
   snap(coordinate: Coordinate): Coordinate | null {
@@ -796,8 +796,8 @@ export class RoutingNetwork {
    * Calculates the least-cost route between two coordinates with A*.
    * Both endpoints are first snapped to nearby segments, and partial-segment
    * costs are included so the search remains accurate between graph nodes.
-   * @param startCoordinate - Requested route start in EPSG:3857.
-   * @param endCoordinate - Requested route destination in EPSG:3857.
+   * @param startCoordinate - Requested route start in EPSG:2056.
+   * @param endCoordinate - Requested route destination in EPSG:2056.
    * @returns Routed geometry and snap distances, or `null` when snapping or connectivity fails.
    */
   route(

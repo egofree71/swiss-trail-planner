@@ -41,7 +41,7 @@ const NETWORK_CACHE_LIMIT = 8;
  */
 const CELL_LOAD_CONCURRENCY = 2;
 
-/** Stable string key for one EPSG:3857 routing grid cell. */
+/** Stable string key for one EPSG:2056 routing grid cell. */
 type CellKey = `${number}:${number}`;
 
 /** Integer address of a routing grid cell. */
@@ -98,7 +98,7 @@ function parseCellKey(key: CellKey): CellIndex {
   return { column, row };
 }
 
-/** Maps an EPSG:3857 coordinate to its containing routing cell. */
+/** Maps an EPSG:2056 coordinate to its containing routing cell. */
 function cellForCoordinate(coordinate: Coordinate): CellIndex {
   return {
     column: Math.floor(coordinate[0] / CELL_SIZE),
@@ -106,7 +106,7 @@ function cellForCoordinate(coordinate: Coordinate): CellIndex {
   };
 }
 
-/** Returns the exact EPSG:3857 extent covered by one routing cell. */
+/** Returns the exact EPSG:2056 extent covered by one routing cell. */
 function extentForCell(cell: CellIndex): Extent {
   const minX = cell.column * CELL_SIZE;
   const minY = cell.row * CELL_SIZE;
@@ -135,8 +135,8 @@ function addExpandedCell(
  * Returns each grid cell crossed by a segment using an integer line walk.
  * Expanding those cells creates a corridor without downloading the complete
  * bounding rectangle between distant waypoints.
- * @param startCoordinate - Segment start in EPSG:3857.
- * @param endCoordinate - Segment end in EPSG:3857.
+ * @param startCoordinate - Segment start in EPSG:2056.
+ * @param endCoordinate - Segment end in EPSG:2056.
  * @returns Ordered grid cells crossed from start to end.
  */
 function cellsAlongSegment(
@@ -279,7 +279,7 @@ export class DynamicRoutingNetworkLoader {
 
   /**
    * Loads a neighbourhood around a point and snaps it to the local network.
-   * @param coordinate - User-selected coordinate in EPSG:3857.
+   * @param coordinate - User-selected coordinate in EPSG:2056.
    * @param signal - Abort signal owned by the route-creation session.
    * @returns The snapped coordinate, or `null` when coverage is empty or no segment is close enough.
    * @throws {RoutingAreaTooLargeError} If the generated neighbourhood exceeds the safety limit.
@@ -308,8 +308,8 @@ export class DynamicRoutingNetworkLoader {
 
   /**
    * Routes between two waypoints using an on-demand corridor of swissTLM3D cells.
-   * @param startCoordinate - Existing route endpoint in EPSG:3857.
-   * @param endCoordinate - Newly selected destination in EPSG:3857.
+   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+   * @param endCoordinate - Newly selected destination in EPSG:2056.
    * @param signal - Abort signal owned by the route-creation session.
    * @returns A routed path, or `null` when both corridor widths lack usable coverage or connectivity.
    * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
