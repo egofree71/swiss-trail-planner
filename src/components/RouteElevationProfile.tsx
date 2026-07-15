@@ -43,6 +43,8 @@ const MINIMUM_ELEVATION_RANGE_METERS = 40;
 const ELEVATION_BOUND_ROUNDING_METERS = 10;
 /** Larger profiles keep a small visual margin above and below their extrema. */
 const ELEVATION_RANGE_PADDING_RATIO = 0.05;
+/** Roughly five readable intervals work across both short and long hikes. */
+const TARGET_DISTANCE_INTERVAL_COUNT = 5;
 
 /** Formats one chart altitude in whole metres. */
 function formatAltitude(
@@ -63,6 +65,52 @@ function formatDistance(
   }
 
   return `${distanceFormat.format(distanceMeters / 1_000)} km`;
+}
+
+/** One horizontal-axis graduation projected into the SVG plot. */
+interface DistanceTick {
+  distanceMeters: number;
+  x: number;
+}
+
+/**
+ * Rounds a raw interval to the nearest value in the familiar 1, 2, 2.5, 5,
+ * 10 sequence so distance graduations stay stable and easy to scan.
+ */
+function calculateNiceDistanceInterval(totalDistance: number): number {
+  const rawInterval = totalDistance / TARGET_DISTANCE_INTERVAL_COUNT;
+  const magnitude = 10 ** Math.floor(Math.log10(rawInterval));
+  const normalizedInterval = rawInterval / magnitude;
+  const multiplier = [1, 2, 2.5, 5, 10].reduce((closest, candidate) =>
+    Math.abs(candidate - normalizedInterval) <
+    Math.abs(closest - normalizedInterval)
+      ? candidate
+      : closest,
+  );
+
+  return multiplier * magnitude;
+}
+
+/** Builds regular intermediate graduations without redundant endpoints. */
+function buildDistanceTicks(
+  totalDistance: number,
+  plotWidth: number,
+): DistanceTick[] {
+  const interval = calculateNiceDistanceInterval(totalDistance);
+  const ticks: DistanceTick[] = [];
+
+  for (
+    let distanceMeters = interval;
+    distanceMeters < totalDistance;
+    distanceMeters += interval
+  ) {
+    ticks.push({
+      distanceMeters,
+      x: CHART_PADDING.left + (distanceMeters / totalDistance) * plotWidth,
+    });
+  }
+
+  return ticks;
 }
 
 interface ElevationBounds {
@@ -295,6 +343,7 @@ export default function RouteElevationProfile({
     CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   const chartElevationRange =
     chartMaximumElevation - chartMinimumElevation;
+  const distanceTicks = buildDistanceTicks(totalDistance, plotWidth);
 
   const clearHover = useCallback(() => {
     setHoveredPoint(null);
@@ -411,28 +460,35 @@ export default function RouteElevationProfile({
           );
         })}
 
+        {distanceTicks.map((tick) => (
+          <g key={tick.distanceMeters}>
+            <line
+              className="route-elevation-profile-distance-grid"
+              x1={tick.x}
+              x2={tick.x}
+              y1={CHART_PADDING.top}
+              y2={CHART_HEIGHT - CHART_PADDING.bottom}
+            />
+            <text
+              className="route-elevation-profile-distance-label"
+              x={tick.x}
+              y={CHART_HEIGHT - 7}
+              textAnchor="middle"
+            >
+              {formatDistance(
+                tick.distanceMeters,
+                integerFormat,
+                distanceFormat,
+              )}
+            </text>
+          </g>
+        ))}
+
         <path className="route-elevation-profile-area" d={areaPath} />
         <polyline
           className="route-elevation-profile-line"
           points={linePoints}
         />
-
-        <text
-          className="route-elevation-profile-distance-label"
-          x={CHART_PADDING.left}
-          y={CHART_HEIGHT - 7}
-          textAnchor="start"
-        >
-          0
-        </text>
-        <text
-          className="route-elevation-profile-distance-label"
-          x={CHART_WIDTH - CHART_PADDING.right}
-          y={CHART_HEIGHT - 7}
-          textAnchor="end"
-        >
-          {formatDistance(totalDistance, integerFormat, distanceFormat)}
-        </text>
 
         {hoveredPoint && (
           <g className="route-elevation-profile-hover" aria-hidden="true">

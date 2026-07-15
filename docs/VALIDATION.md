@@ -98,6 +98,9 @@ and locations over broad but unstructured exploration.
       scaling with visible space above and below its real extrema.
 - [ ] The profile header continues to show the real minimum and maximum altitude,
       while the axis labels may use wider rounded display bounds.
+- [ ] The horizontal profile axis shows readable intermediate distance
+      graduations only; the redundant zero and exact route-total labels remain
+      omitted because the total distance is already visible in the summary bar.
 - [ ] Moving the mouse across the open profile shows a vertical chart guide,
       replaces the header range with the current distance and altitude, and moves
       one dark marker smoothly along the matching map route.

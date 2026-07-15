@@ -1042,6 +1042,12 @@ select {
   vector-effect: non-scaling-stroke;
 }
 
+.route-elevation-profile-distance-grid {
+  stroke: rgb(32 47 60 / 9%);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
 .route-elevation-profile-axis-label,
 .route-elevation-profile-distance-label {
   fill: #6a747d;

@@ -21,7 +21,7 @@ time.
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile whose pointer position is mirrored on the map |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations whose pointer position is mirrored on the map |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with sub-metre geometry simplification and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |

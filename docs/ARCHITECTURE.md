@@ -939,8 +939,9 @@ no network requests or geographic calculations.
 ### `src/components/RouteElevationProfile.tsx`
 
 Projects ordered distance/elevation samples into a compact responsive SVG with
-axis guides, real minimum and maximum altitude in the header, rounded display
-bounds, a minimum 40-metre vertical range, and a route-coloured profile line.
+altitude guides, adaptive intermediate distance graduations, real minimum and
+maximum altitude in the header, rounded display bounds, a minimum 40-metre
+vertical range, and a route-coloured profile line.
 Pointer exploration adds a chart guide, replaces the header range temporarily
 with distance and altitude, and emits cumulative route distance without owning
 map state.
