@@ -3,7 +3,13 @@
  * replacing the map. The chart is intentionally lightweight and uses the same
  * elevation samples already fetched for ascent/descent calculations.
  */
-import { useMemo } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { useI18n } from '../i18n/I18nContext';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
@@ -13,6 +19,8 @@ interface RouteElevationProfileProps {
   id: string;
   /** Ordered elevation samples from the start to the end of the route. */
   points: RouteElevationPoint[];
+  /** Publishes cumulative route distance while the pointer explores the chart. */
+  onHoverDistanceChange?: (distanceMeters: number | null) => void;
 }
 
 /** Internal SVG dimensions used to normalize route distance and altitude. */
@@ -192,10 +200,72 @@ function buildChartPoints(points: RouteElevationPoint[]): {
   };
 }
 
+/** One interpolated point currently explored through the profile pointer. */
+interface HoveredProfilePoint {
+  distanceMeters: number;
+  elevationMeters: number;
+  x: number;
+  y: number;
+}
+
+/** Finds the first profile sample at or beyond one cumulative distance. */
+function findUpperProfilePointIndex(
+  points: RouteElevationPoint[],
+  distanceMeters: number,
+): number {
+  let lowerIndex = 0;
+  let upperIndex = points.length - 1;
+
+  while (lowerIndex < upperIndex) {
+    const middleIndex = Math.floor((lowerIndex + upperIndex) / 2);
+
+    if (points[middleIndex].distanceMeters < distanceMeters) {
+      lowerIndex = middleIndex + 1;
+    } else {
+      upperIndex = middleIndex;
+    }
+  }
+
+  return lowerIndex;
+}
+
+/** Interpolates altitude between adjacent profile samples for a smooth cursor. */
+function elevationAtDistance(
+  points: RouteElevationPoint[],
+  distanceMeters: number,
+): number {
+  if (distanceMeters <= points[0].distanceMeters) {
+    return points[0].elevationMeters;
+  }
+
+  const lastPoint = points[points.length - 1];
+
+  if (distanceMeters >= lastPoint.distanceMeters) {
+    return lastPoint.elevationMeters;
+  }
+
+  const upperIndex = findUpperProfilePointIndex(points, distanceMeters);
+  const lowerIndex = Math.max(0, upperIndex - 1);
+  const lowerPoint = points[lowerIndex];
+  const upperPoint = points[upperIndex];
+  const distanceSpan =
+    upperPoint.distanceMeters - lowerPoint.distanceMeters;
+  const fraction =
+    distanceSpan > 0
+      ? (distanceMeters - lowerPoint.distanceMeters) / distanceSpan
+      : 0;
+
+  return (
+    lowerPoint.elevationMeters +
+    (upperPoint.elevationMeters - lowerPoint.elevationMeters) * fraction
+  );
+}
+
 /** Compact SVG elevation profile displayed above the route statistics bar. */
 export default function RouteElevationProfile({
   id,
   points,
+  onHoverDistanceChange,
 }: RouteElevationProfileProps) {
   const { locale, t } = useI18n();
   const integerFormat = useMemo(
@@ -219,6 +289,74 @@ export default function RouteElevationProfile({
     CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
   const formattedMinimum = formatAltitude(minimumElevation, integerFormat);
   const formattedMaximum = formatAltitude(maximumElevation, integerFormat);
+  const [hoveredPoint, setHoveredPoint] =
+    useState<HoveredProfilePoint | null>(null);
+  const plotWidth =
+    CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
+  const chartElevationRange =
+    chartMaximumElevation - chartMinimumElevation;
+
+  const clearHover = useCallback(() => {
+    setHoveredPoint(null);
+    onHoverDistanceChange?.(null);
+  }, [onHoverDistanceChange]);
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      const chartBounds = event.currentTarget.getBoundingClientRect();
+
+      if (chartBounds.width <= 0) {
+        return;
+      }
+
+      const chartX =
+        ((event.clientX - chartBounds.left) / chartBounds.width) * CHART_WIDTH;
+      const boundedX = Math.min(
+        CHART_WIDTH - CHART_PADDING.right,
+        Math.max(CHART_PADDING.left, chartX),
+      );
+      const distanceMeters =
+        ((boundedX - CHART_PADDING.left) / plotWidth) * totalDistance;
+      const elevationMeters = elevationAtDistance(points, distanceMeters);
+      const y =
+        CHART_PADDING.top +
+        (1 -
+          (elevationMeters - chartMinimumElevation) /
+            chartElevationRange) *
+          plotHeight;
+
+      setHoveredPoint({
+        distanceMeters,
+        elevationMeters,
+        x: boundedX,
+        y,
+      });
+      onHoverDistanceChange?.(distanceMeters);
+    },
+    [
+      chartElevationRange,
+      chartMinimumElevation,
+      onHoverDistanceChange,
+      plotHeight,
+      plotWidth,
+      points,
+      totalDistance,
+    ],
+  );
+
+  useEffect(() => {
+    clearHover();
+
+    return () => onHoverDistanceChange?.(null);
+  }, [clearHover, onHoverDistanceChange, points]);
+
+  const headerValue = hoveredPoint
+    ? `${formatDistance(
+        hoveredPoint.distanceMeters,
+        integerFormat,
+        distanceFormat,
+      )} · ${formatAltitude(hoveredPoint.elevationMeters, integerFormat)}`
+    : `${formattedMinimum} – ${formattedMaximum}`;
 
   return (
     <section
@@ -228,9 +366,7 @@ export default function RouteElevationProfile({
     >
       <div className="route-elevation-profile-header">
         <strong>{t('profile.title')}</strong>
-        <span>
-          {formattedMinimum} – {formattedMaximum}
-        </span>
+        <span>{headerValue}</span>
       </div>
 
       <svg
@@ -242,6 +378,9 @@ export default function RouteElevationProfile({
           maximum: formattedMaximum,
         })}
         preserveAspectRatio="xMidYMid meet"
+        onPointerMove={handlePointerMove}
+        onPointerLeave={clearHover}
+        onPointerCancel={clearHover}
       >
         {Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
           const fraction = index / (GRID_LINE_COUNT - 1);
@@ -294,6 +433,26 @@ export default function RouteElevationProfile({
         >
           {formatDistance(totalDistance, integerFormat, distanceFormat)}
         </text>
+
+        {hoveredPoint && (
+          <g className="route-elevation-profile-hover" aria-hidden="true">
+            <line
+              x1={hoveredPoint.x}
+              x2={hoveredPoint.x}
+              y1={CHART_PADDING.top}
+              y2={CHART_HEIGHT - CHART_PADDING.bottom}
+            />
+            <circle cx={hoveredPoint.x} cy={hoveredPoint.y} r="5" />
+          </g>
+        )}
+
+        <rect
+          className="route-elevation-profile-hit-area"
+          x={CHART_PADDING.left}
+          y={CHART_PADDING.top}
+          width={plotWidth}
+          height={plotHeight}
+        />
       </svg>
     </section>
   );

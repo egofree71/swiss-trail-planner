@@ -21,7 +21,7 @@ time.
 |---|---|
 | Map | Full-screen OpenLayers map with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile whose pointer position is mirrored on the map |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with sub-metre geometry simplification and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
@@ -62,7 +62,8 @@ http://localhost:5173/
    one complete undoable edit.
 5. Load a GPX file as the current purple, read-only itinerary. Its distance,
    ascent, descent, Swiss hiking-time estimate, and elevation profile use the same
-   bottom summary as an editable route. Complete embedded GPX elevations are
+   bottom summary as an editable route. Moving the pointer over the open profile
+   shows the matching position on the map. Complete embedded GPX elevations are
    reused; GeoAdmin supplies the profile only when they are unavailable.
    Starting a new route replaces the imported itinerary.
 6. Outside route-creation mode, click visible closures, danger zones, or public

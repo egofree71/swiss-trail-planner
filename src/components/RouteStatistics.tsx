@@ -25,6 +25,8 @@ interface RouteStatisticsProps {
   durationMinutes: number | null;
   /** Ordered samples used to draw the optional elevation profile. */
   elevationPoints: RouteElevationPoint[];
+  /** Receives profile distance while the pointer explores the chart. */
+  onProfileHoverDistanceChange?: (distanceMeters: number | null) => void;
 }
 
 /** Duration is rounded to five minutes because it is an indicative estimate. */
@@ -90,6 +92,7 @@ export default function RouteStatistics({
   descentMeters,
   durationMinutes,
   elevationPoints,
+  onProfileHoverDistanceChange,
 }: RouteStatisticsProps) {
   const { locale, t } = useI18n();
   const [isProfileVisible, setIsProfileVisible] = useState(false);
@@ -125,7 +128,11 @@ export default function RouteStatistics({
   return (
     <div className="route-summary">
       {isProfileVisible && hasProfile && (
-        <RouteElevationProfile id={profileId} points={elevationPoints} />
+        <RouteElevationProfile
+          id={profileId}
+          points={elevationPoints}
+          onHoverDistanceChange={onProfileHoverDistanceChange}
+        />
       )}
 
       <section

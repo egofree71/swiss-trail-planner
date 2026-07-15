@@ -1063,6 +1063,30 @@ select {
   vector-effect: non-scaling-stroke;
 }
 
+.route-elevation-profile-hit-area {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+.route-elevation-profile-hover {
+  pointer-events: none;
+}
+
+.route-elevation-profile-hover line {
+  stroke: rgb(23 33 43 / 58%);
+  stroke-dasharray: 4 3;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.route-elevation-profile-hover circle {
+  fill: #d52b1e;
+  stroke: #ffffff;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .route-export-dialog {
   width: min(28rem, calc(100vw - 2rem));
   max-width: none;

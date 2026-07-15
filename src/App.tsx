@@ -107,6 +107,13 @@ import {
   updateSearchResultMarker,
 } from './map/searchResult';
 import {
+  createRouteProfileMarker,
+  createRouteProfilePositionIndex,
+  getRouteProfileCoordinate,
+  type RouteProfileMarker,
+  updateRouteProfileMarker,
+} from './map/routeProfileMarker';
+import {
   createUserLocationMarker,
   type UserLocationMarker,
   updateUserLocationMarker,
@@ -813,6 +820,7 @@ export default function App() {
   const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
   const routeDisplayRef = useRef<RouteDisplay | null>(null);
   const importedRouteDisplayRef = useRef<ImportedRouteDisplay | null>(null);
+  const routeProfileMarkerRef = useRef<RouteProfileMarker | null>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
   const routeMessageTimerRef = useRef<number | null>(null);
   const routeHistoryRef = useRef<RouteHistory>({
@@ -891,6 +899,10 @@ export default function App() {
         : importedRouteSegments,
     [importedRouteSegments, routeCoordinates],
   );
+  const routeProfilePositionIndex = useMemo(
+    () => createRouteProfilePositionIndex(activeRouteSegments),
+    [activeRouteSegments],
+  );
   const routeDistanceMeters = useMemo(
     () => calculateRouteSegmentsDistance(activeRouteSegments),
     [activeRouteSegments],
@@ -898,6 +910,28 @@ export default function App() {
   const routeDurationMinutes = routeElevation
     ? estimateHikingDuration(routeElevation.points)
     : null;
+
+  /** Keeps the map marker synchronized with cumulative distance under the chart pointer. */
+  const handleProfileHoverDistanceChange = useCallback(
+    (distanceMeters: number | null) => {
+      const marker = routeProfileMarkerRef.current;
+
+      if (!marker) {
+        return;
+      }
+
+      updateRouteProfileMarker(
+        marker,
+        distanceMeters === null
+          ? null
+          : getRouteProfileCoordinate(
+              routeProfilePositionIndex,
+              distanceMeters,
+            ),
+      );
+    },
+    [routeProfilePositionIndex],
+  );
 
   /** Closes any information-layer metadata and cancels its active request. */
   const closeMapInformationPopup = useCallback(() => {
@@ -1806,6 +1840,7 @@ export default function App() {
     const searchResultMarker = createSearchResultMarker();
     const importedRouteDisplay = createImportedRouteDisplay();
     const routeDisplay = createRouteDisplay();
+    const routeProfileMarker = createRouteProfileMarker();
     const baseMapLayer = new TileLayer<XYZ>({
       source: rasterSource,
     });
@@ -1894,6 +1929,7 @@ export default function App() {
         routeDisplay.layer,
         searchResultMarker.layer,
         userLocationMarker.layer,
+        routeProfileMarker.layer,
       ],
       view: new View({
         center: DEFAULT_MAP_CENTER,
@@ -1946,6 +1982,7 @@ export default function App() {
     searchResultMarkerRef.current = searchResultMarker;
     importedRouteDisplayRef.current = importedRouteDisplay;
     routeDisplayRef.current = routeDisplay;
+    routeProfileMarkerRef.current = routeProfileMarker;
 
     return () => {
       clearLocationMessageTimer();
@@ -1971,6 +2008,7 @@ export default function App() {
       searchResultMarkerRef.current = null;
       importedRouteDisplayRef.current = null;
       routeDisplayRef.current = null;
+      routeProfileMarkerRef.current = null;
     };
   }, []);
 
@@ -2597,6 +2635,15 @@ export default function App() {
     };
   }, [isRouteCreationActive, language]);
 
+  /** Clears any stale profile marker as soon as the active geometry changes. */
+  useEffect(() => {
+    const marker = routeProfileMarkerRef.current;
+
+    if (marker) {
+      updateRouteProfileMarker(marker, null);
+    }
+  }, [routeProfilePositionIndex]);
+
   /**
    * Retrieves a fresh elevation profile after route history settles. Previous
    * requests are aborted so rapid undo/redo actions cannot publish stale data.
@@ -3105,6 +3152,9 @@ export default function App() {
           descentMeters={routeElevation?.descentMeters ?? null}
           durationMinutes={routeDurationMinutes}
           elevationPoints={routeElevation?.points ?? []}
+          onProfileHoverDistanceChange={
+            handleProfileHoverDistanceChange
+          }
         />
       )}
 

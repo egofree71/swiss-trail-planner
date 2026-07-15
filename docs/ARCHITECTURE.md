@@ -600,7 +600,9 @@ profile line, and performs no extra network request. The header keeps the real
 minimum and maximum elevations, while the chart enforces a minimum 40-metre
 vertical range with rounded axis bounds so small local variations are not
 visually exaggerated. Larger profiles retain automatic scaling with a small
-margin around their extrema.
+margin around their extrema. Pointer movement interpolates the profile distance
+and altitude, draws a vertical chart guide, and publishes only cumulative
+distance to the root application.
 
 Reversal uses `reverseRouteState()` to reverse waypoint order, normal sections,
 and the optional closing geometry without issuing another routing request. Loop
@@ -939,6 +941,16 @@ no network requests or geographic calculations.
 Projects ordered distance/elevation samples into a compact responsive SVG with
 axis guides, real minimum and maximum altitude in the header, rounded display
 bounds, a minimum 40-metre vertical range, and a route-coloured profile line.
+Pointer exploration adds a chart guide, replaces the header range temporarily
+with distance and altitude, and emits cumulative route distance without owning
+map state.
+
+### `src/map/routeProfileMarker.ts`
+
+Owns the transient map marker shown while the elevation profile is explored. It
+precomputes geodesic cumulative distances for each displayed route segment,
+interpolates the corresponding Web Mercator coordinate through a binary search,
+and never creates a connector across separate imported GPX segments.
 
 ### `src/metrics/routeMetrics.ts`
 
@@ -1121,28 +1133,31 @@ messages, and OpenLayers control placement.
 35. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
 36. The profile button reveals or hides the SVG chart without another request.
-37. Undo and redo exchange complete stored route states without routing again.
-38. Reversal rebuilds normal and closing geometry in the opposite direction as
+37. Moving a pointer across the chart interpolates its cumulative distance and
+    updates a transient marker above the corresponding map position; leaving or
+    hiding the profile clears the marker.
+38. Undo and redo exchange complete stored route states without routing again.
+39. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
-39. Deletion clears the current route and all undo/redo states and hides the summary.
-40. GPX export opens a modal naming form before any XML is generated.
-41. Confirming the form converts the flattened route to WGS 84, merges exact
+40. Deletion clears the current route and all undo/redo states and hides the summary.
+41. GPX export opens a modal naming form before any XML is generated.
+42. Confirming the form converts the flattened route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-42. Changing language updates interface text, number formatting, document
+43. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-43. Leaving route mode removes the route-click listener and drag interaction,
+44. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-44. The fullscreen button requests fullscreen for the root application element.
-45. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-46. Focusing the location-search field closes any stop, hiking-closure, or
+45. The fullscreen button requests fullscreen for the root application element.
+46. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+47. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
-47. On unmount, map listeners, interactions, timers, requests, references, and
+48. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-48. A push to `main` triggers the Pages workflow, which builds and deploys
+49. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist`.
 
 ## 18. Error handling
