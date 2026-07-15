@@ -104,6 +104,14 @@ and locations over broad but unstructured exploration.
 - [ ] A named GPX export opens in at least one independent hiking application.
 - [ ] Exported geometry preserves routed bends and waypoint order; a closed route
       ends at exactly the same coordinate where it starts.
+- [ ] A short snapped route created from only a few waypoints exports without
+      alternating centimetre-scale point pairs and contains substantially fewer
+      points than its unsimplified routing geometry.
+- [ ] Export simplification never removes section endpoints: moving or inserting
+      a waypoint at a visible bend keeps that bend in the exported GPX.
+- [ ] Long straight sections still receive regularly spaced elevation points,
+      while profile samples within one metre of an existing geometry vertex are
+      not duplicated.
 - [ ] Elevation values are present when the profile request succeeded.
 - [ ] A valid GPX track or route replaces the editable route and loads as the current purple read-only itinerary.
 - [ ] The imported GPX shows distance, ascent, descent, estimated walking time, and a collapsible elevation profile.

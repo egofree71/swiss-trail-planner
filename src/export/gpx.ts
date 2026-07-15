@@ -1,18 +1,15 @@
 /**
  * Business context: exports the route currently edited in Swiss Trail Planner
- * as a standalone GPX 1.1 track. Routed section vertices are preserved so
- * external hiking applications display the exact swissTLM3D geometry, while
- * the smoothed elevation samples are embedded when available so compatible
- * applications do not need to rebuild a noisier terrain profile.
+ * as a standalone GPX 1.1 track. Each route section is simplified within a
+ * sub-metre tolerance while preserving its endpoints, so user waypoints and
+ * visible bends survive without exporting redundant routing vertices. Smoothed
+ * elevation samples are embedded when available so compatible applications do
+ * not need to rebuild a noisier terrain profile.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import { toLonLat } from 'ol/proj.js';
 import { getDistance } from 'ol/sphere.js';
-import {
-  collectRouteCoordinates,
-  type RouteClosure,
-  type RouteStep,
-} from '../map/route';
+import type { RouteClosure, RouteStep } from '../map/route';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
 /** Language-neutral fallback used if a route name contains no valid filename characters. */
@@ -21,9 +18,19 @@ const GPX_FILENAME_FALLBACK = 'swiss-trail-planner-route';
 const GPX_COORDINATE_PRECISION = 7;
 /** Decimal places for elevation values supplied by the terrain profile service. */
 const GPX_ELEVATION_PRECISION = 1;
-/** Distance tolerance in metres used to merge route vertices and regular profile samples. */
-const GPX_DISTANCE_MERGE_TOLERANCE_METERS = 0.01;
-
+/** Maximum ground deviation accepted while simplifying one routed section. */
+const GPX_GEOMETRY_SIMPLIFICATION_TOLERANCE_METERS = 0.5;
+/** Near-identical profile distances are replaced before elevation interpolation. */
+const GPX_PROFILE_DISTANCE_DUPLICATE_TOLERANCE_METERS = 0.01;
+/**
+ * Regular profile samples closer than this to an exported geometry vertex are
+ * omitted because that vertex receives the same interpolated elevation.
+ */
+const GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS = 1;
+/** Mean Earth radius used only for a local metre-scale simplification plane. */
+const EARTH_RADIUS_METERS = 6_371_008.8;
+/** Squared map-unit distance used to avoid exact or sub-decimetre duplicates. */
+const GPX_DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 
 /**
  * Converts a route name into a portable GPX filename while preserving readable
@@ -54,11 +61,11 @@ interface GpxTrackPoint {
 
 /** Route geometry prepared for distance-based interpolation. */
 interface MeasuredRoute {
-  /** Original map coordinates in EPSG:3857. */
+  /** Retained export coordinates in EPSG:3857. */
   coordinates: Coordinate[];
   /** WGS 84 coordinates used for geodesic segment lengths and GPX output. */
   lonLatCoordinates: Coordinate[];
-  /** Cumulative geodesic distance at each original route vertex, in metres. */
+  /** Cumulative geodesic distance at each retained export vertex, in metres. */
   cumulativeDistances: number[];
   /** Total geodesic route distance in metres. */
   totalDistanceMeters: number;
@@ -76,6 +83,191 @@ function escapeXml(value: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
+}
+
+/** Returns squared distance in map units without allocating an OpenLayers geometry. */
+function coordinateDistanceSquared(
+  first: Coordinate,
+  second: Coordinate,
+): number {
+  const deltaX = first[0] - second[0];
+  const deltaY = first[1] - second[1];
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
+/** Appends one coordinate unless it is effectively identical to the previous one. */
+function appendExportCoordinate(
+  coordinates: Coordinate[],
+  coordinate: Coordinate,
+): void {
+  const previousCoordinate = coordinates[coordinates.length - 1];
+
+  if (
+    !previousCoordinate ||
+    coordinateDistanceSquared(previousCoordinate, coordinate) >
+      GPX_DUPLICATE_COORDINATE_DISTANCE_SQUARED
+  ) {
+    coordinates.push([coordinate[0], coordinate[1]]);
+  }
+}
+
+/** Local metric coordinate used only by the geometry simplifier. */
+interface LocalMetricCoordinate {
+  x: number;
+  y: number;
+}
+
+/**
+ * Converts WGS 84 coordinates to a small local equirectangular plane.
+ *
+ * Route sections are short compared with the Earth radius, so this provides a
+ * stable metre-scale perpendicular distance without Web Mercator's latitude
+ * scale distortion. Original coordinates are retained for the final GPX.
+ */
+function createLocalMetricCoordinates(
+  coordinates: Coordinate[],
+): LocalMetricCoordinate[] {
+  const lonLatCoordinates = coordinates.map((coordinate) =>
+    toLonLat(coordinate),
+  );
+  const referenceLatitudeRadians =
+    (lonLatCoordinates.reduce(
+      (total, coordinate) => total + coordinate[1],
+      0,
+    ) /
+      lonLatCoordinates.length) *
+    (Math.PI / 180);
+  const longitudeScale =
+    EARTH_RADIUS_METERS * Math.cos(referenceLatitudeRadians) * (Math.PI / 180);
+  const latitudeScale = EARTH_RADIUS_METERS * (Math.PI / 180);
+
+  return lonLatCoordinates.map(([longitude, latitude]) => ({
+    x: longitude * longitudeScale,
+    y: latitude * latitudeScale,
+  }));
+}
+
+/** Returns squared distance from one point to a finite segment in a local plane. */
+function pointToSegmentDistanceSquared(
+  point: LocalMetricCoordinate,
+  start: LocalMetricCoordinate,
+  end: LocalMetricCoordinate,
+): number {
+  const segmentX = end.x - start.x;
+  const segmentY = end.y - start.y;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    const deltaX = point.x - start.x;
+    const deltaY = point.y - start.y;
+    return deltaX * deltaX + deltaY * deltaY;
+  }
+
+  const projection = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - start.x) * segmentX +
+        (point.y - start.y) * segmentY) /
+        segmentLengthSquared,
+    ),
+  );
+  const closestX = start.x + projection * segmentX;
+  const closestY = start.y + projection * segmentY;
+  const deltaX = point.x - closestX;
+  const deltaY = point.y - closestY;
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
+/**
+ * Simplifies one route section with iterative Ramer-Douglas-Peucker.
+ *
+ * Section endpoints are always retained. Since each editable route section is
+ * bounded by user waypoints, simplifying sections independently also preserves
+ * every waypoint and the optional loop-closing junction.
+ */
+function simplifyRouteSection(coordinates: Coordinate[]): Coordinate[] {
+  const deduplicatedCoordinates: Coordinate[] = [];
+
+  for (const coordinate of coordinates) {
+    appendExportCoordinate(deduplicatedCoordinates, coordinate);
+  }
+
+  if (deduplicatedCoordinates.length <= 2) {
+    return deduplicatedCoordinates;
+  }
+
+  const localCoordinates = createLocalMetricCoordinates(
+    deduplicatedCoordinates,
+  );
+  const keepCoordinate = new Array<boolean>(
+    deduplicatedCoordinates.length,
+  ).fill(false);
+  const lastIndex = deduplicatedCoordinates.length - 1;
+  const pendingRanges: Array<[number, number]> = [[0, lastIndex]];
+  const toleranceSquared =
+    GPX_GEOMETRY_SIMPLIFICATION_TOLERANCE_METERS ** 2;
+
+  keepCoordinate[0] = true;
+  keepCoordinate[lastIndex] = true;
+
+  while (pendingRanges.length > 0) {
+    const [startIndex, endIndex] = pendingRanges.pop()!;
+    let farthestIndex = -1;
+    let farthestDistanceSquared = toleranceSquared;
+
+    for (let index = startIndex + 1; index < endIndex; index += 1) {
+      const distanceSquared = pointToSegmentDistanceSquared(
+        localCoordinates[index],
+        localCoordinates[startIndex],
+        localCoordinates[endIndex],
+      );
+
+      if (distanceSquared > farthestDistanceSquared) {
+        farthestDistanceSquared = distanceSquared;
+        farthestIndex = index;
+      }
+    }
+
+    if (farthestIndex >= 0) {
+      keepCoordinate[farthestIndex] = true;
+      pendingRanges.push([startIndex, farthestIndex]);
+      pendingRanges.push([farthestIndex, endIndex]);
+    }
+  }
+
+  return deduplicatedCoordinates.filter(
+    (_coordinate, index) => keepCoordinate[index],
+  );
+}
+
+/**
+ * Collects export geometry while simplifying each independently routed section.
+ * User waypoints remain section endpoints and are therefore never removed.
+ */
+function collectExportCoordinates(
+  steps: RouteStep[],
+  closure: RouteClosure | null,
+): Coordinate[] {
+  const coordinates: Coordinate[] = [];
+
+  for (const step of steps) {
+    if (step.segment && step.segment.length >= 2) {
+      for (const coordinate of simplifyRouteSection(step.segment)) {
+        appendExportCoordinate(coordinates, coordinate);
+      }
+    } else {
+      appendExportCoordinate(coordinates, step.waypoint);
+    }
+  }
+
+  if (closure?.segment && closure.segment.length >= 2) {
+    for (const coordinate of simplifyRouteSection(closure.segment)) {
+      appendExportCoordinate(coordinates, coordinate);
+    }
+  }
+
+  return coordinates;
 }
 
 /**
@@ -185,7 +377,7 @@ function normalizeElevationPoints(
     if (
       previousPoint &&
       Math.abs(point.distanceMeters - previousPoint.distanceMeters) <=
-        GPX_DISTANCE_MERGE_TOLERANCE_METERS
+        GPX_PROFILE_DISTANCE_DUPLICATE_TOLERANCE_METERS
     ) {
       // The later value replaces a duplicate distance so interpolation never
       // divides by an effectively zero profile section.
@@ -244,13 +436,15 @@ function elevationAtDistance(
 }
 
 /**
- * Merges exact route vertices with regular elevation samples.
+ * Merges simplified route vertices with regular elevation samples.
  *
- * Keeping original vertices preserves sharp swissTLM3D bends. Adding the
- * profile distances ensures long straight sections still contain enough GPX
- * points for another application to reproduce the same smooth altitude curve.
+ * Simplified section vertices preserve visible swissTLM3D bends and every user
+ * waypoint. Adding profile distances ensures long straight sections still
+ * contain enough GPX points for another application to reproduce the same
+ * smooth altitude curve. A profile point very close to an existing geometry
+ * vertex is unnecessary because that vertex receives an interpolated altitude.
  *
- * @param route - Pre-measured exact displayed geometry.
+ * @param route - Pre-measured simplified export geometry.
  * @param elevationPoints - Smoothed profile samples already shown in the UI.
  * @returns GPX points with interpolated WGS 84 coordinates and elevations.
  */
@@ -278,29 +472,43 @@ function createElevationAwareTrackPoints(
     return null;
   }
 
-  const routeDistances = [
-    ...route.cumulativeDistances,
-    ...normalizedElevationPoints.map((point) =>
-      ((point.distanceMeters - firstProfileDistance) /
-        profileDistanceSpan) *
-      route.totalDistanceMeters,
-    ),
-  ].sort((first, second) => first - second);
-  const mergedDistances: number[] = [];
+  const mergedDistances = route.cumulativeDistances.slice();
 
-  for (const distance of routeDistances) {
-    const clampedDistance = Math.min(
+  for (const point of normalizedElevationPoints) {
+    const routeDistance = Math.min(
       route.totalDistanceMeters,
-      Math.max(0, distance),
+      Math.max(
+        0,
+        ((point.distanceMeters - firstProfileDistance) /
+          profileDistanceSpan) *
+          route.totalDistanceMeters,
+      ),
     );
-    const previousDistance = mergedDistances[mergedDistances.length - 1];
+    let lowerIndex = 0;
+    let upperIndex = mergedDistances.length;
 
-    if (
-      previousDistance === undefined ||
-      Math.abs(clampedDistance - previousDistance) >
-        GPX_DISTANCE_MERGE_TOLERANCE_METERS
-    ) {
-      mergedDistances.push(clampedDistance);
+    while (lowerIndex < upperIndex) {
+      const middleIndex = Math.floor((lowerIndex + upperIndex) / 2);
+
+      if (mergedDistances[middleIndex] < routeDistance) {
+        lowerIndex = middleIndex + 1;
+      } else {
+        upperIndex = middleIndex;
+      }
+    }
+
+    const previousDistance = mergedDistances[lowerIndex - 1];
+    const nextDistance = mergedDistances[lowerIndex];
+    const isNearExistingDistance =
+      (previousDistance !== undefined &&
+        Math.abs(routeDistance - previousDistance) <=
+          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS) ||
+      (nextDistance !== undefined &&
+        Math.abs(nextDistance - routeDistance) <=
+          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS);
+
+    if (!isNearExistingDistance) {
+      mergedDistances.splice(lowerIndex, 0, routeDistance);
     }
   }
 
@@ -340,7 +548,7 @@ function serializeTrackPoint(point: GpxTrackPoint): string {
 }
 
 /**
- * Builds a GPX 1.1 track from the exact displayed route geometry.
+ * Builds a GPX 1.1 track from a sub-metre simplification of the displayed route.
  * @param steps - Applied route steps in display order.
  * @param generatedAt - Timestamp written to GPX metadata.
  * @param routeName - Localized track name written to metadata and track nodes.
@@ -356,7 +564,7 @@ export function createRouteGpx(
   elevationPoints: RouteElevationPoint[] = [],
   closure: RouteClosure | null = null,
 ): string {
-  const coordinates = collectRouteCoordinates(steps, closure);
+  const coordinates = collectExportCoordinates(steps, closure);
 
   if (coordinates.length < 2) {
     throw new Error('A GPX route requires at least two coordinates.');

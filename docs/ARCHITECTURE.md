@@ -611,7 +611,13 @@ waypoints and first opens
 `src/components/RouteExportDialog.tsx`. The chosen name is then passed to
 `src/export/gpx.ts` for both GPX metadata and filename generation. The latest
 smoothed elevation samples are passed only when they belong to the current
-immutable route geometry.
+immutable route geometry. Export simplification is deliberately separate from
+the editable route: each normal or closing section is simplified independently
+with a 0.5-metre ground tolerance, so section endpoints and therefore every
+user waypoint remain exact. Regular elevation samples closer than one metre to
+an already retained geometry vertex are omitted because that vertex receives
+the same interpolated elevation. This prevents centimetre-scale point pairs
+without changing route history, map display, statistics, or routing.
 
 Routine loading and graph-construction details are intentionally not shown to
 the user. Temporary route messages are reserved for actionable problems such as
@@ -945,14 +951,17 @@ abortable so stale route histories cannot update the UI.
 
 ### `src/export/gpx.ts`
 
-Converts the complete displayed route geometry, including an optional closing section, from Web Mercator to WGS 84,
-builds a GPX 1.1 track, and starts a browser download through a temporary object
-URL. The name entered in the export dialog is XML-escaped for metadata and the
-track node, sanitized for a portable filename, and used for both outputs. The
-module keeps routed intermediate vertices to preserve sharp bends, merges in
-the regularly spaced profile distances, and interpolates the smoothed terrain
-altitude into `<ele>` values. If no valid profile is available, it falls back to
-the previous geometry-only export.
+Simplifies every normal or closing route section independently with iterative
+Ramer-Douglas-Peucker in a local metric plane, converts the retained Web
+Mercator geometry to WGS 84, builds a GPX 1.1 track, and starts a browser
+download through a temporary object URL. Section endpoints are never removed,
+which preserves waypoint order and loop closure. The name entered in the export
+dialog is XML-escaped for metadata and the track node, sanitized for a portable
+filename, and used for both outputs. The module merges in regularly spaced
+profile distances, skips profile samples within one metre of a retained geometry
+vertex, and interpolates smoothed terrain altitude into `<ele>` values. If no
+valid profile is available, it exports the same simplified geometry without
+elevations.
 
 ### `src/import/gpx.ts`
 
