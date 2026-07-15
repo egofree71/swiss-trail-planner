@@ -101,8 +101,6 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices.
-- [Validation](docs/VALIDATION.md): release checks, routing scenarios, regression
-  cases, and a reusable test log.
 
 ## Production build and deployment
 

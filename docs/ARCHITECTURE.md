@@ -741,8 +741,7 @@ swiss-trail-planner/
 │   └── workflows/
 │       └── deploy.yml
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   └── VALIDATION.md
+│   └── ARCHITECTURE.md
 ├── src/
 │   ├── assets/
 │   │   └── public-transport-stops/
@@ -1099,8 +1098,6 @@ messages, and OpenLayers control placement.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
-- `docs/VALIDATION.md` contains repeatable release checks, routing scenarios,
-  regression locations, and a test log.
 - `LICENSE` contains the MIT license.
 
 ## 17. Runtime flow
@@ -1279,12 +1276,7 @@ to the normal GeoAdmin profile service.
 - `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
-## 20. Validation and possible evolution
-
-Repeatable release checks, regional routing scenarios, known regression
-locations, browser coverage, and a reusable test log live in
-`docs/VALIDATION.md`. This keeps operational validation separate from the
-architecture description.
+## 20. Possible evolution
 
 The main product scope is implemented. Further work should be driven by observed
 usage or validation results rather than by a fixed feature roadmap. Possible
