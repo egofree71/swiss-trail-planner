@@ -9,8 +9,6 @@ import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
 import Feature, { type FeatureLike } from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
-import { toLonLat } from 'ol/proj.js';
-import { getDistance } from 'ol/sphere.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import CircleStyle from 'ol/style/Circle.js';
@@ -26,15 +24,16 @@ import funicularIconUrl from '../assets/public-transport-stops/funicular.svg';
 import trainIconUrl from '../assets/public-transport-stops/train.svg';
 import tramIconUrl from '../assets/public-transport-stops/tram.svg';
 import type { Language } from '../i18n/translations';
+import { LV95_VIEW_RESOLUTIONS } from '../map/projection';
 
 /** Technical GeoAdmin identifier for official public-transport stops. */
 export const PUBLIC_TRANSPORT_STOPS_LAYER_ID = 'ch.bav.haltestellen-oev';
 
 /**
  * Stops are useful only at detailed scales. OpenLayers treats this boundary as
- * exclusive, so a value of 12 displays the layer from integer zoom 13.
+ * exclusive, so a value of 18 displays the layer from native level 19.
  */
-export const PUBLIC_TRANSPORT_STOPS_MIN_ZOOM = 12;
+export const PUBLIC_TRANSPORT_STOPS_MIN_ZOOM = 18;
 
 /** GeoAdmin identify endpoint used for viewport feature loading. */
 const IDENTIFY_ENDPOINT =
@@ -52,9 +51,6 @@ const MAX_SUBDIVISION_DEPTH = 5;
 /** Browser display resolution sent to GeoAdmin for scale-aware identification. */
 const IDENTIFY_DPI = 96;
 
-/** Web Mercator ground resolution at zoom level zero, in map units per pixel. */
-const WEB_MERCATOR_INITIAL_RESOLUTION = 156543.03392804097;
-
 /** Compact symbol size used at broad urban and regional scales. */
 const STOP_ICON_OVERVIEW_SIZE_PIXELS = 20;
 
@@ -71,29 +67,28 @@ const STOP_ICON_VERY_DETAILED_SIZE_PIXELS = 33;
 const STOP_ICON_CLOSE_SIZE_PIXELS = 37;
 
 /** First zoom level at which overview symbols receive a modest size increase. */
-const STOP_ICON_MEDIUM_ZOOM = 15;
+const STOP_ICON_MEDIUM_ZOOM = 21;
 
 /** First zoom level at which stop symbols receive a detailed-scale boost. */
-const STOP_ICON_DETAILED_ZOOM = 17;
+const STOP_ICON_DETAILED_ZOOM = 25;
 
 /** First zoom level at which stop symbols receive a second size increase. */
-const STOP_ICON_VERY_DETAILED_ZOOM = 18;
+const STOP_ICON_VERY_DETAILED_ZOOM = 26;
 
 /** First zoom level at which stop symbols receive the final close-scale boost. */
-const STOP_ICON_CLOSE_ZOOM = 19;
+const STOP_ICON_CLOSE_ZOOM = 27;
 
 /**
  * GeoAdmin exposes operational sub-points such as platform numbers at the
- * closest scales. Stop loading is therefore evaluated at no more than zoom 17,
- * even when the user zooms further in, so the passenger-stop representation
+ * closest scales. Stop loading is therefore evaluated at no more than native
+ * level 25, even when the user zooms further in, so the passenger-stop representation
  * remains stable instead of changing to technical objects.
  */
-const PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM = 17;
+const PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM = 25;
 
 /** Minimum map resolution used only for GeoAdmin stop identification. */
 const PUBLIC_TRANSPORT_IDENTIFY_MIN_RESOLUTION =
-  WEB_MERCATOR_INITIAL_RESOLUTION /
-  2 ** PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM;
+  LV95_VIEW_RESOLUTIONS[PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM];
 
 /** Attribution attached to the vector source built from the official layer. */
 const PUBLIC_TRANSPORT_STOPS_ATTRIBUTION =
@@ -156,7 +151,7 @@ const STOP_OVERLAP_DISPLAY_RADIUS_PIXELS = 17;
 const STOP_OVERLAP_RELEASE_RADIUS_PIXELS = 14;
 
 /**
- * Returns the discrete stop-symbol size for the current Web Mercator scale.
+ * Returns the discrete stop-symbol size for the current native LV95 scale.
  * The overlay stays compact at medium zooms, then gains readability as the
  * background exposes increasingly detailed streets, buildings, and paths.
  */
@@ -165,21 +160,19 @@ function getStopIconSize(resolution: number): number {
     return STOP_ICON_OVERVIEW_SIZE_PIXELS;
   }
 
-  const zoom = Math.log2(WEB_MERCATOR_INITIAL_RESOLUTION / resolution);
-
-  if (zoom >= STOP_ICON_CLOSE_ZOOM) {
+  if (resolution <= LV95_VIEW_RESOLUTIONS[STOP_ICON_CLOSE_ZOOM]) {
     return STOP_ICON_CLOSE_SIZE_PIXELS;
   }
 
-  if (zoom >= STOP_ICON_VERY_DETAILED_ZOOM) {
+  if (resolution <= LV95_VIEW_RESOLUTIONS[STOP_ICON_VERY_DETAILED_ZOOM]) {
     return STOP_ICON_VERY_DETAILED_SIZE_PIXELS;
   }
 
-  if (zoom >= STOP_ICON_DETAILED_ZOOM) {
+  if (resolution <= LV95_VIEW_RESOLUTIONS[STOP_ICON_DETAILED_ZOOM]) {
     return STOP_ICON_DETAILED_SIZE_PIXELS;
   }
 
-  if (zoom >= STOP_ICON_MEDIUM_ZOOM) {
+  if (resolution <= LV95_VIEW_RESOLUTIONS[STOP_ICON_MEDIUM_ZOOM]) {
     return STOP_ICON_MEDIUM_SIZE_PIXELS;
   }
 
@@ -206,7 +199,7 @@ export interface PublicTransportStop {
   name: string;
   /** Normalized transport categories used for symbols and translated titles. */
   modes: PublicTransportMode[];
-  /** Point coordinate in the OpenLayers display projection (EPSG:3857). */
+  /** Point coordinate in the OpenLayers display projection (EPSG:2056). */
   coordinate: Coordinate;
 }
 
@@ -224,7 +217,7 @@ export interface PublicTransportStopsDisplay {
 
 /** Visual layout for one stop that belongs to a close-symbol group. */
 interface StopOverlapLayout {
-  /** Shared group centre in EPSG:3857 map coordinates. */
+  /** Shared group centre in EPSG:2056 map coordinates. */
   center: Coordinate;
   /** Furthest real stop distance from the group centre in map units. */
   radiusMapUnits: number;
@@ -256,7 +249,7 @@ interface IdentifyResponse {
 
 /** Viewport context required to load and filter visible passenger stops. */
 export interface PublicTransportStopsLoadContext {
-  /** Current map extent in EPSG:3857. */
+  /** Current map extent in EPSG:2056. */
   extent: Extent;
   /** Current map canvas size in CSS pixels. */
   imageSize: [number, number];
@@ -533,15 +526,15 @@ function normalizeModes(
   );
 }
 
-/** Returns geodesic ground distance between two EPSG:3857 coordinates. */
+/** Returns planar ground distance between two native LV95 coordinates. */
 function stopDistanceMeters(
   first: Coordinate,
   second: Coordinate,
 ): number {
-  return getDistance(toLonLat(first), toLonLat(second));
+  return mapCoordinateDistance(first, second);
 }
 
-/** Returns planar map-unit distance between two EPSG:3857 coordinates. */
+/** Returns planar map-unit distance between two EPSG:2056 coordinates. */
 function mapCoordinateDistance(
   first: Coordinate,
   second: Coordinate,
@@ -731,7 +724,7 @@ async function fetchStopsForExtent(
     ).join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     returnGeometry: 'true',
-    sr: '3857',
+    sr: '2056',
     lang: context.language,
     limit: String(IDENTIFY_RESULT_LIMIT),
   });

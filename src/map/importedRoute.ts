@@ -51,7 +51,7 @@ export function createImportedRouteDisplay(): ImportedRouteDisplay {
 /**
  * Replaces or clears the displayed imported itinerary.
  * @param display - OpenLayers resources to update in place.
- * @param segments - Independent EPSG:3857 line segments.
+ * @param segments - Independent EPSG:2056 line segments.
  */
 export function updateImportedRouteDisplay(
   display: ImportedRouteDisplay,

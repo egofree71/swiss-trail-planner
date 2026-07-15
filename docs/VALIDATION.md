@@ -27,11 +27,18 @@ and locations over broad but unstructured exploration.
 ### Application and map
 
 - [ ] The production build succeeds without TypeScript errors.
-- [ ] The application starts with no blocking console error.
-- [ ] Color, grey, and aerial backgrounds load and can be switched without
-      changing the current view.
-- [ ] Hiking trails appear only at the intended detailed zoom levels.
-- [ ] Search, geolocation, zoom controls, scale, and fullscreen mode work.
+- [ ] The application starts with no blocking console error, especially no
+      missing transformation between EPSG:4326 and EPSG:2056.
+- [ ] At browser zoom 100%, color, grey, and aerial backgrounds render sharply
+      in the native LV95 grid and can be switched without changing the current
+      view.
+- [ ] WMTS requests use the `/2056/` matrix set. Matrix 24 is not requested;
+      color and grey remain usable at client levels 27 and 28, while SWISSIMAGE
+      loads its published fine matrices.
+- [ ] Hiking trails appear only beyond native level 18 and align with the
+      topographic background.
+- [ ] Search, geolocation, zoom controls, scale, and fullscreen mode work. Search
+      and geolocation markers land on the expected LV95 map position.
 - [ ] Focusing the location-search field closes any open stop, hiking-closure,
       or shooting-danger popup, clears its map selection, and leaves both cached
       and newly requested suggestions unobstructed. Verify this after reopening a
@@ -114,6 +121,9 @@ and locations over broad but unstructured exploration.
       not duplicated.
 - [ ] Elevation values are present when the profile request succeeded.
 - [ ] A valid GPX track or route replaces the editable route and loads as the current purple read-only itinerary.
+- [ ] Importing a short GPX frames its actual LV95 extent at a useful local
+      scale; it does not remain capped at the former Web Mercator zoom 16 or
+      show the whole of Switzerland.
 - [ ] The imported GPX shows distance, ascent, descent, estimated walking time, and a collapsible elevation profile.
 - [ ] Exporting and immediately reimporting a short route preserves the same smooth profile shape by reusing embedded `<ele>` values.
 - [ ] A GPX with complete elevations does not require GeoAdmin to build its profile; a GPX with missing or invalid elevations falls back successfully.
@@ -124,16 +134,17 @@ and locations over broad but unstructured exploration.
 
 ### Information layers
 
-- [ ] Hiking closures are visible, selectable, localized, and do not alter route
-      calculation.
+- [ ] Hiking closures are visible, selectable, localized, aligned with the
+      native background, and do not alter route calculation.
 - [ ] Shooting danger zones are semi-transparent, remain above closures and
-      transport symbols, and visibly highlight the selected polygon.
+      transport symbols, align with the map, and visibly highlight the selected
+      EPSG:2056 polygon.
 - [ ] Public-transport stops display only recognized passenger modes.
 - [ ] Public-transport SVG symbols use the shared dark-blue-and-white visual set,
-      render at 20 pixels in broad dense views, 23 pixels at zooms 15 and 16,
-      then grow to 29, 33, and 37 pixels at zooms 17, 18, and 19 respectively,
-      stay sharp on standard and high-density displays, and keep their selection
-      halo correctly aligned.
+      render at 20 pixels in broad dense views, 23 pixels from native levels 21
+      through 24, then grow to 29, 33, and 37 pixels at levels 25, 26, and 27
+      respectively, stay sharp on standard and high-density displays, and keep
+      their selection halo correctly aligned.
 - [ ] A selected stop shows its official name without appended textual mode
       labels. Its available modes appear below as sharp 20-pixel SVG pictograms,
       wrap cleanly for long multimodal names, and expose translated accessible
@@ -155,6 +166,25 @@ and locations over broad but unstructured exploration.
 - [ ] Closing a popup, starting a location search, or disabling its layer clears
       the associated selection and aborts obsolete requests.
 
+### Native LV95 migration
+
+- [ ] Geneva city: compare labels, buildings, roads, scale bar, search marker,
+      stops, and one short snapped route at browser zoom 100%.
+- [ ] Alpine area such as Moléson / Plan-Francey: verify contour readability,
+      hiking portrayal alignment, routing, elevation profile, and transport-stop
+      separation.
+- [ ] Border area near France, Italy, Germany, or Austria: verify map navigation,
+      WGS 84 search/geolocation conversion, and straight fallback beyond
+      swissTLM3D coverage.
+- [ ] Import a known GPX, inspect its placement, export it again, and compare the
+      WGS 84 coordinates in an independent viewer. No systematic displacement
+      should be visible.
+- [ ] Explore the elevation profile and confirm that its transient marker follows
+      the LV95 route without jumping between disconnected GPX segments.
+- [ ] Inspect Network requests for closures, danger zones, transport stops, and
+      routing: GeoAdmin identify requests use `sr=2056` and returned geometries
+      align with the visible map.
+
 ## 3. Routing validation scenarios
 
 Use these scenarios to cover different topology and loading risks. Add the exact
@@ -171,8 +201,10 @@ can be reproduced.
 | Bridge, tunnel, or grade-separated crossing | Vertically separated geometry | No connection based only on an XY crossing |
 
 For every routed section, compare the displayed geometry with the official map.
-Record request failures, unusually slow calculations, missing connections,
-implausible detours, and false intersections.
+The 2.4 km cells and all routing tolerances now operate in true LV95 metres, so
+also compare request counts and latency with the pre-migration behavior. Record
+request failures, unusually slow calculations, missing connections, implausible
+detours, and false intersections.
 
 ## 4. Information-layer regression locations
 
@@ -185,7 +217,7 @@ They should remain part of routine regression testing.
 | Lausanne-Triage B | The operating-only point is not displayed as a passenger stop |
 | Plan-Francey / Moléson | Nearby funicular and cable-car stops remain distinct and both icons are accessible |
 | Biel/Bienne Magglingenbahn | Bus and funicular remain separate; one popup never borrows the other stop's departures |
-| Bois de Sauvabelin | Dark-blue SVG bus symbols grow progressively from zoom 17 through zoom 19, remain sharp and readable through zoom 20 on standard and high-density displays, and keep aligned selection halos |
+| Bois de Sauvabelin | Dark-blue SVG bus symbols grow progressively from native level 25 through level 27, remain sharp and readable at finer client levels on standard and high-density displays, and keep aligned selection halos |
 | Petit Hongrin / Col des Mosses | Adjacent danger zones are visible above other overlays and the selected polygon is unambiguous |
 | A rural stop with few departures | Results spanning more than one day are grouped under explicit localized dates |
 

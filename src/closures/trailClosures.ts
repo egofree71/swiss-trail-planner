@@ -9,6 +9,7 @@ import type { Extent } from 'ol/extent.js';
 import TileWMS from 'ol/source/TileWMS.js';
 import type { Language } from '../i18n/translations';
 import { sanitizeGeoAdminPopupHtml } from '../map/geoAdminPopup';
+import { MAP_PROJECTION_CODE } from '../map/projection';
 
 /** Technical GeoAdmin identifier for hiking closures and detours. */
 export const TRAIL_CLOSURES_LAYER_ID =
@@ -47,9 +48,9 @@ interface IdentifyResponse {
 
 /** Map context required for a scale-aware identify request. */
 export interface TrailClosureIdentifyContext {
-  /** Click coordinate in the OpenLayers display projection (EPSG:3857). */
+  /** Click coordinate in the OpenLayers display projection (EPSG:2056). */
   coordinate: Coordinate;
-  /** Current visible map extent in EPSG:3857. */
+  /** Current visible map extent in EPSG:2056. */
   mapExtent: Extent;
   /** Current map canvas width and height in CSS pixels. */
   imageSize: [number, number];
@@ -94,7 +95,7 @@ export function createTrailClosuresSource(): TileWMS {
     },
     attributions: TRAIL_CLOSURES_ATTRIBUTION,
     crossOrigin: 'anonymous',
-    projection: 'EPSG:3857',
+    projection: MAP_PROJECTION_CODE,
     wrapX: false,
   });
 }
@@ -120,7 +121,7 @@ export async function identifyTrailClosure(
     mapExtent: context.mapExtent.join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     returnGeometry: 'false',
-    sr: '3857',
+    sr: '2056',
     lang: context.language,
     limit: '5',
   });
@@ -160,7 +161,7 @@ export async function fetchTrailClosurePopup(
   const { context } = closure;
   const parameters = new URLSearchParams({
     lang: context.language,
-    sr: '3857',
+    sr: '2056',
     mapExtent: context.mapExtent.join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
     coord: `${context.coordinate[0]},${context.coordinate[1]}`,

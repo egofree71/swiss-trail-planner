@@ -7,9 +7,9 @@
  * not need to rebuild a noisier terrain profile.
  */
 import type { Coordinate } from 'ol/coordinate.js';
-import { toLonLat } from 'ol/proj.js';
 import { getDistance } from 'ol/sphere.js';
 import type { RouteClosure, RouteStep } from '../map/route';
+import { toWgs84 } from '../map/projection';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
 /** Language-neutral fallback used if a route name contains no valid filename characters. */
@@ -61,7 +61,7 @@ interface GpxTrackPoint {
 
 /** Route geometry prepared for distance-based interpolation. */
 interface MeasuredRoute {
-  /** Retained export coordinates in EPSG:3857. */
+  /** Retained export coordinates in EPSG:2056. */
   coordinates: Coordinate[];
   /** WGS 84 coordinates used for geodesic segment lengths and GPX output. */
   lonLatCoordinates: Coordinate[];
@@ -121,14 +121,15 @@ interface LocalMetricCoordinate {
  * Converts WGS 84 coordinates to a small local equirectangular plane.
  *
  * Route sections are short compared with the Earth radius, so this provides a
- * stable metre-scale perpendicular distance without Web Mercator's latitude
- * scale distortion. Original coordinates are retained for the final GPX.
+ * stable metre-scale perpendicular distance for GPX simplification. Original
+ * LV95 coordinates are retained for interpolation and transformed only at
+ * output.
  */
 function createLocalMetricCoordinates(
   coordinates: Coordinate[],
 ): LocalMetricCoordinate[] {
   const lonLatCoordinates = coordinates.map((coordinate) =>
-    toLonLat(coordinate),
+    toWgs84(coordinate),
   );
   const referenceLatitudeRadians =
     (lonLatCoordinates.reduce(
@@ -273,12 +274,12 @@ function collectExportCoordinates(
 /**
  * Measures the displayed route once so coordinates can be interpolated at the
  * same regular distances used by the elevation profile.
- * @param coordinates - Ordered route vertices in EPSG:3857.
+ * @param coordinates - Ordered route vertices in EPSG:2056.
  * @returns Route coordinates and cumulative geodesic distances.
  */
 function measureRoute(coordinates: Coordinate[]): MeasuredRoute {
   const lonLatCoordinates = coordinates.map((coordinate) =>
-    toLonLat(coordinate),
+    toWgs84(coordinate),
   );
   const cumulativeDistances = [0];
 
@@ -350,7 +351,7 @@ function coordinateAtDistance(
       (upperCoordinate[1] - lowerCoordinate[1]) * fraction,
   ];
 
-  return toLonLat(interpolatedMapCoordinate);
+  return toWgs84(interpolatedMapCoordinate);
 }
 
 /**

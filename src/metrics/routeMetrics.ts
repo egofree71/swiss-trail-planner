@@ -7,8 +7,8 @@
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import LineString from 'ol/geom/LineString.js';
-import { toLonLat } from 'ol/proj.js';
 import { getDistance, getLength } from 'ol/sphere.js';
+import { MAP_PROJECTION_CODE, toWgs84 } from '../map/projection';
 
 /** Official GeoAdmin endpoint returning elevations along an LV95 polyline. */
 const ELEVATION_PROFILE_ENDPOINT =
@@ -89,7 +89,7 @@ export interface RouteElevationSummary {
 
 /** One imported GPX segment with a complete altitude for every map coordinate. */
 export interface ImportedRouteElevationSegment {
-  /** Ordered segment geometry in EPSG:3857. */
+  /** Ordered segment geometry in EPSG:2056. */
   coordinates: Coordinate[];
   /** Embedded GPX elevations matching the coordinate array one-for-one. */
   elevationsMeters: number[];
@@ -123,44 +123,9 @@ function readFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-/**
- * Converts WGS 84 longitude/latitude to approximate Swiss LV95 coordinates.
- *
- * The polynomial is the official swisstopo approximation, accurate to better
- * than one metre throughout Switzerland. That is more precise than needed for
- * selecting terrain samples spaced about 20 metres apart.
- *
- * @param longitude - WGS 84 longitude in decimal degrees.
- * @param latitude - WGS 84 latitude in decimal degrees.
- * @returns LV95 easting and northing in metres.
- */
-function wgs84ToLv95(longitude: number, latitude: number): Coordinate {
-  const latitudeSeconds = latitude * 3_600;
-  const longitudeSeconds = longitude * 3_600;
-  const latitudeOffset = (latitudeSeconds - 169_028.66) / 10_000;
-  const longitudeOffset = (longitudeSeconds - 26_782.5) / 10_000;
-
-  const easting =
-    2_600_072.37 +
-    211_455.93 * longitudeOffset -
-    10_938.51 * longitudeOffset * latitudeOffset -
-    0.36 * longitudeOffset * latitudeOffset ** 2 -
-    44.54 * longitudeOffset ** 3;
-  const northing =
-    1_200_147.07 +
-    308_807.95 * latitudeOffset +
-    3_745.25 * longitudeOffset ** 2 +
-    76.63 * latitudeOffset ** 2 -
-    194.56 * longitudeOffset ** 2 * latitudeOffset +
-    119.79 * latitudeOffset ** 3;
-
-  return [easting, northing];
-}
-
-/** Converts one EPSG:3857 map coordinate to LV95 for the profile service. */
+/** Copies one native LV95 map coordinate for the profile-service payload. */
 function mapCoordinateToLv95(coordinate: Coordinate): Coordinate {
-  const [longitude, latitude] = toLonLat(coordinate);
-  return wgs84ToLv95(longitude, latitude);
+  return [coordinate[0], coordinate[1]];
 }
 
 /**
@@ -200,8 +165,8 @@ function profileSampleCount(distanceMeters: number): number {
 }
 
 /**
- * Calculates geodesic route length from the displayed Web Mercator geometry.
- * @param coordinates - Ordered route vertices in EPSG:3857.
+ * Calculates geodesic route length from the displayed native LV95 geometry.
+ * @param coordinates - Ordered route vertices in EPSG:2056.
  * @returns Horizontal distance in metres, or zero for fewer than two points.
  */
 export function calculateRouteDistance(coordinates: Coordinate[]): number {
@@ -212,7 +177,7 @@ export function calculateRouteDistance(coordinates: Coordinate[]): number {
   const line = new LineString(
     coordinates.map((coordinate) => [coordinate[0], coordinate[1]]),
   );
-  return getLength(line, { projection: 'EPSG:3857' });
+  return getLength(line, { projection: MAP_PROJECTION_CODE });
 }
 
 /** Calculates total geodesic length without inventing links across GPX gaps. */
@@ -227,7 +192,7 @@ export function calculateRouteSegmentsDistance(segments: Coordinate[][]): number
 /** Measures cumulative geodesic distances at each imported GPX coordinate. */
 function measureImportedSegment(coordinates: Coordinate[]): number[] {
   const lonLatCoordinates = coordinates.map((coordinate) =>
-    toLonLat(coordinate),
+    toWgs84(coordinate),
   );
   const cumulativeDistances = [0];
 
@@ -408,7 +373,7 @@ export async function fetchRouteSegmentsElevationSummary(
 /**
  * Retrieves and accumulates smoothed elevations along the current route.
  *
- * @param coordinates - Ordered route vertices in EPSG:3857.
+ * @param coordinates - Ordered route vertices in EPSG:2056.
  * @param distanceMeters - Already calculated route distance used to size the profile.
  * @param signal - Abort signal used when route history changes before completion.
  * @returns Total ascent and descent in metres.

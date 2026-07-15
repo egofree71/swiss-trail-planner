@@ -67,7 +67,7 @@ interface IdentifyResponse {
 
 /** One bounded identify request in the adaptive quadtree. */
 interface TileRequest {
-  /** Request extent in EPSG:3857 map coordinates. */
+  /** Request extent in EPSG:2056 map coordinates. */
   extent: Extent;
   /** Current subdivision depth, starting at zero. */
   depth: number;
@@ -89,7 +89,7 @@ export interface SwissTlmRoadAttributes {
 export interface SwissTlmLineFeature {
   /** Stable provider identifier, or a deterministic geometry fallback. */
   id: string;
-  /** One or more validated line strings in EPSG:3857, preserving elevation when supplied. */
+  /** One or more validated line strings in EPSG:2056, preserving elevation when supplied. */
   lines: Coordinate[][];
   /** Normalized road attributes; hiking-overlay features usually leave them empty. */
   attributes: SwissTlmRoadAttributes;
@@ -342,7 +342,7 @@ async function fetchTile(
     layers: `all:${ROAD_LAYER_ID},${HIKING_LAYER_ID}`,
     returnGeometry: 'true',
     geometryFormat: 'geojson',
-    sr: '3857',
+    sr: '2056',
     lang: 'en',
     limit: String(RESULT_LIMIT),
   });
@@ -394,7 +394,7 @@ async function mapWithConcurrency<T, R>(
  * they reach that cap. This loader is designed for dynamic local routing, not
  * for downloading or retaining the national data set.
  *
- * @param extent - Requested EPSG:3857 extent in map units/metres.
+ * @param extent - Requested EPSG:2056 extent in map units/metres.
  * @param signal - Abort signal for the current route operation.
  * @param options - Empty-cell handling and optional progress reporting.
  * @returns Deduplicated road and hiking features covering the extent.
