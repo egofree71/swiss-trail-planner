@@ -319,7 +319,10 @@ export default function PublicTransportStopPopup({
                   >
                     {group.departures.map((departure) => (
                       <li key={departure.id}>
-                        <span className="public-transport-departure-line">
+                        <span
+                          className="public-transport-departure-line"
+                          title={departure.line}
+                        >
                           {departure.line}
                         </span>
                         <span className="public-transport-departure-destination">
