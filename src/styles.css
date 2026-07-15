@@ -748,24 +748,27 @@ select {
   line-height: 1.35;
 }
 
+/* Shared tracks size the line badge from the widest visible label across all rows. */
 .public-transport-departure-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) 3.15rem;
+  column-gap: 0.35rem;
   margin: 0.25rem 0 0;
-  padding: 0;
+  padding: 0 0.75rem 0 0;
   list-style: none;
+}
+
+.public-transport-departure-list--with-delay {
+  grid-template-columns: max-content minmax(0, 1fr) 3.15rem 3.5rem;
 }
 
 .public-transport-departure-list li {
   display: grid;
   min-height: 2.65rem;
-  grid-template-columns: 4.75rem minmax(0, 1fr) 3.15rem;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.35rem;
-  padding-right: 0.75rem;
   border-bottom: 1px solid rgb(32 47 60 / 11%);
-}
-
-.public-transport-departure-list--with-delay li {
-  grid-template-columns: 4.75rem minmax(0, 1fr) 3.15rem 3.5rem;
 }
 
 .public-transport-departure-list li:first-child {
@@ -774,8 +777,8 @@ select {
 
 .public-transport-departure-line {
   box-sizing: border-box;
-  min-width: 0;
-  max-width: 100%;
+  min-width: 3.5rem;
+  max-width: 5.5rem;
   padding: 0.2rem 0.4rem;
   border-radius: 5px;
   color: #17212b;
@@ -790,6 +793,7 @@ select {
 
 .public-transport-departure-destination {
   min-width: 0;
+  margin-left: 0.15rem;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;

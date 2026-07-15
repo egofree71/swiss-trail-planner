@@ -356,10 +356,12 @@ names can expand the panel before ellipsis is required. The stop-name header and
 fixed CFF action labels are excluded from intrinsic sizing so timetable content
 determines the width; a long stop name wraps within that result instead of expanding
 the panel. Narrow viewports still use the available responsive width.
-When at least one displayed service has a positive delay, fixed timetable columns
-reserve independent space for the line, time, and delay, with a compact gap between
-time and delay so delayed services do not shift the time column relative to on-time
-departures. When no displayed service is delayed, the unused delay column is removed.
+The line column follows the widest displayed service label within compact minimum
+and maximum bounds, so short labels do not waste destination space while unusually
+long labels remain safely truncated. A small dedicated gap separates the line badge
+from the destination. When at least one displayed service has a positive delay, fixed
+time and delay columns keep delayed services aligned with on-time departures. When no
+displayed service is delayed, the unused delay column is removed.
 The final time or delay column keeps a small inset from the panel edge in both layouts,
 so the timetable remains aligned without looking cramped. A predicted departure with a
 positive delay uses the same pure-red emphasis as its explicit delay value, while
@@ -853,13 +855,15 @@ mode identification without repeating labels inside long or already qualified
 stop names. The component aborts superseded stationboard requests, groups the
 next departures by Swiss local date, formats dates and times in the active locale,
 and conditionally adds a separate aligned delay column only when at least one
-visible service is delayed. Otherwise the departure times use the freed space. Its
-popup width follows the longest useful timetable content between compact desktop
-minimum and maximum bounds, without letting the stop-name header or CFF action labels
-force expansion. Long stop names wrap inside the timetable-driven width. In both
-layouts, the final numeric column keeps a small right-side inset rather than
-sitting flush against the panel edge. The adaptive desktop panel retains compact
-column spacing. It also keeps
+visible service is delayed. Otherwise the departure times use the freed space. The
+line-badge column follows the widest visible label within bounded minimum and maximum
+widths, leaving more room for destinations when all labels are short and truncating
+exceptional labels safely. Its popup width follows the longest useful timetable
+content between compact desktop minimum and maximum bounds, without letting the
+stop-name header or CFF action labels force expansion. Long stop names wrap inside
+the timetable-driven width. In both layouts, the final numeric column keeps a small
+right-side inset rather than sitting flush against the panel edge. The adaptive
+desktop panel retains compact column spacing. It also keeps
 localized links that prefill the stop as departure or destination on the
 official SBB/CFF/FFS timetable.
 
