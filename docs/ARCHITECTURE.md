@@ -36,7 +36,7 @@ The current version is a frontend-only application with no backend.
 It can:
 
 - switch between official swisstopo color, grey, and SWISSIMAGE aerial backgrounds;
-- display the official swissTLM3D hiking-trail portrayal at detailed zoom levels;
+- display the official swissTLM3D hiking-trail portrayal at detailed zoom levels and hide or restore it independently;
 - show the official ASTRA hiking-trail closures and detours WMS overlay;
 - identify a visible closure and display its localized official metadata;
 - show the official Swiss Armed Forces shooting-notice and danger-zone WMS overlay;
@@ -251,11 +251,14 @@ The single OpenLayers base layer swaps between three official sources:
 Changing the source preserves the native LV95 view and every overlay. The
 hiking overlay uses transparent PNG tiles and has `minZoom` set to 18. Because
 OpenLayers treats this boundary as exclusive, it normally appears from native
-level 19, whose resolution is 20 metres per pixel. The overlay remains visible
-above all three backgrounds.
+level 19, whose resolution is 20 metres per pixel. The overlay remains above
+all three backgrounds, is enabled by default, and can be hidden independently
+from the first information-layer switch. The explicit choice is persisted in
+local browser storage.
 
 The hiking overlay is already rendered and therefore cannot expose individual
-trail geometries or attributes.
+trail geometries or attributes. Its visibility affects portrayal only and does
+not change the separate swissTLM3D geometry used by route calculation.
 
 The operational overlay uses the official WMS layer
 `ch.astra.wanderland-sperrungen_umleitungen`. Its server-side portrayal keeps
@@ -826,8 +829,10 @@ Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
 switchable. The component does not know about OpenLayers; `App.tsx` owns the
 actual layer sources and visibility. Outside pointer presses and Escape close
-the menu. It owns independent switches for hiking closures, military danger
-zones, and public-transport stops without adding another permanent map button.
+the menu. It owns independent switches for rendered hiking trails, hiking
+closures, military danger zones, and public-transport stops without adding
+another permanent map button. Hiking trails appear first because they are the
+primary planning overlay and remain enabled by default.
 
 ### `src/components/MapInformationPopup.tsx`
 
@@ -1114,8 +1119,8 @@ messages, and OpenLayers control placement.
 4. The default color base map begins loading from the native `2056` WMTS
    matrix set at `wmts.geo.admin.ch`.
 5. The Layers menu changes the base-map source or toggles information overlays.
-6. The rendered hiking overlay starts loading when the native view moves
-   beyond level 18.
+6. The rendered hiking overlay is enabled by default unless a stored preference
+   hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
 9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.

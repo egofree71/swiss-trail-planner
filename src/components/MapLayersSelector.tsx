@@ -13,6 +13,10 @@ interface MapLayersSelectorProps {
   baseMapStyle: BaseMapStyle;
   /** Replaces the current background while preserving all overlays. */
   onBaseMapChange: (style: BaseMapStyle) => void;
+  /** Whether official hiking trails are currently visible. */
+  areHikingTrailsVisible: boolean;
+  /** Shows or hides the official hiking-trail overlay. */
+  onHikingTrailsChange: (isVisible: boolean) => void;
   /** Whether official hiking closures and detours are currently visible. */
   areTrailClosuresVisible: boolean;
   /** Shows or hides the official closure overlay. */
@@ -46,6 +50,8 @@ const BASE_MAP_OPTIONS: BaseMapOption[] = [
 export default function MapLayersSelector({
   baseMapStyle,
   onBaseMapChange,
+  areHikingTrailsVisible,
+  onHikingTrailsChange,
   areTrailClosuresVisible,
   onTrailClosuresChange,
   areShootingDangerZonesVisible,
@@ -171,6 +177,39 @@ export default function MapLayersSelector({
             >
               {t('map.layers.information')}
             </h2>
+
+            <button
+              type="button"
+              className={[
+                'map-layer-option',
+                'map-layer-option--overlay',
+                areHikingTrailsVisible
+                  ? 'map-layer-option--selected'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              role="menuitemcheckbox"
+              aria-checked={areHikingTrailsVisible}
+              onClick={() =>
+                onHikingTrailsChange(!areHikingTrailsVisible)
+              }
+            >
+              <span>{t('hikingTrails.layer')}</span>
+              <span
+                className={[
+                  'map-layer-option-toggle',
+                  areHikingTrailsVisible
+                    ? 'map-layer-option-toggle--checked'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-hidden="true"
+              >
+                <span />
+              </span>
+            </button>
 
             <button
               type="button"

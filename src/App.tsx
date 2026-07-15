@@ -226,6 +226,9 @@ const ROUTE_INTERACTION_CLICK_TOLERANCE_PX = 8;
 const ROUTE_CONTEXT_HINT_HALF_WIDTH_PX = 190;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
+/** Browser preference key for the rendered hiking-trail overlay. */
+const HIKING_TRAILS_VISIBILITY_STORAGE_KEY =
+  'swiss-trail-planner.hiking-trails-visible';
 /** Browser preference key for the safety-information overlay. */
 const TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY =
   'swiss-trail-planner.trail-closures-visible';
@@ -235,6 +238,19 @@ const SHOOTING_DANGER_ZONES_VISIBILITY_STORAGE_KEY =
 /** Browser preference key for the optional public-transport stop overlay. */
 const PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY =
   'swiss-trail-planner.public-transport-stops-visible';
+
+/** Restores the hiking-trail preference, which is enabled by default. */
+function getInitialHikingTrailsVisibility(): boolean {
+  try {
+    return (
+      window.localStorage.getItem(
+        HIKING_TRAILS_VISIBILITY_STORAGE_KEY,
+      ) !== 'false'
+    );
+  } catch {
+    return true;
+  }
+}
 
 /**
  * Restores the explicit closure-layer preference. Safety information is shown
@@ -811,6 +827,7 @@ export default function App() {
   const mapRef = useRef<Map | null>(null);
   const baseMapLayerRef = useRef<TileLayer<WMTS> | null>(null);
   const grayDetailLayerRef = useRef<TileLayer<WMTS> | null>(null);
+  const hikingTrailsLayerRef = useRef<TileLayer<WMTS> | null>(null);
   const trailClosuresLayerRef = useRef<TileLayer<TileWMS> | null>(null);
   const shootingDangerZonesLayerRef =
     useRef<TileLayer<TileWMS> | null>(null);
@@ -860,6 +877,8 @@ export default function App() {
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
   );
+  const [areHikingTrailsVisible, setAreHikingTrailsVisible] =
+    useState(getInitialHikingTrailsVisibility);
   const [areTrailClosuresVisible, setAreTrailClosuresVisible] =
     useState(getInitialTrailClosuresVisibility);
   const [areShootingDangerZonesVisible, setAreShootingDangerZonesVisible] =
@@ -1855,6 +1874,12 @@ export default function App() {
       visible: false,
       zIndex: 1,
     });
+    const hikingTrailsLayer = new TileLayer<WMTS>({
+      source: hikingTrailsSource,
+      minZoom: HIKING_TRAILS_MIN_ZOOM,
+      visible: areHikingTrailsVisible,
+      zIndex: 10,
+    });
     const trailClosuresLayer = new TileLayer<TileWMS>({
       source: trailClosuresSource,
       minZoom: HIKING_TRAILS_MIN_ZOOM,
@@ -1920,11 +1945,7 @@ export default function App() {
       layers: [
         baseMapLayer,
         grayDetailLayer,
-        new TileLayer({
-          source: hikingTrailsSource,
-          minZoom: HIKING_TRAILS_MIN_ZOOM,
-          zIndex: 10,
-        }),
+        hikingTrailsLayer,
         trailClosuresLayer,
         publicTransportStopsDisplay.selectionLayer,
         publicTransportStopsDisplay.layer,
@@ -1980,6 +2001,7 @@ export default function App() {
     mapRef.current = map;
     baseMapLayerRef.current = baseMapLayer;
     grayDetailLayerRef.current = grayDetailLayer;
+    hikingTrailsLayerRef.current = hikingTrailsLayer;
     trailClosuresLayerRef.current = trailClosuresLayer;
     shootingDangerZonesLayerRef.current = shootingDangerZonesLayer;
     shootingDangerZoneSelectionDisplayRef.current =
@@ -2007,6 +2029,7 @@ export default function App() {
       mapRef.current = null;
       baseMapLayerRef.current = null;
       grayDetailLayerRef.current = null;
+      hikingTrailsLayerRef.current = null;
       trailClosuresLayerRef.current = null;
       shootingDangerZonesLayerRef.current = null;
       shootingDangerZoneSelectionDisplayRef.current = null;
@@ -2045,6 +2068,17 @@ export default function App() {
   useEffect(() => {
     try {
       window.localStorage.setItem(
+        HIKING_TRAILS_VISIBILITY_STORAGE_KEY,
+        String(areHikingTrailsVisible),
+      );
+    } catch {
+      // Layer visibility remains functional when browser storage is unavailable.
+    }
+  }, [areHikingTrailsVisible]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
         TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY,
         String(areTrailClosuresVisible),
       );
@@ -2074,6 +2108,10 @@ export default function App() {
       // Layer visibility remains functional when browser storage is unavailable.
     }
   }, [arePublicTransportStopsVisible]);
+
+  useEffect(() => {
+    hikingTrailsLayerRef.current?.setVisible(areHikingTrailsVisible);
+  }, [areHikingTrailsVisible]);
 
   useEffect(() => {
     const trailClosuresLayer = trailClosuresLayerRef.current;
@@ -3025,6 +3063,8 @@ export default function App() {
         <MapLayersSelector
           baseMapStyle={baseMapStyle}
           onBaseMapChange={setBaseMapStyle}
+          areHikingTrailsVisible={areHikingTrailsVisible}
+          onHikingTrailsChange={setAreHikingTrailsVisible}
           areTrailClosuresVisible={areTrailClosuresVisible}
           onTrailClosuresChange={setAreTrailClosuresVisible}
           areShootingDangerZonesVisible={areShootingDangerZonesVisible}

@@ -19,7 +19,7 @@ time.
 
 | Area | Available functionality |
 |---|---|
-| Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
+| Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, optional hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations whose pointer position is mirrored on the map |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with sub-metre geometry simplification and smoothed elevations when available |
@@ -48,7 +48,7 @@ http://localhost:5173/swiss-trail-planner/
 ## Basic usage
 
 1. Use the **Layers** button to choose a background and enable or disable
-   information overlays.
+   hiking trails and other information overlays.
 2. Activate route creation, then click or tap the map to add waypoints. Drag
    an existing red waypoint to move it, click it to delete it, or drag a section
    of the red line to insert a new waypoint there. Contextual labels describe
