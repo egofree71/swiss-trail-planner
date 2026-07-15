@@ -98,17 +98,6 @@ and locations over broad but unstructured exploration.
       scaling with visible space above and below its real extrema.
 - [ ] The profile header continues to show the real minimum and maximum altitude,
       while the axis labels may use wider rounded display bounds.
-- [ ] The horizontal profile axis shows readable intermediate distance
-      graduations only; the redundant zero and exact route-total labels remain
-      omitted because the total distance is already visible in the summary bar.
-- [ ] Moving the mouse across the open profile shows a vertical chart guide,
-      replaces the header range with the current distance and altitude, and moves
-      one dark marker smoothly along the matching map route.
-- [ ] Leaving or closing the profile removes the map marker immediately. Editing,
-      reversing, deleting, or replacing the route cannot leave a stale marker.
-- [ ] The profile marker works for both editable routes and imported GPX files;
-      separate GPX track segments are never joined while translating distance to
-      map position.
 
 ### GPX
 
@@ -209,9 +198,9 @@ Recommended minimum manual coverage:
 
 | Environment | Checks |
 |---|---|
-| Current Chromium desktop browser | Complete smoke checklist and developer-console review |
+| Current Chromium desktop browser | Complete smoke checklist, favicon display, and developer-console review without a missing `/favicon.ico` request |
 | Current Firefox desktop browser | Map interaction, fullscreen, file import, and popups |
-| Narrow mobile-sized viewport | Control spacing, popup fit, route actions, elevation profile, and pointer marker cleanup |
+| Narrow mobile-sized viewport | Control spacing, popup fit, route actions, and elevation profile |
 | Touch-capable device or emulator | Map taps, waypoint and route-line dragging, enlarged waypoint hit area, route creation, menus, and popup closing |
 
 Also verify keyboard interaction for location search, Layers menu closing with
