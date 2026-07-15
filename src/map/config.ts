@@ -82,8 +82,8 @@ export const USER_LOCATION_ZOOM = 21;
 /** Location search opens at the native 20 m/px planning level. */
 export const LOCATION_SEARCH_ZOOM = 19;
 
-/** GPX framing may zoom to the native 2.5 m/px level for short itineraries. */
-export const IMPORTED_ROUTE_MAX_ZOOM = 22;
+/** GPX framing may use the finest native national-map level for very short itineraries. */
+export const IMPORTED_ROUTE_MAX_ZOOM = 26;
 
 type SwissTopoTileFormat = 'jpeg' | 'png';
 
