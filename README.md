@@ -49,8 +49,10 @@ http://localhost:5173/via-helvetica/
 
 1. Use the **Layers** button to choose a background and enable or disable
    information overlays.
-2. Activate route creation, then click or tap the map to add waypoints. A
-   simple click on an existing red route section also adds the next waypoint
+2. Activate route creation. Snapping is enabled by default and can be changed
+   before placing the first waypoint. Then click or tap the map to add
+   waypoints. A simple click on an existing red route section also adds the next
+   waypoint
    from the current endpoint, which allows the itinerary to reuse the same path.
    Drag an existing red waypoint to move it, click it to delete it, or drag a
    red route section to insert a waypoint into that stored section. Contextual
@@ -114,6 +116,7 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices.
+- [Validation](docs/VALIDATION.md): important manual and regression checks.
 
 ## Production build and deployment
 

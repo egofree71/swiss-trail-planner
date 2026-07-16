@@ -626,10 +626,12 @@ actions.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from snapshot history state. The snap button selects network or
-straight behavior for both creation and route reshaping; it becomes
-available after the first waypoint and is
-temporarily disabled while cells are loading or a route is being calculated.
-The loop button sits between reversal and deletion, uses the current snap mode
+straight behavior for both creation and route reshaping. It is available as soon
+as route creation starts, so the first waypoint can be placed freely, and is
+temporarily disabled only while cells are loading or a route is being calculated.
+A fresh empty route starts with snapping enabled; reopening an existing editable
+route preserves the current snap choice. The loop button sits between reversal
+and deletion, uses the current snap mode
 to create the final section, shows an active state while closed, and reopens the
 route on a second press. Empty-map clicks do not append waypoints while a route
 is closed; reopening it makes the last waypoint the editable endpoint again.
@@ -789,7 +791,8 @@ via-helvetica/
 │   └── workflows/
 │       └── deploy.yml
 ├── docs/
-│   └── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md
+│   └── VALIDATION.md
 ├── public/
 │   ├── base-map-previews/
 │   │   ├── aerial.png
@@ -1190,6 +1193,7 @@ messages, and OpenLayers control placement.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
+- `docs/VALIDATION.md` records important manual and regression checks.
 - `LICENSE` contains the MIT license.
 
 ## 17. Runtime flow
@@ -1218,9 +1222,13 @@ messages, and OpenLayers control placement.
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
     the profile.
 14. Starting editable route creation clears the imported GPX without prompting.
-15. The route button toggles route-creation mode and the crosshair cursor; entering the mode clears the temporary location-search marker.
+15. The route button toggles route-creation mode and the crosshair cursor;
+    entering the mode clears the temporary location-search marker. A fresh empty
+    route resets to snapping enabled, while an existing editable route keeps its
+    current snap choice.
 16. Entering route mode attaches the route-click listener, one focused route
-    drag interaction, and the contextual toolbar.
+    drag interaction, and the contextual toolbar. The snap control is immediately
+    available before the first waypoint is placed.
 17. With snapping disabled, a map click stores a direct section immediately.
 18. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.

@@ -592,6 +592,18 @@ select {
   background: #ecece8;
 }
 
+/*
+ * A pending route request temporarily disables the snap control, but its blue
+ * pressed state must remain visible so disabled is not mistaken for switched off.
+ */
+.map-control-button--route-action.map-control-button--route-active:disabled,
+.map-control-button--route-action.map-control-button--route-active:disabled:hover {
+  border-color: #1769e0;
+  color: #ffffff;
+  background: #1769e0;
+  cursor: default;
+}
+
 .map-control-button--active {
   color: #1769e0;
   border-color: rgb(23 105 224 / 55%);

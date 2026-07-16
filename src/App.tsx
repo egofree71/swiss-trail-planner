@@ -1730,6 +1730,12 @@ export default function App() {
 
     if (nextState) {
       clearSelectedSearchResult();
+
+      // A fresh route starts in the safer, expected network mode, while
+      // reopening an existing editable route preserves the user's choice.
+      if (routeHistoryRef.current.steps.length === 0) {
+        setIsRouteSnapEnabled(true);
+      }
     }
 
     if (nextState && importedRouteSegments.length > 0) {
@@ -3114,7 +3120,6 @@ export default function App() {
           isActive={isRouteCreationActive}
           isSnapEnabled={isRouteSnapEnabled}
           isBusy={isRouteOperationPending}
-          hasRoute={routeHistory.steps.length > 0}
           canUndo={
             !isRouteOperationPending && routeHistory.undoStates.length > 0
           }

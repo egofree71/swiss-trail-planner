@@ -16,8 +16,6 @@ interface RouteControlsProps {
   isSnapEnabled: boolean;
   /** Whether a snap or route request is currently in progress. */
   isBusy: boolean;
-  /** Whether the route already contains at least one waypoint. */
-  hasRoute: boolean;
   /** Whether at least one complete route edit can be undone. */
   canUndo: boolean;
   /** Whether at least one previously undone route state can be restored. */
@@ -61,7 +59,6 @@ export default function RouteControls({
   isActive,
   isSnapEnabled,
   isBusy,
-  hasRoute,
   canUndo,
   canRedo,
   canReverse,
@@ -83,11 +80,9 @@ export default function RouteControls({
     ? t('route.exitCreation')
     : t('route.create');
 
-  const snapLabel = !hasRoute
-    ? t('route.addFirstPoint')
-    : isSnapEnabled
-      ? t('route.followPaths')
-      : t('route.straightSegments');
+  const snapLabel = isSnapEnabled
+    ? t('route.followPaths')
+    : t('route.straightSegments');
   const loopLabel = isLoopClosed
     ? t('route.openLoop')
     : t('route.closeLoop');
@@ -134,16 +129,16 @@ export default function RouteControls({
             className={[
               'map-control-button',
               'map-control-button--route-action',
-              hasRoute && isSnapEnabled
+              isSnapEnabled
                 ? 'map-control-button--route-active'
                 : '',
             ]
               .filter(Boolean)
               .join(' ')}
             aria-label={snapLabel}
-            aria-pressed={hasRoute && isSnapEnabled}
+            aria-pressed={isSnapEnabled}
             title={snapLabel}
-            disabled={isBusy || !hasRoute}
+            disabled={isBusy}
             onClick={onToggleSnap}
           >
             <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
