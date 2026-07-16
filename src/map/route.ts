@@ -21,6 +21,11 @@ import {
   Stroke,
   Style,
 } from 'ol/style.js';
+import {
+  createItineraryEndpointFeatures,
+  ITINERARY_ENDPOINT_ROLE_PROPERTY,
+  type ItineraryEndpointRole,
+} from './itineraryEndpoints';
 
 /** Geometry source used when one route step was created. */
 export type RouteMode =
@@ -704,6 +709,29 @@ export function updateRouteDisplay(
         : ROUTE_WAYPOINT_STYLE,
     );
     features.push(waypoint);
+  });
+
+  const finishCoordinate =
+    steps.length >= 2
+      ? closure
+        ? steps[0].waypoint
+        : steps[steps.length - 1].waypoint
+      : null;
+  const endpointFeatures = createItineraryEndpointFeatures(
+    steps[0]?.waypoint ?? null,
+    finishCoordinate,
+    closure !== null && steps.length >= 2,
+  );
+
+  endpointFeatures.forEach((endpointFeature) => {
+    const role = endpointFeature.get(
+      ITINERARY_ENDPOINT_ROLE_PROPERTY,
+    ) as ItineraryEndpointRole;
+    endpointFeature.set(
+      ROUTE_WAYPOINT_INDEX_PROPERTY,
+      role === 'finish' ? steps.length - 1 : 0,
+    );
+    features.push(endpointFeature);
   });
 
   display.source.clear();

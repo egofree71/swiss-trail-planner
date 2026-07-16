@@ -9,6 +9,7 @@ import LineString from 'ol/geom/LineString.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import { Stroke, Style } from 'ol/style.js';
+import { createItineraryEndpointFeatures } from './itineraryEndpoints';
 
 /** OpenLayers resources owned by the root application for the loaded GPX. */
 export interface ImportedRouteDisplay {
@@ -57,15 +58,23 @@ export function updateImportedRouteDisplay(
   display: ImportedRouteDisplay,
   segments: Coordinate[][],
 ): void {
-  const features = segments
-    .filter((segment) => segment.length >= 2)
-    .map((segment) => {
-      const feature = new Feature({
-        geometry: new LineString(segment),
-      });
-      feature.setStyle(IMPORTED_ROUTE_STYLE);
-      return feature;
+  const validSegments = segments.filter((segment) => segment.length >= 2);
+  const features: Feature[] = validSegments.map((segment) => {
+    const feature = new Feature({
+      geometry: new LineString(segment),
     });
+    feature.setStyle(IMPORTED_ROUTE_STYLE);
+    return feature;
+  });
+  const firstSegment = validSegments[0];
+  const lastSegment = validSegments[validSegments.length - 1];
+
+  features.push(
+    ...createItineraryEndpointFeatures(
+      firstSegment?.[0] ?? null,
+      lastSegment?.[lastSegment.length - 1] ?? null,
+    ),
+  );
 
   display.source.clear();
   display.source.addFeatures(features);

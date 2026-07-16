@@ -59,6 +59,8 @@ It can:
 - prefer official hiking-trail sections through routing costs;
 - undo and redo complete route edits with their exact stored geometry;
 - reverse the complete route without recalculating sections;
+- mark the displayed start and finish with compact A and B symbols that swap on reversal;
+- combine start and finish into one A/B symbol for closed editable routes and imported GPX loops;
 - close the route with a dedicated final section back to the first waypoint, or reopen it without losing the normal route;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
@@ -169,8 +171,8 @@ Browser
    │      ├── VectorLayer: selected military danger-zone polygon
    │      ├── TileLayer: hiking closures and detours (transparent WMS)
    │      ├── VectorLayer: filtered passenger public-transport stops
-   │      ├── VectorLayer: imported read-only GPX geometry
-   │      ├── VectorLayer: editable route geometry and waypoints
+   │      ├── VectorLayer: imported read-only GPX geometry and endpoint markers
+   │      ├── VectorLayer: editable route geometry, waypoints, and endpoint markers
    │      ├── VectorLayer: selected search result
    │      └── VectorLayer: user location
    │
@@ -564,7 +566,10 @@ stored sections and the optional closing section into one red `LineString` with
 a white casing, while creating exactly one red-outlined `Point` feature per
 waypoint. Red is used deliberately so planned routes do not resemble blue
 hydrographic features. Waypoint features carry their route index for hit
-detection.
+detection. Shared endpoint styling from `src/map/itineraryEndpoints.ts` adds
+compact A and B markers above the first and final waypoints. A closed route uses
+one vertically split green/red A/B marker at its current start; reversing the immutable state
+moves or swaps these markers automatically without separate marker state.
 
 The same module creates one focused OpenLayers pointer interaction for existing
 waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
@@ -681,9 +686,11 @@ new purple read-only geometry replaces any prior GPX. Invalid imports leave the
 current itinerary untouched. Starting route creation later clears the imported
 layer immediately, without confirmation.
 
-`src/map/importedRoute.ts` owns the purple read-only vector layer. `App.tsx` fits
-the view to its extent and feeds its projected segments into the shared metrics
-pipeline. Distance is summed per segment. When every retained GPX point has a
+`src/map/importedRoute.ts` owns the purple read-only vector layer and adds the
+shared endpoint markers to the first and last retained GPX coordinates. Endpoints
+within five LV95 metres use one combined A/B marker so small recording differences
+do not hide one symbol beneath the other. `App.tsx` fits the view to its extent
+and feeds its projected segments into the shared metrics pipeline. Distance is summed per segment. When every retained GPX point has a
 valid `<ele>` value, the embedded altitude function is resampled at the same
 roughly 20 metre spacing used for editable routes; this preserves the exported
 profile while avoiding visible artefacts from irregularly spaced geometry
@@ -790,6 +797,7 @@ swiss-trail-planner/
 │   │   ├── geoAdminPopup.ts
 │   │   ├── config.ts
 │   │   ├── importedRoute.ts
+│   │   ├── itineraryEndpoints.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
 │   │   ├── routeProfileMarker.ts
@@ -1029,14 +1037,22 @@ point supplies a valid `<ele>` value. It does not touch OpenLayers state.
 
 Creates and updates the read-only GPX vector layer. Its purple casing style
 distinguishes an imported current itinerary from the red editable route and
-blue hydrography.
+blue hydrography. It also applies the shared start/finish markers to the first
+and last retained GPX coordinates without joining independent segments.
+
+### `src/map/itineraryEndpoints.ts`
+
+Creates the shared high-contrast A, B, and split green/red A/B point features used by
+editable and imported itineraries. It recognizes near-coincident imported GPX
+endpoints in native LV95 metres and stores a semantic endpoint role so editable
+markers can retain waypoint hit behaviour without owning route state.
 
 ### `src/map/route.ts`
 
 Defines immutable route steps, the optional dedicated loop-closing section, and
 complete route state. It flattens normal and closing geometry, reverses complete
 routes without recalculation, creates the route vector layer, and rebuilds its
-line and indexed waypoint features. It also owns waypoint and normal/closing
+line, indexed waypoint features, and start/finish markers. It also owns waypoint and normal/closing
 section hit detection, deterministic newest-section selection for overlapping
 geometry, the focused click/drag interaction, contextual hover target reporting,
 cursor state, and straight preview rendering for moved or temporarily inserted
@@ -1185,8 +1201,9 @@ messages, and OpenLayers control placement.
 32. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
-33. Updating the committed route state rebuilds the route line and indexed
-    waypoint features.
+33. Updating the committed route state rebuilds the route line, indexed
+    waypoint features, and A/B endpoint markers. Reversal swaps the open-route
+    markers; a closed route keeps one combined marker at its new start.
 34. Distance is recalculated locally from the flattened route geometry, including
     the optional closing section.
 35. After a short debounce, an abortable profile request refreshes ascent,

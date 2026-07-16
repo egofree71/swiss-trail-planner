@@ -20,7 +20,7 @@ time.
 | Area | Available functionality |
 |---|---|
 | Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
+| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; pointer position is mirrored in both directions between the map route and the open profile |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX export with sub-metre geometry simplification and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
@@ -60,9 +60,13 @@ http://localhost:5173/swiss-trail-planner/
    disable it to create straight segments. A section also falls back to a
    straight line when no routable path can be resolved.
 4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
-   or export the current itinerary. A waypoint move, insertion, or individual deletion is restored as
-   one complete undoable edit.
-5. Load a GPX file as the current purple, read-only itinerary. Its distance,
+   or export the current itinerary. Compact **A** and **B** markers identify the
+   current start and finish; reversing the route swaps them, while a closed loop
+   uses one split green/red **A/B** marker so both roles remain visible. A waypoint
+   move, insertion, or individual deletion is restored as one complete undoable
+   edit.
+5. Load a GPX file as the current purple, read-only itinerary. Its overall start
+   and finish use the same **A**, **B**, or split **A/B** markers. Its distance,
    ascent, descent, Swiss hiking-time estimate, and elevation profile use the same
    bottom summary as an editable route. Moving the pointer over either itinerary
    shows its position with a circle on the map; when the profile is open, the same
