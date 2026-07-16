@@ -26,6 +26,20 @@ const AVOID_COORDINATE_MARGIN_PX = 30;
 /** Defensive cap for unusually long routes or very wide displays. */
 const MAX_DIRECTION_ARROWS_PER_LINE = 16;
 /**
+ * Minimum centre-to-centre separation between direction symbols. This keeps
+ * opposite arrows on an out-and-back section from touching or forming one
+ * ambiguous combined shape.
+ */
+const DIRECTION_ARROW_COLLISION_DISTANCE_PX = 30;
+/**
+ * Screen-space phase shift tried when a candidate collides with an earlier
+ * symbol. Moving along the route preserves the true direction while
+ * desynchronizing repeated passes over the same geometry.
+ */
+const DIRECTION_ARROW_PHASE_SHIFT_PX = 42;
+/** Number of alternating forward/backward phase shifts attempted per symbol. */
+const DIRECTION_ARROW_PHASE_SHIFT_ATTEMPTS = 2;
+/**
  * Hollow arrowhead dimensions in CSS pixels. The symbol is deliberately
  * larger than the first compact version, but remains much smaller than the
  * earlier full arrows that overwhelmed the route at broad scales.
@@ -187,6 +201,54 @@ function isNearAvoidCoordinate(
   });
 }
 
+/** Returns whether a candidate direction symbol overlaps one already retained. */
+function collidesWithDirectionSample(
+  candidate: DirectionSample,
+  samples: DirectionSample[],
+  minimumDistance: number,
+): boolean {
+  const minimumDistanceSquared = minimumDistance * minimumDistance;
+
+  return samples.some((sample) => {
+    const deltaX = candidate.coordinate[0] - sample.coordinate[0];
+    const deltaY = candidate.coordinate[1] - sample.coordinate[1];
+    return deltaX * deltaX + deltaY * deltaY < minimumDistanceSquared;
+  });
+}
+
+/**
+ * Returns the base distance followed by alternating phase-shifted distances.
+ * Repeated passes usually collide at the same screen ratio; trying later and
+ * earlier positions keeps both directions readable without moving the route.
+ */
+function createCandidateDistances(
+  baseDistance: number,
+  minimumDistance: number,
+  maximumDistance: number,
+  resolution: number,
+): number[] {
+  const distances = [baseDistance];
+  const phaseShift = DIRECTION_ARROW_PHASE_SHIFT_PX * resolution;
+
+  for (
+    let attempt = 1;
+    attempt <= DIRECTION_ARROW_PHASE_SHIFT_ATTEMPTS;
+    attempt += 1
+  ) {
+    const forward = baseDistance + phaseShift * attempt;
+    const backward = baseDistance - phaseShift * attempt;
+
+    if (forward <= maximumDistance) {
+      distances.push(forward);
+    }
+    if (backward >= minimumDistance) {
+      distances.push(backward);
+    }
+  }
+
+  return distances;
+}
+
 /** Builds sparse arrow samples for one resolution without altering the line. */
 function createDirectionSamples(
   coordinates: Coordinate[],
@@ -231,21 +293,38 @@ function createDirectionSamples(
   );
   const evenSpacing = usableLength / (arrowCount + 1);
   const avoidMargin = AVOID_COORDINATE_MARGIN_PX * resolution;
+  const collisionDistance = DIRECTION_ARROW_COLLISION_DISTANCE_PX * resolution;
   const samples: DirectionSample[] = [];
+  const minimumSampleDistance = endMargin;
+  const maximumSampleDistance = totalLength - endMargin;
 
   for (let index = 1; index <= arrowCount; index += 1) {
-    const sample = sampleDirectionAtDistance(
-      coordinates,
-      endMargin + evenSpacing * index,
-      totalLength,
+    const baseDistance = endMargin + evenSpacing * index;
+    const candidateDistances = createCandidateDistances(
+      baseDistance,
+      minimumSampleDistance,
+      maximumSampleDistance,
       resolution,
     );
 
-    if (
-      sample &&
-      !isNearAvoidCoordinate(sample.coordinate, avoidCoordinates, avoidMargin)
-    ) {
+    for (const candidateDistance of candidateDistances) {
+      const sample = sampleDirectionAtDistance(
+        coordinates,
+        candidateDistance,
+        totalLength,
+        resolution,
+      );
+
+      if (
+        !sample ||
+        isNearAvoidCoordinate(sample.coordinate, avoidCoordinates, avoidMargin) ||
+        collidesWithDirectionSample(sample, samples, collisionDistance)
+      ) {
+        continue;
+      }
+
       samples.push(sample);
+      break;
     }
   }
 
