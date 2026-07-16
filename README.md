@@ -1,6 +1,6 @@
-# Swiss Trail Planner
+# Via Helvetica
 
-Swiss Trail Planner is an open-source, map-centered web application for
+Via Helvetica is an open-source, map-centered web application for
 planning hiking routes in Switzerland with official swisstopo maps and geodata.
 It is intentionally lightweight, frontend-only, and focused on one route at a
 time.
@@ -42,7 +42,7 @@ npm run dev
 Vite then displays the project address, usually:
 
 ```text
-http://localhost:5173/swiss-trail-planner/
+http://localhost:5173/via-helvetica/
 ```
 
 ## Basic usage
@@ -112,7 +112,6 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices.
-- [Validation](docs/VALIDATION.md): important manual and regression checks.
 
 ## Production build and deployment
 

@@ -21,7 +21,7 @@ import {
 } from './translations';
 
 /** Local-storage key used to preserve the explicit language selection. */
-const LANGUAGE_STORAGE_KEY = 'swiss-trail-planner-language';
+const LANGUAGE_STORAGE_KEY = 'via-helvetica-language';
 
 /** Named values substituted into translated strings such as profile ranges. */
 type TranslationParameters = Record<string, string | number>;

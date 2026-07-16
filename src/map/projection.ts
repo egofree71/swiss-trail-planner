@@ -1,6 +1,6 @@
 /**
  * Business context: centralizes the application's native Swiss map projection.
- * Swiss Trail Planner keeps all displayed and editable geometry in LV95 so
+ * Via Helvetica keeps all displayed and editable geometry in LV95 so
  * swisstopo tiles, swissTLM3D routing data, and metric geometry share one CRS.
  * WGS 84 remains confined to browser geolocation, search results, and GPX I/O.
  */

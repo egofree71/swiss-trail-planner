@@ -1,5 +1,5 @@
 /**
- * Business context: exports the route currently edited in Swiss Trail Planner
+ * Business context: exports the route currently edited in Via Helvetica
  * as a standalone GPX 1.1 track. Each route section is simplified within a
  * sub-metre tolerance while preserving its endpoints, so user waypoints and
  * visible bends survive without exporting redundant routing vertices. Smoothed
@@ -13,7 +13,7 @@ import { toWgs84 } from '../map/projection';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 
 /** Language-neutral fallback used if a route name contains no valid filename characters. */
-const GPX_FILENAME_FALLBACK = 'swiss-trail-planner-route';
+const GPX_FILENAME_FALLBACK = 'via-helvetica-route';
 /** Decimal places for WGS 84 coordinates; seven digits provide sub-metre precision. */
 const GPX_COORDINATE_PRECISION = 7;
 /** Decimal places for elevation values supplied by the terrain profile service. */
@@ -561,7 +561,7 @@ function serializeTrackPoint(point: GpxTrackPoint): string {
 export function createRouteGpx(
   steps: RouteStep[],
   generatedAt: Date = new Date(),
-  routeName = 'Swiss Trail Planner route',
+  routeName = 'Via Helvetica route',
   elevationPoints: RouteElevationPoint[] = [],
   closure: RouteClosure | null = null,
 ): string {
@@ -581,7 +581,7 @@ export function createRouteGpx(
   const escapedRouteName = escapeXml(routeName);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Swiss Trail Planner" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+<gpx version="1.1" creator="Via Helvetica" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
     <name>${escapedRouteName}</name>
     <time>${generatedAt.toISOString()}</time>
@@ -610,7 +610,7 @@ ${serializedTrackPoints}
  */
 export function downloadRouteGpx(
   steps: RouteStep[],
-  routeName = 'Swiss Trail Planner route',
+  routeName = 'Via Helvetica route',
   elevationPoints: RouteElevationPoint[] = [],
   closure: RouteClosure | null = null,
 ): void {

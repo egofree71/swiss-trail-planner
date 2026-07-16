@@ -1,4 +1,4 @@
-# Swiss Trail Planner Architecture
+# Via Helvetica Architecture
 
 > Documented state: native LV95 (`EPSG:2056`) map rendering with selectable
 > raster backgrounds, hiking, closure, military shooting-danger, and
@@ -15,7 +15,7 @@ directory, or primary application flow changes.
 
 ## 1. Project goal
 
-Swiss Trail Planner is an open-source web application for planning hiking
+Via Helvetica is an open-source web application for planning hiking
 routes in Switzerland.
 
 The long-term functional target is similar to BRouter-Web, with one central
@@ -727,14 +727,14 @@ used by editable routes.
 The repository is deployed as a GitHub Pages project site:
 
 ```text
-https://<username>.github.io/swiss-trail-planner/
+https://<username>.github.io/via-helvetica/
 ```
 
 Because the application is hosted below a repository-specific path rather than
 the domain root, `vite.config.ts` sets:
 
 ```ts
-base: '/swiss-trail-planner/'
+base: '/via-helvetica/'
 ```
 
 Vite uses this value when generating production asset URLs. Production
@@ -777,7 +777,7 @@ without this constraint.
 ## 15. Repository structure
 
 ```text
-swiss-trail-planner/
+via-helvetica/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml

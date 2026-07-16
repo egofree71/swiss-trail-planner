@@ -231,16 +231,16 @@ const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 const ROUTE_PROFILE_HOVER_TOLERANCE_PX = 10;
 /** Browser preference key for the rendered hiking-trail overlay. */
 const HIKING_TRAILS_VISIBILITY_STORAGE_KEY =
-  'swiss-trail-planner.hiking-trails-visible';
+  'via-helvetica.hiking-trails-visible';
 /** Browser preference key for the safety-information overlay. */
 const TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY =
-  'swiss-trail-planner.trail-closures-visible';
+  'via-helvetica.trail-closures-visible';
 /** Browser preference key for the military danger-zone overlay. */
 const SHOOTING_DANGER_ZONES_VISIBILITY_STORAGE_KEY =
-  'swiss-trail-planner.shooting-danger-zones-visible';
+  'via-helvetica.shooting-danger-zones-visible';
 /** Browser preference key for the optional public-transport stop overlay. */
 const PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY =
-  'swiss-trail-planner.public-transport-stops-visible';
+  'via-helvetica.public-transport-stops-visible';
 
 /** Restores the hiking-trail preference, which is enabled by default. */
 function getInitialHikingTrailsVisibility(): boolean {

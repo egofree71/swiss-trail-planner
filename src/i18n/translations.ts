@@ -22,7 +22,7 @@ export const LANGUAGE_METADATA: Record<
 
 const frenchTranslations = {
   'app.description':
-    "Swiss Trail Planner — planificateur d'itinéraires suisse open source.",
+    "Via Helvetica — planificateur open source d'itinéraires de randonnée en Suisse.",
   'language.select': 'Choisir la langue',
   'language.fr': 'Français',
   'language.de': 'Allemand',
@@ -158,7 +158,7 @@ const frenchTranslations = {
 
   'units.hourShort': 'h',
   'units.minuteShort': 'min',
-  'gpx.routeName': 'Itinéraire Swiss Trail Planner',
+  'gpx.routeName': 'Itinéraire Via Helvetica',
   'gpx.nameLabel': 'Nom de l’itinéraire',
   'gpx.nameHint':
     'Ce nom sera utilisé dans le fichier GPX et dans les applications qui l’importent.',
@@ -170,7 +170,7 @@ export type TranslationKey = keyof typeof frenchTranslations;
 
 const germanTranslations: Record<TranslationKey, string> = {
   'app.description':
-    'Swiss Trail Planner — quelloffener Schweizer Routenplaner.',
+    'Via Helvetica — quelloffener Routenplaner für Wanderungen in der Schweiz.',
   'language.select': 'Sprache wählen',
   'language.fr': 'Französisch',
   'language.de': 'Deutsch',
@@ -308,7 +308,7 @@ const germanTranslations: Record<TranslationKey, string> = {
 
   'units.hourShort': 'Std.',
   'units.minuteShort': 'Min.',
-  'gpx.routeName': 'Swiss Trail Planner Route',
+  'gpx.routeName': 'Via-Helvetica-Route',
   'gpx.nameLabel': 'Name der Route',
   'gpx.nameHint':
     'Dieser Name wird in der GPX-Datei und in Anwendungen verwendet, die sie importieren.',
@@ -317,7 +317,7 @@ const germanTranslations: Record<TranslationKey, string> = {
 
 const italianTranslations: Record<TranslationKey, string> = {
   'app.description':
-    'Swiss Trail Planner — pianificatore svizzero di itinerari open source.',
+    'Via Helvetica — pianificatore open source di itinerari escursionistici in Svizzera.',
   'language.select': 'Scegli la lingua',
   'language.fr': 'Francese',
   'language.de': 'Tedesco',
@@ -455,7 +455,7 @@ const italianTranslations: Record<TranslationKey, string> = {
 
   'units.hourShort': 'h',
   'units.minuteShort': 'min',
-  'gpx.routeName': 'Itinerario Swiss Trail Planner',
+  'gpx.routeName': 'Itinerario Via Helvetica',
   'gpx.nameLabel': 'Nome dell’itinerario',
   'gpx.nameHint':
     'Questo nome verrà usato nel file GPX e nelle applicazioni che lo importano.',
@@ -464,7 +464,7 @@ const italianTranslations: Record<TranslationKey, string> = {
 
 const englishTranslations: Record<TranslationKey, string> = {
   'app.description':
-    'Swiss Trail Planner — open-source Swiss hiking route planner.',
+    'Via Helvetica — open-source hiking route planner for Switzerland.',
   'language.select': 'Choose language',
   'language.fr': 'French',
   'language.de': 'German',
@@ -600,7 +600,7 @@ const englishTranslations: Record<TranslationKey, string> = {
 
   'units.hourShort': 'h',
   'units.minuteShort': 'min',
-  'gpx.routeName': 'Swiss Trail Planner route',
+  'gpx.routeName': 'Via Helvetica route',
   'gpx.nameLabel': 'Route name',
   'gpx.nameHint':
     'This name will be used in the GPX file and by applications that import it.',
