@@ -61,8 +61,9 @@ http://localhost:5173/swiss-trail-planner/
    straight line when no routable path can be resolved.
 4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
    or export the current itinerary. Compact **A** and **B** markers identify the
-   current start and finish; reversing the route swaps them, while a closed loop
-   uses one split green/red **A/B** marker so both roles remain visible. A waypoint
+   current start and finish; reversing an open route swaps them, while a closed
+   loop keeps its split green/red **A/B** marker at the same physical start and
+   reverses only the travel direction. A waypoint
    move, insertion, or individual deletion is restored as one complete undoable
    edit.
 5. Load a GPX file as the current purple, read-only itinerary. Its overall start

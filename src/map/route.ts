@@ -351,22 +351,79 @@ export function reverseRouteSteps(steps: RouteStep[]): RouteStep[] {
 }
 
 
-/** Reverses an open or closed route without recalculating any geometry. */
-export function reverseRouteState(state: RouteState): RouteState {
-  const reversedSteps = reverseRouteSteps(state.steps);
-  const reversedClosure = state.closure
-    ? {
-        segment: state.closure.segment
-          .slice()
-          .reverse()
-          .map((coordinate): Coordinate => [...coordinate]),
-        mode: state.closure.mode,
-      }
-    : null;
+/** Reverses one coordinate sequence without sharing mutable point arrays. */
+function reverseSegment(segment: Coordinate[]): Coordinate[] {
+  return segment
+    .slice()
+    .reverse()
+    .map((coordinate): Coordinate => [...coordinate]);
+}
+
+/**
+ * Reverses a closed route while preserving its physical start waypoint.
+ *
+ * A loop has no inherent geometric endpoint, but the user's first waypoint is
+ * still meaningful as the start shown by the combined A/B marker. Reversal
+ * therefore rotates section ownership around that fixed waypoint instead of
+ * making the former last waypoint the new start.
+ */
+function reverseClosedRouteState(state: RouteState): RouteState {
+  const { steps, closure } = state;
+
+  if (!closure || steps.length < 2) {
+    return state;
+  }
+
+  const reversedSteps: RouteStep[] = [
+    {
+      ...steps[0],
+      waypoint: [...steps[0].waypoint],
+      segment: null,
+    },
+    {
+      waypoint: [...steps[steps.length - 1].waypoint],
+      segment: reverseSegment(closure.segment),
+      mode: closure.mode,
+    },
+  ];
+
+  for (let index = steps.length - 1; index > 1; index -= 1) {
+    const sourceStep = steps[index];
+    const destinationStep = steps[index - 1];
+    const reversedSegment = sourceStep.segment
+      ? reverseSegment(sourceStep.segment)
+      : [[...sourceStep.waypoint], [...destinationStep.waypoint]];
+
+    reversedSteps.push({
+      waypoint: [...destinationStep.waypoint],
+      segment: reversedSegment,
+      mode: sourceStep.mode,
+    });
+  }
+
+  const firstNormalSection = steps[1];
+  const reversedClosure: RouteClosure = {
+    segment: firstNormalSection.segment
+      ? reverseSegment(firstNormalSection.segment)
+      : [[...firstNormalSection.waypoint], [...steps[0].waypoint]],
+    mode: firstNormalSection.mode,
+  };
 
   return {
     steps: reversedSteps,
     closure: reversedClosure,
+  };
+}
+
+/** Reverses an open or closed route without recalculating any geometry. */
+export function reverseRouteState(state: RouteState): RouteState {
+  if (state.closure) {
+    return reverseClosedRouteState(state);
+  }
+
+  return {
+    steps: reverseRouteSteps(state.steps),
+    closure: null,
   };
 }
 

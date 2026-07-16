@@ -568,8 +568,9 @@ waypoint. Red is used deliberately so planned routes do not resemble blue
 hydrographic features. Waypoint features carry their route index for hit
 detection. Shared endpoint styling from `src/map/itineraryEndpoints.ts` adds
 compact A and B markers above the first and final waypoints. A closed route uses
-one vertically split green/red A/B marker at its current start; reversing the immutable state
-moves or swaps these markers automatically without separate marker state.
+one vertically split green/red A/B marker at its current start. Open-route
+reversal swaps the endpoint markers, while closed-route reversal preserves that
+physical start and changes only the traversal direction, without separate marker state.
 
 The same module creates one focused OpenLayers pointer interaction for existing
 waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
@@ -642,8 +643,10 @@ and altitude, draws a vertical chart guide, and publishes only cumulative
 distance to the root application. A cumulative distance selected by hovering
 the map route drives the same guide and header values while the profile is open.
 
-Reversal uses `reverseRouteState()` to reverse waypoint order, normal sections,
-and the optional closing geometry without issuing another routing request. Loop
+Reversal uses `reverseRouteState()` to reverse stored geometry without issuing
+another routing request. Open routes reverse waypoint order normally. Closed
+routes rotate the reversed sections around the original first waypoint, so the
+combined A/B marker stays fixed while the travel direction changes. Loop
 closure and reopening are each recorded as one snapshot edit and can therefore
 be undone exactly. Deletion clears the current route and all undo/redo states
 while keeping route-creation mode active. GPX export is enabled after two
@@ -1203,7 +1206,7 @@ messages, and OpenLayers control placement.
     route state and clears obsolete redo states.
 33. Updating the committed route state rebuilds the route line, indexed
     waypoint features, and A/B endpoint markers. Reversal swaps the open-route
-    markers; a closed route keeps one combined marker at its new start.
+    markers; a closed route keeps one combined marker at the same physical start.
 34. Distance is recalculated locally from the flattened route geometry, including
     the optional closing section.
 35. After a short debounce, an abortable profile request refreshes ascent,
