@@ -113,6 +113,7 @@ import {
 import {
   createRouteProfileMarker,
   createRouteProfilePositionIndex,
+  getClosestRouteProfilePosition,
   getRouteProfileCoordinate,
   type RouteProfileMarker,
   updateRouteProfileMarker,
@@ -225,6 +226,8 @@ const ROUTE_INTERACTION_CLICK_TOLERANCE_PX = 8;
 const ROUTE_CONTEXT_HINT_HALF_WIDTH_PX = 190;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
+/** Screen-space route tolerance for the bidirectional map/profile hover link. */
+const ROUTE_PROFILE_HOVER_TOLERANCE_PX = 10;
 /** Browser preference key for the rendered hiking-trail overlay. */
 const HIKING_TRAILS_VISIBILITY_STORAGE_KEY =
   'swiss-trail-planner.hiking-trails-visible';
@@ -906,6 +909,8 @@ export default function App() {
     useState<RouteElevationStatus>('loading');
   const [routeElevation, setRouteElevation] =
     useState<RouteElevationSummary | null>(null);
+  const [routeMapHoverDistanceMeters, setRouteMapHoverDistanceMeters] =
+    useState<number | null>(null);
   const [importedRouteSegments, setImportedRouteSegments] = useState<
     Coordinate[][]
   >([]);
@@ -2471,6 +2476,13 @@ export default function App() {
         routeHistoryRef.current.steps.length > 0,
       getRouteState: () => getRouteState(routeHistoryRef.current),
       onStart: (target: RouteDragTarget) => {
+        const marker = routeProfileMarkerRef.current;
+
+        if (marker) {
+          updateRouteProfileMarker(marker, null);
+        }
+        setRouteMapHoverDistanceMeters(null);
+
         const expectedState = getRouteState(routeHistoryRef.current);
         const { steps, closure } = expectedState;
 
@@ -2682,13 +2694,73 @@ export default function App() {
     };
   }, [isRouteCreationActive, language]);
 
-  /** Clears any stale profile marker as soon as the active geometry changes. */
+  /** Clears any stale route/profile hover position when geometry changes. */
   useEffect(() => {
     const marker = routeProfileMarkerRef.current;
 
     if (marker) {
       updateRouteProfileMarker(marker, null);
     }
+    setRouteMapHoverDistanceMeters(null);
+  }, [routeProfilePositionIndex]);
+
+  /**
+   * Mirrors map pointer movement onto the route and, when open, the elevation
+   * profile. The nearest route coordinate is found in LV95 with a tolerance
+   * derived from screen pixels so the interaction remains stable at every zoom.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    const marker = routeProfileMarkerRef.current;
+
+    if (!map || !marker || routeProfilePositionIndex.segments.length === 0) {
+      return;
+    }
+
+    const clearRouteMapHover = () => {
+      updateRouteProfileMarker(marker, null);
+      setRouteMapHoverDistanceMeters(null);
+    };
+
+    const handleRoutePointerMove = (event: MapBrowserEvent) => {
+      const pointerType =
+        (event.originalEvent as PointerEvent).pointerType;
+
+      if (
+        (pointerType && pointerType !== 'mouse' && pointerType !== 'pen') ||
+        routeDragStateRef.current !== null ||
+        routeOperationPendingRef.current
+      ) {
+        clearRouteMapHover();
+        return;
+      }
+
+      const resolution = map.getView().getResolution();
+
+      if (!resolution) {
+        clearRouteMapHover();
+        return;
+      }
+
+      const position = getClosestRouteProfilePosition(
+        routeProfilePositionIndex,
+        event.coordinate,
+        resolution * ROUTE_PROFILE_HOVER_TOLERANCE_PX,
+      );
+
+      updateRouteProfileMarker(marker, position?.coordinate ?? null);
+      setRouteMapHoverDistanceMeters(position?.distanceMeters ?? null);
+    };
+
+    const mapTarget = map.getTargetElement();
+    map.on('pointermove', handleRoutePointerMove);
+    mapTarget.addEventListener('pointerleave', clearRouteMapHover);
+
+    return () => {
+      map.un('pointermove', handleRoutePointerMove);
+      mapTarget.removeEventListener('pointerleave', clearRouteMapHover);
+      clearRouteMapHover();
+    };
   }, [routeProfilePositionIndex]);
 
   /**
@@ -3200,6 +3272,7 @@ export default function App() {
           onProfileHoverDistanceChange={
             handleProfileHoverDistanceChange
           }
+          routeHoverDistanceMeters={routeMapHoverDistanceMeters}
         />
       )}
 

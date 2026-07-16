@@ -21,6 +21,8 @@ interface RouteElevationProfileProps {
   points: RouteElevationPoint[];
   /** Publishes cumulative route distance while the pointer explores the chart. */
   onHoverDistanceChange?: (distanceMeters: number | null) => void;
+  /** Cumulative distance selected by pointer movement over the map route. */
+  externalHoverDistanceMeters?: number | null;
 }
 
 /** Internal SVG dimensions used to normalize route distance and altitude. */
@@ -314,6 +316,7 @@ export default function RouteElevationProfile({
   id,
   points,
   onHoverDistanceChange,
+  externalHoverDistanceMeters = null,
 }: RouteElevationProfileProps) {
   const { locale, t } = useI18n();
   const integerFormat = useMemo(
@@ -345,6 +348,49 @@ export default function RouteElevationProfile({
     chartMaximumElevation - chartMinimumElevation;
   const distanceTicks = buildDistanceTicks(totalDistance, plotWidth);
 
+  const profilePointAtDistance = useCallback(
+    (distanceMeters: number): HoveredProfilePoint => {
+      const boundedDistance = Math.min(
+        totalDistance,
+        Math.max(0, distanceMeters),
+      );
+      const x =
+        CHART_PADDING.left +
+        (boundedDistance / totalDistance) * plotWidth;
+      const elevationMeters = elevationAtDistance(points, boundedDistance);
+      const y =
+        CHART_PADDING.top +
+        (1 -
+          (elevationMeters - chartMinimumElevation) /
+            chartElevationRange) *
+          plotHeight;
+
+      return {
+        distanceMeters: boundedDistance,
+        elevationMeters,
+        x,
+        y,
+      };
+    },
+    [
+      chartElevationRange,
+      chartMinimumElevation,
+      plotHeight,
+      plotWidth,
+      points,
+      totalDistance,
+    ],
+  );
+
+  const externalHoveredPoint = useMemo(
+    () =>
+      externalHoverDistanceMeters === null
+        ? null
+        : profilePointAtDistance(externalHoverDistanceMeters),
+    [externalHoverDistanceMeters, profilePointAtDistance],
+  );
+  const displayedHoveredPoint = hoveredPoint ?? externalHoveredPoint;
+
   const clearHover = useCallback(() => {
     setHoveredPoint(null);
     onHoverDistanceChange?.(null);
@@ -366,29 +412,14 @@ export default function RouteElevationProfile({
       );
       const distanceMeters =
         ((boundedX - CHART_PADDING.left) / plotWidth) * totalDistance;
-      const elevationMeters = elevationAtDistance(points, distanceMeters);
-      const y =
-        CHART_PADDING.top +
-        (1 -
-          (elevationMeters - chartMinimumElevation) /
-            chartElevationRange) *
-          plotHeight;
 
-      setHoveredPoint({
-        distanceMeters,
-        elevationMeters,
-        x: boundedX,
-        y,
-      });
+      setHoveredPoint(profilePointAtDistance(distanceMeters));
       onHoverDistanceChange?.(distanceMeters);
     },
     [
-      chartElevationRange,
-      chartMinimumElevation,
       onHoverDistanceChange,
-      plotHeight,
       plotWidth,
-      points,
+      profilePointAtDistance,
       totalDistance,
     ],
   );
@@ -399,12 +430,15 @@ export default function RouteElevationProfile({
     return () => onHoverDistanceChange?.(null);
   }, [clearHover, onHoverDistanceChange, points]);
 
-  const headerValue = hoveredPoint
+  const headerValue = displayedHoveredPoint
     ? `${formatDistance(
-        hoveredPoint.distanceMeters,
+        displayedHoveredPoint.distanceMeters,
         integerFormat,
         distanceFormat,
-      )} · ${formatAltitude(hoveredPoint.elevationMeters, integerFormat)}`
+      )} · ${formatAltitude(
+        displayedHoveredPoint.elevationMeters,
+        integerFormat,
+      )}`
     : `${formattedMinimum} – ${formattedMaximum}`;
 
   return (
@@ -490,15 +524,19 @@ export default function RouteElevationProfile({
           points={linePoints}
         />
 
-        {hoveredPoint && (
+        {displayedHoveredPoint && (
           <g className="route-elevation-profile-hover" aria-hidden="true">
             <line
-              x1={hoveredPoint.x}
-              x2={hoveredPoint.x}
+              x1={displayedHoveredPoint.x}
+              x2={displayedHoveredPoint.x}
               y1={CHART_PADDING.top}
               y2={CHART_HEIGHT - CHART_PADDING.bottom}
             />
-            <circle cx={hoveredPoint.x} cy={hoveredPoint.y} r="5" />
+            <circle
+              cx={displayedHoveredPoint.x}
+              cy={displayedHoveredPoint.y}
+              r="5"
+            />
           </g>
         )}
 

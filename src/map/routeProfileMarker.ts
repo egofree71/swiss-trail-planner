@@ -30,7 +30,7 @@ interface RouteProfileIndexedSegment {
   distanceMeters: number;
 }
 
-/** Precomputed route geometry used to translate profile distance to map position. */
+/** Precomputed route geometry used to translate between profile and map positions. */
 export interface RouteProfilePositionIndex {
   /** Independent route sections, preserving deliberate GPX gaps. */
   segments: RouteProfileIndexedSegment[];
@@ -38,13 +38,27 @@ export interface RouteProfilePositionIndex {
   totalDistanceMeters: number;
 }
 
-/** OpenLayers resources for the transient profile-hover marker. */
+/** Closest indexed route position returned for one map pointer coordinate. */
+export interface RouteProfilePosition {
+  /** Projected coordinate snapped to the displayed route geometry. */
+  coordinate: Coordinate;
+  /** Cumulative geodesic distance from the start of the itinerary. */
+  distanceMeters: number;
+}
+
+/** OpenLayers resources for the transient route/profile position marker. */
 export interface RouteProfileMarker {
-  /** Feature whose geometry is removed while the profile is not hovered. */
+  /** Feature whose geometry is removed while neither map nor profile is hovered. */
   feature: Feature<Point>;
   /** Layer kept above route and location symbols. */
   layer: VectorLayer<VectorSource<Feature<Point>>>;
 }
+
+/**
+ * Exact overlap ties use route order so repeated paths map to the latest
+ * passage.
+ */
+const ROUTE_PROFILE_OVERLAP_TIE_TOLERANCE_SQUARED = 1e-6;
 
 /** Dark centre and white casing stay legible over every official background. */
 const ROUTE_PROFILE_MARKER_STYLE = new Style({
@@ -60,7 +74,7 @@ const ROUTE_PROFILE_MARKER_STYLE = new Style({
   }),
 });
 
-/** Creates a hidden marker that can follow pointer movement over the profile. */
+/** Creates a hidden marker that can follow pointer movement over map or profile. */
 export function createRouteProfileMarker(): RouteProfileMarker {
   const feature = new Feature<Point>();
   const source = new VectorSource<Feature<Point>>({
@@ -225,3 +239,117 @@ export function getRouteProfileCoordinate(
   const lastSegment = index.segments[index.segments.length - 1];
   return [...lastSegment.coordinates[lastSegment.coordinates.length - 1]];
 }
+
+/** Returns the closest point and interpolation fraction on one projected segment. */
+function closestPointOnProjectedSegment(
+  coordinate: Coordinate,
+  start: Coordinate,
+  end: Coordinate,
+): {
+  coordinate: Coordinate;
+  fraction: number;
+  distanceSquared: number;
+} {
+  const segmentX = end[0] - start[0];
+  const segmentY = end[1] - start[1];
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+  if (segmentLengthSquared === 0) {
+    const deltaX = coordinate[0] - start[0];
+    const deltaY = coordinate[1] - start[1];
+
+    return {
+      coordinate: [...start],
+      fraction: 0,
+      distanceSquared: deltaX * deltaX + deltaY * deltaY,
+    };
+  }
+
+  const projection =
+    ((coordinate[0] - start[0]) * segmentX +
+      (coordinate[1] - start[1]) * segmentY) /
+    segmentLengthSquared;
+  const fraction = Math.max(0, Math.min(1, projection));
+  const closestCoordinate: Coordinate = [
+    start[0] + fraction * segmentX,
+    start[1] + fraction * segmentY,
+  ];
+  const deltaX = coordinate[0] - closestCoordinate[0];
+  const deltaY = coordinate[1] - closestCoordinate[1];
+
+  return {
+    coordinate: closestCoordinate,
+    fraction,
+    distanceSquared: deltaX * deltaX + deltaY * deltaY,
+  };
+}
+
+/**
+ * Finds the nearest displayed route position for one projected map coordinate.
+ *
+ * The pointer tolerance is supplied in map units so the caller can keep a
+ * stable screen-pixel hit area at every zoom. Perfectly overlapping passages
+ * resolve to the latest cumulative position in route order, matching direct
+ * route-section editing.
+ */
+export function getClosestRouteProfilePosition(
+  index: RouteProfilePositionIndex,
+  coordinate: Coordinate,
+  maximumDistanceMapUnits: number,
+): RouteProfilePosition | null {
+  if (
+    index.segments.length === 0 ||
+    !Number.isFinite(maximumDistanceMapUnits) ||
+    maximumDistanceMapUnits < 0
+  ) {
+    return null;
+  }
+
+  const maximumDistanceSquared = maximumDistanceMapUnits ** 2;
+  let closestDistanceSquared = Number.POSITIVE_INFINITY;
+  let closestPosition: RouteProfilePosition | null = null;
+
+  for (const segment of index.segments) {
+    for (
+      let coordinateIndex = 1;
+      coordinateIndex < segment.coordinates.length;
+      coordinateIndex += 1
+    ) {
+      const candidate = closestPointOnProjectedSegment(
+        coordinate,
+        segment.coordinates[coordinateIndex - 1],
+        segment.coordinates[coordinateIndex],
+      );
+      const lowerDistance =
+        segment.cumulativeDistancesMeters[coordinateIndex - 1];
+      const upperDistance =
+        segment.cumulativeDistancesMeters[coordinateIndex];
+      const candidateRouteDistance =
+        segment.startDistanceMeters +
+        lowerDistance +
+        (upperDistance - lowerDistance) * candidate.fraction;
+      const distanceDifference =
+        candidate.distanceSquared - closestDistanceSquared;
+      const isCloser =
+        distanceDifference < -ROUTE_PROFILE_OVERLAP_TIE_TOLERANCE_SQUARED;
+      const isSameVisiblePositionLaterInRoute =
+        Math.abs(distanceDifference) <=
+          ROUTE_PROFILE_OVERLAP_TIE_TOLERANCE_SQUARED &&
+        closestPosition !== null &&
+        candidateRouteDistance > closestPosition.distanceMeters;
+
+      if (isCloser || isSameVisiblePositionLaterInRoute) {
+        closestDistanceSquared = candidate.distanceSquared;
+        closestPosition = {
+          coordinate: candidate.coordinate,
+          distanceMeters: candidateRouteDistance,
+        };
+      }
+    }
+  }
+
+  return closestDistanceSquared <= maximumDistanceSquared
+    ? closestPosition
+    : null;
+}
+

@@ -27,6 +27,8 @@ interface RouteStatisticsProps {
   elevationPoints: RouteElevationPoint[];
   /** Receives profile distance while the pointer explores the chart. */
   onProfileHoverDistanceChange?: (distanceMeters: number | null) => void;
+  /** Cumulative distance selected by hovering the route on the map. */
+  routeHoverDistanceMeters?: number | null;
 }
 
 /** Duration is rounded to five minutes because it is an indicative estimate. */
@@ -93,6 +95,7 @@ export default function RouteStatistics({
   durationMinutes,
   elevationPoints,
   onProfileHoverDistanceChange,
+  routeHoverDistanceMeters = null,
 }: RouteStatisticsProps) {
   const { locale, t } = useI18n();
   const [isProfileVisible, setIsProfileVisible] = useState(false);
@@ -132,6 +135,7 @@ export default function RouteStatistics({
           id={profileId}
           points={elevationPoints}
           onHoverDistanceChange={onProfileHoverDistanceChange}
+          externalHoverDistanceMeters={routeHoverDistanceMeters}
         />
       )}
 

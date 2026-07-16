@@ -67,6 +67,7 @@ It can:
 - calculate imported GPX distance, ascent, descent, walking time, and elevation profile without inventing links across separate track segments;
 - display distance, ascent, descent, and estimated walking time in a compact bar;
 - reveal or hide a compact elevation profile from the summary bar;
+- show the nearest itinerary position while hovering the map route and mirror it into the open elevation profile;
 - reveal a compact route action strip for snap mode, reversal, loop closure, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
@@ -633,7 +634,8 @@ vertical range with rounded axis bounds so small local variations are not
 visually exaggerated. Larger profiles retain automatic scaling with a small
 margin around their extrema. Pointer movement interpolates the profile distance
 and altitude, draws a vertical chart guide, and publishes only cumulative
-distance to the root application.
+distance to the root application. A cumulative distance selected by hovering
+the map route drives the same guide and header values while the profile is open.
 
 Reversal uses `reverseRouteState()` to reverse waypoint order, normal sections,
 and the optional closing geometry without issuing another routing request. Loop
@@ -981,14 +983,17 @@ maximum altitude in the header, rounded display bounds, a minimum 40-metre
 vertical range, and a route-coloured profile line.
 Pointer exploration adds a chart guide, replaces the header range temporarily
 with distance and altitude, and emits cumulative route distance without owning
-map state.
+map state. When the map supplies a hovered route distance, the mounted chart
+uses the same guide and header presentation.
 
 ### `src/map/routeProfileMarker.ts`
 
-Owns the transient map marker shown while the elevation profile is explored. It
+Owns the transient position marker shared by route and profile exploration. It
 precomputes geodesic cumulative distances for each displayed route segment,
-interpolates the corresponding LV95 coordinate through a binary search, and
-never creates a connector across separate imported GPX segments.
+interpolates profile distance to LV95 coordinates through a binary search, and
+finds the closest cumulative distance for map pointer positions. Separate
+imported GPX segments remain independent, and perfectly overlapping passages
+resolve to the latest position in route order.
 
 ### `src/metrics/routeMetrics.ts`
 
@@ -1187,31 +1192,33 @@ messages, and OpenLayers control placement.
 35. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
 36. The profile button reveals or hides the SVG chart without another request.
-37. Moving a pointer across the chart interpolates its cumulative distance and
-    updates a transient marker above the corresponding map position; leaving or
-    hiding the profile clears the marker.
-38. Undo and redo exchange complete stored route states without routing again.
-39. Reversal rebuilds normal and closing geometry in the opposite direction as
+37. Moving a pointer across the displayed itinerary finds the nearest indexed
+    position and shows a transient circle on the map. When the profile is open,
+    the same cumulative distance updates its guide, altitude, and distance.
+38. Moving a pointer across the chart performs the inverse lookup and updates
+    the same transient marker above the corresponding map position.
+39. Undo and redo exchange complete stored route states without routing again.
+40. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
-40. Deletion clears the current route and all undo/redo states and hides the summary.
-41. GPX export opens a modal naming form before any XML is generated.
-42. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
+41. Deletion clears the current route and all undo/redo states and hides the summary.
+42. GPX export opens a modal naming form before any XML is generated.
+43. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-43. Changing language updates interface text, number formatting, document
+44. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-44. Leaving route mode removes the route-click listener and drag interaction,
+45. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-45. The fullscreen button requests fullscreen for the root application element.
-46. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-47. Focusing the location-search field closes any stop, hiking-closure, or
+46. The fullscreen button requests fullscreen for the root application element.
+47. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+48. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
-48. On unmount, map listeners, interactions, timers, requests, references, and
+49. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-49. A push to `main` triggers the Pages workflow, which builds and deploys
+50. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist`.
 
 ## 18. Error handling
