@@ -9,7 +9,10 @@ import { useI18n } from '../i18n/I18nContext';
 interface RouteControlsProps {
   /** Whether map clicks currently create route waypoints. */
   isActive: boolean;
-  /** Whether new segments use swissTLM3D routing instead of straight lines. */
+  /**
+   * Whether new and reshaped segments use swissTLM3D routing instead of
+   * straight lines.
+   */
   isSnapEnabled: boolean;
   /** Whether a snap or route request is currently in progress. */
   isBusy: boolean;
@@ -35,7 +38,10 @@ interface RouteControlsProps {
   onUndo: () => void;
   /** Restores the latest undone route state. */
   onRedo: () => void;
-  /** Switches between network routing and direct segments. */
+  /**
+   * Switches additions and route reshaping between network routing and direct
+   * segments.
+   */
   onToggleSnap: () => void;
   /** Reverses waypoint and segment order. */
   onReverse: () => void;

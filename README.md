@@ -55,10 +55,12 @@ http://localhost:5173/via-helvetica/
    Drag an existing red waypoint to move it, click it to delete it, or drag a
    red route section to insert a waypoint into that stored section. Contextual
    labels describe these actions when a mouse or hover-capable pointer is used.
-   Only the affected sections are recalculated after an edit.
-3. Keep snapping enabled to follow available swissTLM3D roads and paths, or
-   disable it to create straight segments. A section also falls back to a
-   straight line when no routable path can be resolved.
+   Only the affected sections are recalculated after an edit, using the current
+   snapping choice.
+3. Keep snapping enabled to create or reshape sections along available
+   swissTLM3D roads and paths, or disable it to create or rebuild them as
+   straight lines. A section also falls back to a straight line when no
+   routable path can be resolved.
 4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
    or export the current itinerary. Compact **A** and **B** markers identify the
    current start and finish. Sparse hollow arrows centred on the line show travel direction

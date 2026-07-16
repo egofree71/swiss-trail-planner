@@ -50,11 +50,11 @@ It can:
 - enter and leave browser fullscreen mode;
 - enter a visual route-creation mode with a crosshair map cursor;
 - add ordered route waypoints by clicking or tapping the map;
-- drag an existing waypoint and recalculate only its adjacent sections after release;
-- click an existing waypoint to remove it and reconnect its neighbours;
-- drag an existing route section to insert a new waypoint and reshape that section;
+- drag an existing waypoint and recalculate only its adjacent sections after release using the current snap mode;
+- click an existing waypoint to remove it and reconnect its neighbours using the current snap mode;
+- drag an existing route section to insert a new waypoint and reshape that section using the current snap mode;
 - show contextual hover guidance for waypoint and route-section editing;
-- create straight segments when snapping is disabled or a snapped section cannot be resolved;
+- create or rebuild straight segments when snapping is disabled or a snapped section cannot be resolved;
 - load swissTLM3D road and hiking geometries dynamically around selected waypoints;
 - build a regional walkable graph and calculate snapped sections with A*;
 - prefer official hiking-trail sections through routing costs;
@@ -541,6 +541,11 @@ Later clicks load a narrow cell corridor between the previous waypoint and the
 new position. Completed cells remain cached in memory and are not requested
 again during the browser session.
 
+The same current snap choice governs route reshaping. Moving a waypoint,
+inserting one by dragging a section, or deleting one rebuilds only the affected
+sections as network routes when snapping is enabled, or as exact straight lines
+when it is disabled. Unaffected sections retain their stored geometry and mode.
+
 Missing routing coverage is treated differently from an API failure. If the
 loaded cells contain no walkable graph, the first waypoint is placed freely. If
 no nearby or connected path exists for a later click, that single incoming
@@ -604,23 +609,25 @@ network request runs during either drag.
 On release, `App.tsx` recalculates only the affected sections. A moved point
 updates its incoming and outgoing sections; moving the first or last point of a
 closed route also refreshes the closing section. An inserted point replaces one
-normal or closing section with two sections that inherit the original routing
-intent. Straight sections remain direct; network sections call the dynamic
-router and independently fall back to a straight segment if coverage or
-connectivity is missing. The insertion edit is committed only after a genuine
-drag. A click on an existing waypoint removes it, while a click-only press on a
-route section is restored and then handled by the normal map-click flow as a new
-endpoint from the current route end. This allows an itinerary to reuse an
-already drawn path without confusing that click with section reshaping.
-Closed-route endpoint deletion rebuilds the loop around the remaining points. Intermediate deletion
-reconnects the surrounding waypoints directly when both sections were straight;
-otherwise it recalculates one network section and falls back to a straight
-connector when no path is available. Hover-capable pointers receive a compact,
-localized contextual label for both waypoint and route-section actions.
+normal or closing section with two sections. Both halves use the snap mode
+selected at release: straight mode preserves the dropped coordinate exactly,
+while network mode calls the dynamic router and each half can independently
+fall back to a straight segment if coverage or connectivity is missing. The
+insertion edit is committed only after a genuine drag. A click on an existing
+waypoint removes it, while a click-only press on a route section is restored and
+then handled by the normal map-click flow as a new endpoint from the current
+route end. This allows an itinerary to reuse an already drawn path without
+confusing that click with section reshaping. Closed-route endpoint deletion
+rebuilds the loop around the remaining points. Intermediate deletion reconnects
+the surrounding waypoints according to the current snap mode and falls back to
+a straight connector when no network path is available. Hover-capable pointers
+receive a compact, localized contextual label for both waypoint and route-section
+actions.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from snapshot history state. The snap button selects network or
-straight creation; it becomes available after the first waypoint and is
+straight behavior for both creation and route reshaping; it becomes
+available after the first waypoint and is
 temporarily disabled while cells are loading or a route is being calculated.
 The loop button sits between reversal and deletion, uses the current snap mode
 to create the final section, shows an active state while closed, and reopens the
@@ -1238,55 +1245,59 @@ messages, and OpenLayers control placement.
     made during the drag. Releasing a route section without a genuine drag
     restores the committed display and lets the delayed map click append a new
     endpoint from the current route end.
-28. Releasing a moved point recalculates its affected normal sections and, for
-    the first or last point of a closed route, the closing section.
+28. Releasing a moved point recalculates its affected normal sections with the
+    current snap mode and, for the first or last point of a closed route, also
+    rebuilds the closing section with that mode.
 29. Releasing a dragged normal or closing section after a genuine movement
     replaces that section with two sections through the new waypoint; each half
-    inherits and independently resolves the original straight or network routing intent.
+    uses the current snap mode and independently falls back to a straight line
+    when network routing cannot be resolved.
 30. The loop button creates one dedicated section from the final waypoint back
     to the first using the current snap mode, or removes that section to reopen
     the route. No duplicate start waypoint is created.
 31. While the loop is closed, empty-map clicks do not append another waypoint;
     the closing section remains draggable and the first and last waypoints remain editable.
-32. Every addition, waypoint move, waypoint insertion, waypoint deletion,
+32. Clicking a waypoint deletes it; any replacement connection or rebuilt loop
+    uses the current snap mode, while unrelated sections remain unchanged.
+33. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
-33. Updating the committed route state rebuilds the route line, sparse direction
+34. Updating the committed route state rebuilds the route line, sparse direction
     arrows, indexed waypoint features, and A/B endpoint markers. Reversal swaps
     open-route markers and arrow direction; a closed route keeps one combined
     marker at the same physical start while its arrows reverse.
-34. Distance is recalculated locally from the flattened route geometry, including
+35. Distance is recalculated locally from the flattened route geometry, including
     the optional closing section.
-35. After a short debounce, an abortable profile request refreshes ascent,
+36. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and the reusable chart samples.
-36. The profile button reveals or hides the SVG chart without another request.
-37. Moving a pointer across the displayed itinerary finds the nearest indexed
+37. The profile button reveals or hides the SVG chart without another request.
+38. Moving a pointer across the displayed itinerary finds the nearest indexed
     position and shows a transient circle on the map. When the profile is open,
     the same cumulative distance updates its guide, altitude, and distance.
-38. Moving a pointer across the chart performs the inverse lookup and updates
+39. Moving a pointer across the chart performs the inverse lookup and updates
     the same transient marker above the corresponding map position.
-39. Undo and redo exchange complete stored route states without routing again.
-40. Reversal rebuilds normal and closing geometry in the opposite direction as
+40. Undo and redo exchange complete stored route states without routing again.
+41. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
-41. Deletion clears the current route and all undo/redo states and hides the summary.
-42. GPX export opens a modal naming form before any XML is generated.
-43. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
+42. Deletion clears the current route and all undo/redo states and hides the summary.
+43. GPX export opens a modal naming form before any XML is generated.
+44. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-44. Changing language updates interface text, number formatting, document
+45. Changing language updates interface text, number formatting, document
     metadata, and subsequent GeoAdmin requests without recreating the map.
-45. Leaving route mode removes the route-click listener and drag interaction,
+46. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-46. The fullscreen button requests fullscreen for the root application element.
-47. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
-48. Focusing the location-search field closes any stop, hiking-closure, or
+47. The fullscreen button requests fullscreen for the root application element.
+48. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+49. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
-49. On unmount, map listeners, interactions, timers, requests, references, and
+50. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-50. A push to `main` triggers the Pages workflow, which builds and deploys
+51. A push to `main` triggers the Pages workflow, which builds and deploys
     `dist`.
 
 ## 18. Error handling

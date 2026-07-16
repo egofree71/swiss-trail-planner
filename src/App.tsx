@@ -428,6 +428,9 @@ async function rebuildFixedRouteSection(
 /**
  * Recalculates only the sections adjacent to a moved waypoint.
  *
+ * The current snap choice governs every rebuilt section instead of preserving
+ * the modes stored before the edit.
+ *
  * A closed route also recalculates its dedicated final section when the first
  * or last waypoint moves. All unrelated sections retain their exact geometry.
  */
@@ -435,6 +438,7 @@ async function rebuildRouteAfterWaypointMove(
   state: RouteState,
   waypointIndex: number,
   targetCoordinate: Coordinate,
+  editMode: RouteMode,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
 ): Promise<RouteState> {
@@ -449,12 +453,7 @@ async function rebuildRouteAfterWaypointMove(
   let movedWaypoint: Coordinate;
 
   if (waypointIndex === 0) {
-    const shouldSnapFirstWaypoint =
-      originalStep.mode === 'network' ||
-      closure?.mode === 'network' ||
-      steps[1]?.mode === 'network';
-
-    if (shouldSnapFirstWaypoint) {
+    if (editMode === 'network') {
       const snappedCoordinate = await routingLoader.snap(
         targetCoordinate,
         signal,
@@ -483,12 +482,13 @@ async function rebuildRouteAfterWaypointMove(
         ...originalStep,
         waypoint: movedWaypoint,
         segment: null,
+        mode: 'straight',
       };
     }
   } else {
     const previousStep = steps[waypointIndex - 1];
 
-    if (originalStep.mode === 'network') {
+    if (editMode === 'network') {
       const routedPath = await routingLoader.route(
         previousStep.waypoint,
         targetCoordinate,
@@ -533,7 +533,7 @@ async function rebuildRouteAfterWaypointMove(
     const rebuiltSection = await rebuildFixedRouteSection(
       movedWaypoint,
       nextStep.waypoint,
-      nextStep.mode,
+      editMode,
       routingLoader,
       signal,
     );
@@ -554,7 +554,7 @@ async function rebuildRouteAfterWaypointMove(
     nextClosure = await rebuildFixedRouteSection(
       nextSteps[nextSteps.length - 1].waypoint,
       nextSteps[0].waypoint,
-      closure.mode,
+      editMode,
       routingLoader,
       signal,
     );
@@ -568,13 +568,14 @@ async function rebuildRouteAfterWaypointMove(
 
 /**
  * Splits one normal or loop-closing section by inserting a dragged waypoint.
- * Both halves inherit the selected section's routing intent and may fall back
- * independently to straight geometry.
+ * Both halves use the current snap choice and may fall back independently to
+ * straight geometry.
  */
 async function rebuildRouteAfterWaypointInsertion(
   state: RouteState,
   stepIndex: number,
   targetCoordinate: Coordinate,
+  editMode: RouteMode,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
 ): Promise<RouteState> {
@@ -584,7 +585,7 @@ async function rebuildRouteAfterWaypointInsertion(
     const previousStep = steps[steps.length - 1];
     let insertedStep: RouteStep;
 
-    if (closure.mode === 'network') {
+    if (editMode === 'network') {
       const routedPath = await routingLoader.route(
         previousStep.waypoint,
         targetCoordinate,
@@ -618,7 +619,7 @@ async function rebuildRouteAfterWaypointInsertion(
     const nextClosure = await rebuildFixedRouteSection(
       insertedStep.waypoint,
       steps[0].waypoint,
-      closure.mode,
+      editMode,
       routingLoader,
       signal,
     );
@@ -638,7 +639,7 @@ async function rebuildRouteAfterWaypointInsertion(
 
   let insertedStep: RouteStep;
 
-  if (destinationStep.mode === 'network') {
+  if (editMode === 'network') {
     const routedPath = await routingLoader.route(
       previousStep.waypoint,
       targetCoordinate,
@@ -668,7 +669,7 @@ async function rebuildRouteAfterWaypointInsertion(
   const rebuiltDestinationSection = await rebuildFixedRouteSection(
     insertedStep.waypoint,
     destinationStep.waypoint,
-    destinationStep.mode,
+    editMode,
     routingLoader,
     signal,
   );
@@ -691,11 +692,13 @@ async function rebuildRouteAfterWaypointInsertion(
 
 /**
  * Removes one waypoint and reconnects its neighbours when necessary.
- * Closed-route endpoint deletion rebuilds the loop around the remaining points.
+ * The replacement section uses the current snap choice. Closed-route endpoint
+ * deletion rebuilds the loop around the remaining points the same way.
  */
 async function rebuildRouteAfterWaypointDeletion(
   state: RouteState,
   waypointIndex: number,
+  editMode: RouteMode,
   routingLoader: DynamicRoutingNetworkLoader,
   signal: AbortSignal,
 ): Promise<RouteState> {
@@ -745,14 +748,10 @@ async function rebuildRouteAfterWaypointDeletion(
       };
     }
 
-    const intendedMode: RouteMode =
-      closure.mode === 'network' || nextFirstStep.mode === 'network'
-        ? 'network'
-        : 'straight';
     const nextClosure = await rebuildFixedRouteSection(
       nextSteps[nextSteps.length - 1].waypoint,
       nextSteps[0].waypoint,
-      intendedMode,
+      editMode,
       routingLoader,
       signal,
     );
@@ -773,15 +772,10 @@ async function rebuildRouteAfterWaypointDeletion(
       };
     }
 
-    const removedStep = steps[waypointIndex];
-    const intendedMode: RouteMode =
-      closure.mode === 'network' || removedStep.mode === 'network'
-        ? 'network'
-        : 'straight';
     const nextClosure = await rebuildFixedRouteSection(
       nextSteps[nextSteps.length - 1].waypoint,
       nextSteps[0].waypoint,
-      intendedMode,
+      editMode,
       routingLoader,
       signal,
     );
@@ -793,16 +787,11 @@ async function rebuildRouteAfterWaypointDeletion(
   }
 
   const previousStep = steps[waypointIndex - 1];
-  const removedStep = steps[waypointIndex];
   const destinationStep = steps[waypointIndex + 1];
-  const intendedMode: RouteMode =
-    removedStep.mode === 'network' || destinationStep.mode === 'network'
-      ? 'network'
-      : 'straight';
   const rebuiltDestinationSection = await rebuildFixedRouteSection(
     previousStep.waypoint,
     destinationStep.waypoint,
-    intendedMode,
+    editMode,
     routingLoader,
     signal,
   );
@@ -1455,6 +1444,7 @@ export default function App() {
           dragState.expectedState,
           dragState.waypointIndex,
           targetCoordinate,
+          isRouteSnapEnabled ? 'network' : 'straight',
           routingLoader,
           abortController.signal,
         );
@@ -1550,6 +1540,7 @@ export default function App() {
           dragState.expectedState,
           dragState.stepIndex,
           targetCoordinate,
+          isRouteSnapEnabled ? 'network' : 'straight',
           routingLoader,
           abortController.signal,
         );
@@ -1643,6 +1634,7 @@ export default function App() {
         const nextState = await rebuildRouteAfterWaypointDeletion(
           dragState.expectedState,
           dragState.waypointIndex,
+          isRouteSnapEnabled ? 'network' : 'straight',
           routingLoader,
           abortController.signal,
         );
@@ -2718,7 +2710,7 @@ export default function App() {
         routeHistoryRef.current.closure,
       );
     };
-  }, [isRouteCreationActive, language]);
+  }, [isRouteCreationActive, isRouteSnapEnabled, language]);
 
   /** Clears any stale route/profile hover position when geometry changes. */
   useEffect(() => {
