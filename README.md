@@ -112,6 +112,7 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices.
+- [Validation](docs/VALIDATION.md): important manual and regression checks.
 
 ## Production build and deployment
 

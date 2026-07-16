@@ -106,6 +106,7 @@ import {
   updateRouteWaypointDragPreview,
 } from './map/route';
 import {
+  clearSearchResultMarker,
   createSearchResultMarker,
   type SearchResultMarker,
   updateSearchResultMarker,
@@ -961,6 +962,15 @@ export default function App() {
     [routeProfilePositionIndex],
   );
 
+  /** Hides the temporary marker once another map workflow takes priority. */
+  const clearSelectedSearchResult = useCallback(() => {
+    const marker = searchResultMarkerRef.current;
+
+    if (marker) {
+      clearSearchResultMarker(marker);
+    }
+  }, []);
+
   /** Closes any information-layer metadata and cancels its active request. */
   const closeMapInformationPopup = useCallback(() => {
     mapInformationRequestRef.current?.abort();
@@ -1313,6 +1323,7 @@ export default function App() {
         }
       }
 
+      clearSelectedSearchResult();
       routingAbortControllerRef.current?.abort();
       routingAbortControllerRef.current = null;
       routeOperationPendingRef.current = false;
@@ -1724,6 +1735,10 @@ export default function App() {
 
     routeCreationActiveRef.current = nextState;
     routeCreationSessionRef.current += 1;
+
+    if (nextState) {
+      clearSelectedSearchResult();
+    }
 
     if (nextState && importedRouteSegments.length > 0) {
       const importedDisplay = importedRouteDisplayRef.current;
@@ -2301,6 +2316,7 @@ export default function App() {
         // Stops are already filtered and localized during viewport loading, so
         // opening their compact popup requires no additional network request.
         if (stop && stopDisplay) {
+          clearSelectedSearchResult();
           updatePublicTransportStopSelection(stopDisplay, stop);
           setPublicTransportStopPopup(stop);
           return;
@@ -2330,6 +2346,7 @@ export default function App() {
               );
 
               if (closure && !abortController.signal.aborted) {
+                clearSelectedSearchResult();
                 setTrailClosurePopup({ state: 'loading', html: null });
                 const html = await fetchTrailClosurePopup(
                   closure,
@@ -2347,6 +2364,7 @@ export default function App() {
               }
 
               console.error('Unable to load trail-closure details.', error);
+              clearSelectedSearchResult();
               setTrailClosurePopup({ state: 'error', html: null });
               return;
             }
@@ -2360,6 +2378,7 @@ export default function App() {
               );
 
               if (dangerZone && !abortController.signal.aborted) {
+                clearSelectedSearchResult();
                 const selectionDisplay =
                   shootingDangerZoneSelectionDisplayRef.current;
 
@@ -2392,6 +2411,7 @@ export default function App() {
                 'Unable to load shooting danger-zone details.',
                 error,
               );
+              clearSelectedSearchResult();
               setShootingDangerZonePopup({ state: 'error', html: null });
             }
           }
@@ -2438,6 +2458,7 @@ export default function App() {
     arePublicTransportStopsVisible,
     areShootingDangerZonesVisible,
     areTrailClosuresVisible,
+    clearSelectedSearchResult,
     closeMapInformationPopup,
     isRouteCreationActive,
     language,

@@ -77,3 +77,13 @@ export function updateSearchResultMarker(
 ): void {
   marker.feature.setGeometry(new Point(coordinate));
 }
+
+/**
+ * Hides the selected search result when another map interaction takes over.
+ * @param marker - Marker objects created by `createSearchResultMarker()`.
+ */
+export function clearSearchResultMarker(
+  marker: SearchResultMarker,
+): void {
+  marker.feature.setGeometry(undefined);
+}

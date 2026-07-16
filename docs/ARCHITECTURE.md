@@ -44,7 +44,7 @@ It can:
 - identify a visible military danger zone, highlight its polygon, and display compact localized official metadata;
 - optionally show official public-transport stops and inspect localized stop metadata;
 - search official Swiss location indexes;
-- display a selected search result as a vector marker;
+- display a selected search result as a temporary vector marker that is cleared when an information popup, GPX import, or route-creation workflow takes priority;
 - request and display the user's current position;
 - switch the complete interface between French, German, Italian, and English;
 - enter and leave browser fullscreen mode;
@@ -456,7 +456,10 @@ The component supports mouse, touch, and keyboard interaction:
 
 Selecting a result transforms its WGS 84 longitude and latitude to
 `EPSG:2056`, updates a dedicated marker, and animates the view to native level
-19 (20 metres per pixel).
+19 (20 metres per pixel). The marker remains a temporary location cue: it is
+cleared when a public-transport, hiking-closure, or danger-zone popup opens,
+when a GPX itinerary is loaded successfully, or when route creation starts. A
+map click that does not open an information popup leaves the marker untouched.
 
 ### 8.1 Interface localization
 
@@ -1143,7 +1146,7 @@ language to provide the same key at compile time.
 
 ### `src/map/searchResult.ts`
 
-Creates and updates the vector marker for the selected search result.
+Creates, updates, and clears the vector marker for the selected search result.
 
 ### `src/map/userLocation.ts`
 
@@ -1198,8 +1201,8 @@ messages, and OpenLayers control placement.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
 9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
 10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
-11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices.
-12. Selecting a valid GPX converts its WGS 84 coordinates to LV95, leaves route
+11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices. Opening any of these panels clears the temporary location-search marker.
+12. Selecting a valid GPX clears the temporary location-search marker, converts its WGS 84 coordinates to LV95, leaves route
     creation, clears editable route history, replaces the previous imported
     itinerary, adds direction arrowheads independently to each retained segment,
     and fits the map to its geometry.
@@ -1208,7 +1211,7 @@ messages, and OpenLayers control placement.
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
     the profile.
 14. Starting editable route creation clears the imported GPX without prompting.
-15. The route button toggles route-creation mode and the crosshair cursor.
+15. The route button toggles route-creation mode and the crosshair cursor; entering the mode clears the temporary location-search marker.
 16. Entering route mode attaches the route-click listener, one focused route
     drag interaction, and the contextual toolbar.
 17. With snapping disabled, a map click stores a direct section immediately.
