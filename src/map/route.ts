@@ -21,6 +21,7 @@ import {
   Stroke,
   Style,
 } from 'ol/style.js';
+import { createDirectionalLineStyle } from './itineraryDirection';
 import {
   createItineraryEndpointFeatures,
   ITINERARY_ENDPOINT_ROLE_PROPERTY,
@@ -153,12 +154,14 @@ const ROUTE_LINE_STYLE = [
       color: 'rgba(255, 255, 255, 0.95)',
       width: 11,
     }),
+    zIndex: 0,
   }),
   new Style({
     stroke: new Stroke({
       color: ROUTE_COLOR,
       width: 7,
     }),
+    zIndex: 1,
   }),
 ];
 
@@ -174,6 +177,7 @@ const ROUTE_WAYPOINT_STYLE = new Style({
       width: 3,
     }),
   }),
+  zIndex: 8,
 });
 
 /** The dragged waypoint grows slightly so the active edit remains visible under the pointer. */
@@ -188,6 +192,7 @@ const ACTIVE_ROUTE_WAYPOINT_STYLE = new Style({
       width: 4,
     }),
   }),
+  zIndex: 9,
 });
 
 /** Returns squared horizontal distance in map units to avoid a square root during deduplication. */
@@ -751,7 +756,14 @@ export function updateRouteDisplay(
     const line = new Feature({
       geometry: new LineString(routeCoordinates),
     });
-    line.setStyle(ROUTE_LINE_STYLE);
+    line.setStyle(
+      createDirectionalLineStyle({
+        lineStyles: ROUTE_LINE_STYLE,
+        coordinates: routeCoordinates,
+        color: ROUTE_COLOR,
+        avoidCoordinates: steps.map((step) => step.waypoint),
+      }),
+    );
     features.push(line);
   }
 

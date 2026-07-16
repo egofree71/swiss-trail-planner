@@ -4,8 +4,9 @@
 > raster backgrounds, hiking, closure, military shooting-danger, and
 > public-transport overlays,
 > search, geolocation, fullscreen, manual route creation with draggable,
-> insertable, and individually removable waypoints, optional loop closure, route
-> statistics, elevation profile, GPX export, and experimental
+> insertable, and individually removable waypoints, start/finish markers, sparse
+> direction arrowheads, optional loop closure, route statistics, elevation profile,
+> GPX export, and experimental
 > on-demand swissTLM3D routing around user-selected positions.
 
 This document describes the architecture currently implemented in the
@@ -61,6 +62,7 @@ It can:
 - reverse the complete route without recalculating sections;
 - mark the displayed start and finish with compact A and B symbols that swap on reversal;
 - combine start and finish into one A/B symbol for closed editable routes and imported GPX loops;
+- place sparse screen-scaled arrows along editable and imported itineraries to show travel direction without covering visible waypoints or endpoint markers;
 - close the route with a dedicated final section back to the first waypoint, or reopen it without losing the normal route;
 - clear the complete route;
 - export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
@@ -171,8 +173,8 @@ Browser
    │      ├── VectorLayer: selected military danger-zone polygon
    │      ├── TileLayer: hiking closures and detours (transparent WMS)
    │      ├── VectorLayer: filtered passenger public-transport stops
-   │      ├── VectorLayer: imported read-only GPX geometry and endpoint markers
-   │      ├── VectorLayer: editable route geometry, waypoints, and endpoint markers
+   │      ├── VectorLayer: imported read-only GPX geometry, direction arrowheads, and endpoint markers
+   │      ├── VectorLayer: editable route geometry, direction arrowheads, waypoints, and endpoint markers
    │      ├── VectorLayer: selected search result
    │      └── VectorLayer: user location
    │
@@ -568,9 +570,16 @@ waypoint. Red is used deliberately so planned routes do not resemble blue
 hydrographic features. Waypoint features carry their route index for hit
 detection. Shared endpoint styling from `src/map/itineraryEndpoints.ts` adds
 compact A and B markers above the first and final waypoints. A closed route uses
-one vertically split green/red A/B marker at its current start. Open-route
-reversal swaps the endpoint markers, while closed-route reversal preserves that
-physical start and changes only the traversal direction, without separate marker state.
+one vertically split green/red A/B marker at its current start.
+`src/map/itineraryDirection.ts` adds sparse red hollow arrowheads through a
+resolution-aware style function. Spacing is measured in screen pixels, arrow
+count is capped, and candidates near waypoints or endpoint badges are omitted.
+Each fixed-size triangular symbol is centred on the route, uses a white interior
+and route-coloured outline, and stays within the visible route casing instead of
+protruding across the map. Open-route reversal
+swaps the endpoint markers and arrow direction, while closed-route reversal
+preserves the physical start and changes only traversal and arrow direction,
+without separate marker state.
 
 The same module creates one focused OpenLayers pointer interaction for existing
 waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
@@ -689,7 +698,8 @@ new purple read-only geometry replaces any prior GPX. Invalid imports leave the
 current itinerary untouched. Starting route creation later clears the imported
 layer immediately, without confirmation.
 
-`src/map/importedRoute.ts` owns the purple read-only vector layer and adds the
+`src/map/importedRoute.ts` owns the purple read-only vector layer, adds sparse
+purple direction arrowheads independently to each retained GPX segment, and adds the
 shared endpoint markers to the first and last retained GPX coordinates. Endpoints
 within five LV95 metres use one combined A/B marker so small recording differences
 do not hide one symbol beneath the other. `App.tsx` fits the view to its extent
@@ -800,6 +810,7 @@ swiss-trail-planner/
 │   │   ├── geoAdminPopup.ts
 │   │   ├── config.ts
 │   │   ├── importedRoute.ts
+│   │   ├── itineraryDirection.ts
 │   │   ├── itineraryEndpoints.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
@@ -1040,8 +1051,19 @@ point supplies a valid `<ele>` value. It does not touch OpenLayers state.
 
 Creates and updates the read-only GPX vector layer. Its purple casing style
 distinguishes an imported current itinerary from the red editable route and
-blue hydrography. It also applies the shared start/finish markers to the first
-and last retained GPX coordinates without joining independent segments.
+blue hydrography. Each independent segment receives sparse purple direction
+arrowheads without creating a connector, and the shared start/finish markers use
+the first and last retained GPX coordinates.
+
+### `src/map/itineraryDirection.ts`
+
+Creates resolution-aware directional line styles shared by editable and imported
+itineraries. It samples the displayed geometry at sparse screen-based intervals,
+caps arrow count, keeps hollow triangular arrowheads away from protected waypoint
+and endpoint coordinates, smooths their tangent across a visible route window,
+and caches each style result until the map resolution changes. The fixed-size
+symbols remain centred within the visible route casing. The module is purely
+presentational and never changes route geometry or hit detection.
 
 ### `src/map/itineraryEndpoints.ts`
 
@@ -1055,7 +1077,7 @@ markers can retain waypoint hit behaviour without owning route state.
 Defines immutable route steps, the optional dedicated loop-closing section, and
 complete route state. It flattens normal and closing geometry, reverses complete
 routes without recalculation, creates the route vector layer, and rebuilds its
-line, indexed waypoint features, and start/finish markers. It also owns waypoint and normal/closing
+line with sparse direction arrowheads, indexed waypoint features, and start/finish markers. It also owns waypoint and normal/closing
 section hit detection, deterministic newest-section selection for overlapping
 geometry, the focused click/drag interaction, contextual hover target reporting,
 cursor state, and straight preview rendering for moved or temporarily inserted
@@ -1158,7 +1180,8 @@ messages, and OpenLayers control placement.
 11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices.
 12. Selecting a valid GPX converts its WGS 84 coordinates to LV95, leaves route
     creation, clears editable route history, replaces the previous imported
-    itinerary, and fits the map to its geometry.
+    itinerary, adds direction arrowheads independently to each retained segment,
+    and fits the map to its geometry.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
@@ -1204,9 +1227,10 @@ messages, and OpenLayers control placement.
 32. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
-33. Updating the committed route state rebuilds the route line, indexed
-    waypoint features, and A/B endpoint markers. Reversal swaps the open-route
-    markers; a closed route keeps one combined marker at the same physical start.
+33. Updating the committed route state rebuilds the route line, sparse direction
+    arrows, indexed waypoint features, and A/B endpoint markers. Reversal swaps
+    open-route markers and arrow direction; a closed route keeps one combined
+    marker at the same physical start while its arrows reverse.
 34. Distance is recalculated locally from the flattened route geometry, including
     the optional closing section.
 35. After a short debounce, an abortable profile request refreshes ascent,

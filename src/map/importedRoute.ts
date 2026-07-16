@@ -9,6 +9,7 @@ import LineString from 'ol/geom/LineString.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import { Stroke, Style } from 'ol/style.js';
+import { createDirectionalLineStyle } from './itineraryDirection';
 import { createItineraryEndpointFeatures } from './itineraryEndpoints';
 
 /** OpenLayers resources owned by the root application for the loaded GPX. */
@@ -29,12 +30,14 @@ const IMPORTED_ROUTE_STYLE = [
       color: 'rgba(255, 255, 255, 0.92)',
       width: 9,
     }),
+    zIndex: 0,
   }),
   new Style({
     stroke: new Stroke({
       color: IMPORTED_ROUTE_COLOR,
       width: 5,
     }),
+    zIndex: 1,
   }),
 ];
 
@@ -59,20 +62,32 @@ export function updateImportedRouteDisplay(
   segments: Coordinate[][],
 ): void {
   const validSegments = segments.filter((segment) => segment.length >= 2);
+  const firstSegment = validSegments[0];
+  const lastSegment = validSegments[validSegments.length - 1];
+  const startCoordinate = firstSegment?.[0] ?? null;
+  const finishCoordinate = lastSegment?.[lastSegment.length - 1] ?? null;
+  const avoidCoordinates = [startCoordinate, finishCoordinate].filter(
+    (coordinate): coordinate is Coordinate => coordinate !== null,
+  );
   const features: Feature[] = validSegments.map((segment) => {
     const feature = new Feature({
       geometry: new LineString(segment),
     });
-    feature.setStyle(IMPORTED_ROUTE_STYLE);
+    feature.setStyle(
+      createDirectionalLineStyle({
+        lineStyles: IMPORTED_ROUTE_STYLE,
+        coordinates: segment,
+        color: IMPORTED_ROUTE_COLOR,
+        avoidCoordinates,
+      }),
+    );
     return feature;
   });
-  const firstSegment = validSegments[0];
-  const lastSegment = validSegments[validSegments.length - 1];
 
   features.push(
     ...createItineraryEndpointFeatures(
-      firstSegment?.[0] ?? null,
-      lastSegment?.[lastSegment.length - 1] ?? null,
+      startCoordinate,
+      finishCoordinate,
     ),
   );
 
