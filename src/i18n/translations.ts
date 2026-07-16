@@ -57,7 +57,7 @@ const frenchTranslations = {
   'route.openLoop': 'Ouvrir l’itinéraire',
   'route.delete': 'Supprimer l’itinéraire',
   'route.waypointHint': 'Glisser pour déplacer ; cliquer pour supprimer.',
-  'route.segmentHint': 'Glisser pour ajouter un point de passage.',
+  'route.segmentHint': 'Cliquer pour prolonger, glisser pour ajouter un point de passage.',
   'route.export': 'Exporter l’itinéraire',
   'route.import': 'Charger un itinéraire GPX',
   'route.importError':
@@ -205,7 +205,7 @@ const germanTranslations: Record<TranslationKey, string> = {
   'route.openLoop': 'Rundweg öffnen',
   'route.delete': 'Route löschen',
   'route.waypointHint': 'Zum Verschieben ziehen; zum Löschen klicken.',
-  'route.segmentHint': 'Ziehen, um einen Wegpunkt hinzuzufügen.',
+  'route.segmentHint': 'Klicken zum Fortsetzen, ziehen zum Einfügen eines Wegpunkts.',
   'route.export': 'Route exportieren',
   'route.import': 'GPX-Route laden',
   'route.importError':
@@ -352,7 +352,7 @@ const italianTranslations: Record<TranslationKey, string> = {
   'route.openLoop': 'Apri l’anello',
   'route.delete': 'Elimina l’itinerario',
   'route.waypointHint': 'Trascina per spostare; fai clic per eliminare.',
-  'route.segmentHint': 'Trascina per aggiungere un punto di passaggio.',
+  'route.segmentHint': 'Fai clic per continuare, trascina per inserire un punto di passaggio.',
   'route.export': 'Esporta l’itinerario',
   'route.import': 'Carica un itinerario GPX',
   'route.importError':
@@ -499,7 +499,7 @@ const englishTranslations: Record<TranslationKey, string> = {
   'route.openLoop': 'Open the loop',
   'route.delete': 'Delete the route',
   'route.waypointHint': 'Drag to move; click to delete.',
-  'route.segmentHint': 'Drag to add a waypoint.',
+  'route.segmentHint': 'Click to continue, drag to insert a waypoint.',
   'route.export': 'Export the route',
   'route.import': 'Load a GPX route',
   'route.importError':

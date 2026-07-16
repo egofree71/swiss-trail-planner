@@ -54,12 +54,14 @@ select {
 }
 
 .app--route-creation .map--route-waypoint-hover,
-.app--route-creation .map--route-waypoint-hover .ol-viewport {
-  cursor: grab;
+.app--route-creation .map--route-waypoint-hover .ol-viewport,
+.app--route-creation .map--route-segment-hover,
+.app--route-creation .map--route-segment-hover .ol-viewport {
+  cursor: pointer;
 }
 
-.app--route-creation .map--route-waypoint-dragging,
-.app--route-creation .map--route-waypoint-dragging .ol-viewport {
+.app--route-creation .map--route-edit-dragging,
+.app--route-creation .map--route-edit-dragging .ol-viewport {
   cursor: grabbing;
 }
 

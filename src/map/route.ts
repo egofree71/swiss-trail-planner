@@ -133,6 +133,8 @@ const DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
 /** Route-line tolerance in screen pixels, matching the white casing around the red line. */
 const ROUTE_SEGMENT_HIT_TOLERANCE_PX = 7;
+/** Visually indistinguishable section distances use route order as a stable tie-breaker. */
+const ROUTE_SEGMENT_OVERLAP_TIE_TOLERANCE_PX = 0.1;
 /** Minimum screen movement that distinguishes a drag edit from a click. */
 const ROUTE_EDIT_DRAG_DISTANCE_PX = 3;
 
@@ -251,15 +253,22 @@ function getWaypointIndex(feature: Feature): number | null {
   return Number.isInteger(waypointIndex) ? (waypointIndex as number) : null;
 }
 
-/** Updates the map target cursor classes without overriding the busy cursor. */
-function updateRouteDragCursor(
+/** Updates contextual route cursor classes without overriding the busy cursor. */
+function updateRouteEditCursor(
   map: Map,
-  isHovering: boolean,
+  hoverTarget: RouteHoverTarget | null,
   isDragging: boolean,
 ): void {
   const target = map.getTargetElement();
-  target.classList.toggle('map--route-waypoint-hover', isHovering);
-  target.classList.toggle('map--route-waypoint-dragging', isDragging);
+  target.classList.toggle(
+    'map--route-waypoint-hover',
+    hoverTarget === 'waypoint' && !isDragging,
+  );
+  target.classList.toggle(
+    'map--route-segment-hover',
+    hoverTarget === 'segment' && !isDragging,
+  );
+  target.classList.toggle('map--route-edit-dragging', isDragging);
 }
 
 /**
@@ -434,6 +443,8 @@ export function getRouteSegmentHitAtPixel(
   }
 
   const toleranceSquared = (resolution * hitTolerance) ** 2;
+  const overlapTieToleranceSquared =
+    (resolution * ROUTE_SEGMENT_OVERLAP_TIE_TOLERANCE_PX) ** 2;
   let closestHit: RouteSegmentHit | null = null;
   let closestDistanceSquared = Number.POSITIVE_INFINITY;
 
@@ -449,7 +460,17 @@ export function getRouteSegmentHitAtPixel(
         segment[coordinateIndex],
       );
 
-      if (candidate.distanceSquared < closestDistanceSquared) {
+      const distanceDifference =
+        candidate.distanceSquared - closestDistanceSquared;
+      const isCloser = distanceDifference < -overlapTieToleranceSquared;
+      const isVisuallyOverlapping =
+        Math.abs(distanceDifference) <= overlapTieToleranceSquared;
+      const isMoreRecentOverlappingSection =
+        isVisuallyOverlapping &&
+        closestHit !== null &&
+        stepIndex > closestHit.stepIndex;
+
+      if (isCloser || isMoreRecentOverlappingSection) {
         closestDistanceSquared = candidate.distanceSquared;
         closestHit = {
           stepIndex,
@@ -490,6 +511,7 @@ export function createRouteDragInteraction(
   let dragTarget: RouteDragTarget | null = null;
   let startPixel: Pixel | null = null;
   let maximumPixelDistanceSquared = 0;
+  let isDragging = false;
 
   return new PointerInteraction({
     handleDownEvent: (event: MapBrowserEvent) => {
@@ -537,8 +559,9 @@ export function createRouteDragInteraction(
 
       startPixel = [...event.pixel];
       maximumPixelDistanceSquared = 0;
+      isDragging = false;
       callbacks.onHover(null, null);
-      updateRouteDragCursor(event.map, false, true);
+      updateRouteEditCursor(event.map, dragTarget.type, false);
       callbacks.onStart(dragTarget);
       return true;
     },
@@ -554,6 +577,14 @@ export function createRouteDragInteraction(
           maximumPixelDistanceSquared,
           deltaX * deltaX + deltaY * deltaY,
         );
+
+        if (
+          !isDragging &&
+          maximumPixelDistanceSquared >= ROUTE_EDIT_DRAG_DISTANCE_PX ** 2
+        ) {
+          isDragging = true;
+          updateRouteEditCursor(event.map, null, true);
+        }
       }
 
       callbacks.onDrag(dragTarget, [...event.coordinate]);
@@ -566,7 +597,7 @@ export function createRouteDragInteraction(
         (pointerType && pointerType !== 'mouse' && pointerType !== 'pen')
       ) {
         callbacks.onHover(null, null);
-        updateRouteDragCursor(event.map, false, false);
+        updateRouteEditCursor(event.map, null, false);
         return;
       }
 
@@ -599,7 +630,7 @@ export function createRouteDragInteraction(
         hoverTarget,
         hoverTarget ? [...event.pixel] : null,
       );
-      updateRouteDragCursor(event.map, hoverTarget !== null, false);
+      updateRouteEditCursor(event.map, hoverTarget, false);
     },
     handleUpEvent: (event: MapBrowserEvent) => {
       if (!dragTarget) {
@@ -613,8 +644,9 @@ export function createRouteDragInteraction(
       dragTarget = null;
       startPixel = null;
       maximumPixelDistanceSquared = 0;
+      isDragging = false;
       callbacks.onHover(null, null);
-      updateRouteDragCursor(event.map, false, false);
+      updateRouteEditCursor(event.map, null, false);
       callbacks.onEnd(
         releasedTarget,
         [...event.coordinate],
@@ -629,7 +661,7 @@ export function createRouteDragInteraction(
 
 /** Removes cursor state if route editing is left during an active drag. */
 export function clearRouteDragCursor(map: Map): void {
-  updateRouteDragCursor(map, false, false);
+  updateRouteEditCursor(map, null, false);
 }
 
 /**

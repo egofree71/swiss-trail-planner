@@ -92,7 +92,6 @@ import {
   collectRouteCoordinates,
   createRouteDragInteraction,
   createRouteDisplay,
-  getRouteSegmentHitAtPixel,
   getRouteWaypointIndexAtPixel,
   reverseRouteState,
   type RouteClosure,
@@ -2600,7 +2599,10 @@ export default function App() {
         routeDragStateRef.current = null;
         setRouteContextHint(null);
 
-        if (!didDrag) {
+        // Waypoint clicks are handled as deletion, while every genuine drag
+        // owns its release. A click-only segment press is deliberately left
+        // unsuppressed so the normal map click can extend the route there.
+        if (target.type === 'waypoint' || didDrag) {
           routeInteractionReleaseRef.current = {
             pixel: [...pixel],
             expiresAt:
@@ -2802,17 +2804,13 @@ export default function App() {
         return;
       }
 
-      // A press on the current route belongs to the drag interaction and must
-      // never append a new endpoint, even when no movement occurred.
+      // Waypoint clicks belong to the editing interaction because they delete
+      // that point. A simple click on the route line is intentionally allowed
+      // through: it appends a new endpoint from the current route end, while a
+      // genuine line drag still inserts a waypoint into the selected section.
       if (
         display &&
-        (getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null ||
-          getRouteSegmentHitAtPixel(
-            map,
-            expectedSteps,
-            expectedClosure,
-            event.pixel,
-          ) !== null)
+        getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null
       ) {
         return;
       }

@@ -568,11 +568,13 @@ detection.
 The same module creates one focused OpenLayers pointer interaction for existing
 waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
 usable on touch screens, while a narrower line tolerance selects the closest
-stored incoming section. Pressing either target stops map panning. Moving an
-existing point draws an immediate preview with only its adjacent sections
-replaced by straight lines. Pulling the route line inserts a temporary point and
-splits the selected section into two straight previews. No network request runs
-during either drag.
+stored incoming section. When several stored sections overlap at the same
+screen distance, the section latest in the current route order wins so repeated
+out-and-back passages behave deterministically. Pressing either target stops map
+panning. Moving an existing point draws an immediate preview with only its
+adjacent sections replaced by straight lines. Pulling the route line inserts a
+temporary point and splits the selected section into two straight previews. No
+network request runs during either drag.
 
 On release, `App.tsx` recalculates only the affected sections. A moved point
 updates its incoming and outgoing sections; moving the first or last point of a
@@ -581,8 +583,11 @@ normal or closing section with two sections that inherit the original routing
 intent. Straight sections remain direct; network sections call the dynamic
 router and independently fall back to a straight segment if coverage or
 connectivity is missing. The insertion edit is committed only after a genuine
-drag, while a click on an existing waypoint removes it. Closed-route endpoint
-deletion rebuilds the loop around the remaining points. Intermediate deletion
+drag. A click on an existing waypoint removes it, while a click-only press on a
+route section is restored and then handled by the normal map-click flow as a new
+endpoint from the current route end. This allows an itinerary to reuse an
+already drawn path without confusing that click with section reshaping.
+Closed-route endpoint deletion rebuilds the loop around the remaining points. Intermediate deletion
 reconnects the surrounding waypoints directly when both sections were straight;
 otherwise it recalculates one network section and falls back to a straight
 connector when no path is available. Hover-capable pointers receive a compact,
@@ -1027,9 +1032,10 @@ Defines immutable route steps, the optional dedicated loop-closing section, and
 complete route state. It flattens normal and closing geometry, reverses complete
 routes without recalculation, creates the route vector layer, and rebuilds its
 line and indexed waypoint features. It also owns waypoint and normal/closing
-section hit detection, the focused click/drag interaction, contextual hover
-target reporting, cursor state, and straight preview rendering for moved or
-temporarily inserted waypoints. It does not own immutable route history or
+section hit detection, deterministic newest-section selection for overlapping
+geometry, the focused click/drag interaction, contextual hover target reporting,
+cursor state, and straight preview rendering for moved or temporarily inserted
+waypoints. It does not own immutable route history or
 network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
@@ -1154,10 +1160,13 @@ messages, and OpenLayers control placement.
 25. Pressing an existing waypoint starts a potential move or deletion sequence
     and prevents map panning; a click deletes it, while a drag moves it.
 26. Pressing the route line outside a waypoint selects the closest stored normal
-    or closing section and starts a potential insertion sequence.
+    or closing section and starts a potential insertion sequence. Exact overlap
+    ties select the section latest in the current route order.
 27. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
-    made during the drag.
+    made during the drag. Releasing a route section without a genuine drag
+    restores the committed display and lets the delayed map click append a new
+    endpoint from the current route end.
 28. Releasing a moved point recalculates its affected normal sections and, for
     the first or last point of a closed route, the closing section.
 29. Releasing a dragged normal or closing section after a genuine movement
