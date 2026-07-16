@@ -1,3 +1,8 @@
+/**
+ * Business context: mounts the single React application shell and its language
+ * provider into the static Vite entry page. The module fails fast when the
+ * expected root element is missing because no map or recovery UI can be shown.
+ */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'ol/ol.css';

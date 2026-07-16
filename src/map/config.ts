@@ -1,3 +1,9 @@
+/**
+ * Business context: centralizes the official swisstopo layer identifiers,
+ * native LV95 WMTS grids, geographic limits, and zoom policy used by the map.
+ * Keeping these provider and scale decisions together prevents individual
+ * components from inventing incompatible projections or visibility thresholds.
+ */
 import { transformExtent } from 'ol/proj.js';
 import WMTS from 'ol/source/WMTS.js';
 import WMTSTileGrid from 'ol/tilegrid/WMTS.js';
@@ -25,12 +31,15 @@ const SWISSTOPO_BASE_MAP_LAYER_IDS: Record<BaseMapStyle, string> = {
   aerial: 'ch.swisstopo.swissimage',
 };
 
+/** Detailed grey-map layer used only at close planning scales. */
 const SWISSTOPO_GRAY_DETAIL_LAYER_ID =
   'ch.swisstopo.landeskarte-grau-10';
 
+/** Official rendered hiking-trail portrayal shown independently from routing. */
 const SWISSTOPO_HIKING_TRAILS_LAYER_ID =
   'ch.swisstopo.swisstlm3d-wanderwege';
 
+/** HTML attribution required by the official swisstopo tile service. */
 const SWISSTOPO_ATTRIBUTION =
   '<a href="https://www.swisstopo.admin.ch/" target="_blank" rel="noopener noreferrer">© swisstopo</a>';
 
@@ -43,8 +52,10 @@ const SWISSTOPO_ATTRIBUTION =
  */
 const MAP_BOUNDS_WGS84 = [5.7, 45.65, 10.75, 47.95];
 
+/** Initial map centre near the geographic middle of Switzerland, in LV95. */
 export const DEFAULT_MAP_CENTER = fromWgs84([8.2275, 46.8182]);
 
+/** Navigable LV95 extent derived from the documented WGS84 border margin. */
 export const MAP_EXTENT = transformExtent(
   MAP_BOUNDS_WGS84,
   WGS84_PROJECTION_CODE,
@@ -85,10 +96,20 @@ export const LOCATION_SEARCH_ZOOM = 19;
 /** GPX framing may use the finest native national-map level for very short itineraries. */
 export const IMPORTED_ROUTE_MAX_ZOOM = 26;
 
+/** Image formats published by the configured swisstopo WMTS layers. */
 type SwissTopoTileFormat = 'jpeg' | 'png';
 
+/** Index into the shared native LV95 resolution and matrix-size arrays. */
 type MatrixIndex = number;
 
+/**
+ * Builds a WMTS tile grid from the exact native LV95 matrices exposed by one
+ * source. Views may interpolate between resolutions, but tile requests must
+ * never target an unpublished matrix.
+ *
+ * @param matrixIndices - Ordered indices retained from the shared LV95 pyramid.
+ * @returns An OpenLayers tile grid matching the selected source matrices.
+ */
 function createLv95TileGrid(matrixIndices: readonly MatrixIndex[]): WMTSTileGrid {
   return new WMTSTileGrid({
     extent: LV95_WMTS_EXTENT,
@@ -100,13 +121,23 @@ function createLv95TileGrid(matrixIndices: readonly MatrixIndex[]): WMTSTileGrid
   });
 }
 
+/** Native matrices available to the national maps and hiking portrayal. */
 const STANDARD_LV95_TILE_GRID = createLv95TileGrid(
   LV95_STANDARD_SOURCE_MATRIX_INDICES,
 );
+/** Additional fine matrices published by SWISSIMAGE at close zoom levels. */
 const FINE_LV95_TILE_GRID = createLv95TileGrid(
   LV95_FINE_SOURCE_MATRIX_INDICES,
 );
 
+/**
+ * Creates one REST-encoded swisstopo WMTS source in EPSG:2056.
+ *
+ * @param layerId - Official provider layer identifier.
+ * @param format - Image format published by that layer.
+ * @param supportsFineMatrices - Whether the source exposes the extra close-scale matrices.
+ * @returns A non-wrapping OpenLayers source with the required attribution.
+ */
 function createSwissTopoWmtsSource(
   layerId: string,
   format: SwissTopoTileFormat,

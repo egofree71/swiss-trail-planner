@@ -14,16 +14,25 @@ const SEARCH_ORIGINS = ['zipcode', 'gg25', 'gazetteer'] as const;
 /** GeoAdmin origin used to translate the category in the interface layer. */
 export type SearchOrigin = (typeof SEARCH_ORIGINS)[number];
 
+/** Loose top-level contract returned by the GeoAdmin SearchServer endpoint. */
 interface SearchServerResponse {
+  /** Candidate locations; absent results are treated as an empty response. */
   results?: SearchServerItem[];
 }
 
+/** Untrusted provider item validated before it enters the typed UI contract. */
 interface SearchServerItem {
+  /** Provider identifier, normalized to a string when retained. */
   id?: string | number;
+  /** Search attributes may be missing or have unexpected runtime types. */
   attrs?: {
+    /** Provider label, potentially containing simple emphasis markup. */
     label?: unknown;
+    /** WGS84 latitude supplied by SearchServer. */
     lat?: unknown;
+    /** WGS84 longitude supplied by SearchServer. */
     lon?: unknown;
+    /** Language-neutral search-origin identifier. */
     origin?: unknown;
   };
 }
@@ -72,6 +81,8 @@ function normalizeLabel(value: unknown): string {
  * @param searchText - User-entered place text.
  * @param language - Language passed to GeoAdmin for returned labels.
  * @param signal - Abort signal owned by the debounced React effect.
+ * @returns Valid, deduplicated locations in provider order.
+ * @throws {Error} If SearchServer returns a non-successful HTTP response.
  */
 export async function searchLocations(
   searchText: string,

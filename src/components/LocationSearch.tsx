@@ -15,6 +15,7 @@ import {
   type LocationSearchResult,
 } from '../search/locationSearch';
 
+/** Callbacks supplied by the map shell to the presentation-only search control. */
 interface LocationSearchProps {
   /** Closes map information when the search field becomes active. */
   onSearchFocus: () => void;
@@ -22,6 +23,7 @@ interface LocationSearchProps {
   onSelect: (result: LocationSearchResult) => void;
 }
 
+/** Request lifecycle used to render loading, results, and retryable errors. */
 type SearchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** Minimum characters required before GeoAdmin is queried. */
@@ -29,6 +31,11 @@ const MINIMUM_QUERY_LENGTH = 2;
 /** Debounce delay in milliseconds to avoid a request for every keystroke. */
 const SEARCH_DELAY_MS = 300;
 
+/**
+ * Renders the debounced, keyboard-accessible GeoAdmin location search control.
+ * Network cancellation and stale-result protection remain local to the control,
+ * while map movement is delegated through the supplied callbacks.
+ */
 export default function LocationSearch({
   onSearchFocus,
   onSelect,

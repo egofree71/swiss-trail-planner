@@ -329,6 +329,11 @@ export function createImportedRouteElevationSummary(
 /**
  * Retrieves elevation profiles for independent GPX segments and combines their
  * totals without adding ascent, descent, or distance across deliberate gaps.
+ *
+ * @param segments - Independent itinerary lines in EPSG:2056.
+ * @param signal - Abort signal used when another GPX or route replaces the request.
+ * @returns Combined ascent, descent, and cumulative samples without gap connectors.
+ * @throws {Error} If no usable segment profile can be retrieved or validated.
  */
 export async function fetchRouteSegmentsElevationSummary(
   segments: Coordinate[][],

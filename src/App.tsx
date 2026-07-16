@@ -2238,6 +2238,11 @@ export default function App() {
     closeMapInformationPopup();
   }, [closeMapInformationPopup, language]);
 
+  /**
+   * Registers one prioritized click pipeline for optional information layers.
+   * Already loaded passenger stops win first, then closures, then military
+   * danger zones, so overlapping official portrayals produce deterministic UI.
+   */
   useEffect(() => {
     const map = mapRef.current;
     const hasVisibleInformationLayer =

@@ -115,8 +115,11 @@ function buildDistanceTicks(
   return ticks;
 }
 
+/** Rounded display range used to project real elevations into the SVG chart. */
 interface ElevationBounds {
+  /** Lower chart boundary in metres, possibly below the route minimum. */
   chartMinimumElevation: number;
+  /** Upper chart boundary in metres, possibly above the route maximum. */
   chartMaximumElevation: number;
 }
 

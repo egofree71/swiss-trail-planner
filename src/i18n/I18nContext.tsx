@@ -128,7 +128,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
-/** Returns the nearest language provider and fails fast if wiring is missing. */
+/**
+ * Returns the nearest language provider.
+ * @returns Current language state and the typed translation helper.
+ * @throws {Error} If the hook is used outside `I18nProvider`.
+ */
 export function useI18n(): I18nContextValue {
   const context = useContext(I18nContext);
 

@@ -75,6 +75,7 @@ const MAXIMUM_LOCAL_TANGENT_DELTA_RADIANS = (32 * Math.PI) / 180;
 /** Resolution changes below this relative threshold reuse the prior render cache. */
 const RESOLUTION_CACHE_EPSILON = 1e-9;
 
+/** Inputs required to append sparse direction symbols to one displayed line. */
 export interface DirectionalLineStyleOptions {
   /** Existing casing and centre-line styles returned before arrow styles. */
   lineStyles: Style[];
@@ -86,13 +87,19 @@ export interface DirectionalLineStyleOptions {
   avoidCoordinates?: Coordinate[];
 }
 
+/** Accepted symbol position and final rotation in map-rendering radians. */
 interface DirectionSample {
+  /** Coordinate on the displayed itinerary where the symbol is anchored. */
   coordinate: Coordinate;
+  /** Clockwise icon rotation following the accepted local route tangent. */
   rotation: number;
 }
 
+/** Coordinate sampled at a cumulative line distance with its local tangent. */
 interface CoordinateSample {
+  /** Interpolated coordinate on the itinerary. */
   coordinate: Coordinate;
+  /** Direction of travel on the source segment containing the sample. */
   localRotation: number;
 }
 

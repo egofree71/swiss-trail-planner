@@ -1,3 +1,8 @@
+/**
+ * Business context: renders the one temporary marker associated with a selected
+ * GeoAdmin search result. Keeping it in a dedicated layer lets search selection
+ * change independently from geolocation, route editing, and information popups.
+ */
 import type { Coordinate } from 'ol/coordinate.js';
 import Feature from 'ol/Feature.js';
 import Point from 'ol/geom/Point.js';
@@ -10,13 +15,17 @@ import {
   Style,
 } from 'ol/style.js';
 
+/** OpenLayers objects retained while the selected search result is displayed. */
 export interface SearchResultMarker {
+  /** Point feature whose geometry is replaced whenever another result is selected. */
   feature: Feature<Point>;
+  /** Dedicated layer kept above the editable route and below the profile marker. */
   layer: VectorLayer<VectorSource<Feature<Point>>>;
 }
 
 /**
- * Creates the marker used for the currently selected search result.
+ * Creates the initially hidden marker used for the selected search result.
+ * @returns The mutable point feature and its dedicated vector layer.
  */
 export function createSearchResultMarker(): SearchResultMarker {
   const feature = new Feature<Point>();
@@ -59,6 +68,8 @@ export function createSearchResultMarker(): SearchResultMarker {
 
 /**
  * Moves the search-result marker to a projected map coordinate.
+ * @param marker - Marker objects created by `createSearchResultMarker()`.
+ * @param coordinate - Selected location in the current map projection.
  */
 export function updateSearchResultMarker(
   marker: SearchResultMarker,
