@@ -47,31 +47,13 @@ const DIRECTION_ARROW_PHASE_SHIFT_ATTEMPTS = 2;
 const DIRECTION_ARROW_WIDTH_PX = 24;
 const DIRECTION_ARROW_HEIGHT_PX = 16;
 /**
- * Curvature is inspected across this many visible pixels on either side of a
- * candidate. The wider window catches bends that collapse into one apparent
- * corner at broad map scales.
+ * Direction is measured across this many pixels on either side of the marker,
+ * rather than from one tiny geometry edge that may be invisible at the current
+ * scale.
  */
-const DIRECTION_CURVATURE_HALF_WINDOW_PX = 18;
-/**
- * The final orientation uses a shorter tangent so the symbol follows the line
- * directly underneath it instead of pointing across the inside of a bend.
- */
-const DIRECTION_LOCAL_TANGENT_HALF_WINDOW_PX = 5;
-/** Tight folds whose visible chord is still tiny are skipped instead of guessing. */
-const MINIMUM_VISIBLE_TANGENT_CHORD_PX = 7;
-/** A local tangent shorter than this is too unstable to orient reliably. */
-const MINIMUM_LOCAL_TANGENT_CHORD_PX = 3;
-/**
- * Maximum change in travel direction across the visible inspection window.
- * Fifty degrees is equivalent to a 130-degree minimum interior angle while
- * still accepting ordinary rounded trail bends.
- */
-const MAXIMUM_VISIBLE_TURN_RADIANS = (50 * Math.PI) / 180;
-/**
- * Rejects a candidate when its local tangent disagrees strongly with the
- * direction suggested by the surrounding visible route.
- */
-const MAXIMUM_LOCAL_TANGENT_DELTA_RADIANS = (32 * Math.PI) / 180;
+const DIRECTION_TANGENT_HALF_WINDOW_PX = 12;
+/** Tight folds whose smoothed chord is still tiny are skipped instead of guessing. */
+const MINIMUM_TANGENT_CHORD_PX = 7;
 /** Resolution changes below this relative threshold reuse the prior render cache. */
 const RESOLUTION_CACHE_EPSILON = 1e-9;
 
@@ -99,22 +81,6 @@ interface CoordinateSample {
 /** Returns planar LV95 distance between two route coordinates. */
 function coordinateDistance(first: Coordinate, second: Coordinate): number {
   return Math.hypot(second[0] - first[0], second[1] - first[1]);
-}
-
-/** Returns the smallest absolute difference between two angles. */
-function angleDifference(first: number, second: number): number {
-  let difference = Math.abs(first - second) % (Math.PI * 2);
-
-  if (difference > Math.PI) {
-    difference = Math.PI * 2 - difference;
-  }
-
-  return difference;
-}
-
-/** Returns the travel angle from one map coordinate to another. */
-function coordinateAngle(first: Coordinate, second: Coordinate): number {
-  return Math.atan2(second[1] - first[1], second[0] - first[0]);
 }
 
 /**
@@ -172,12 +138,9 @@ function sampleCoordinateAtDistance(
 }
 
 /**
- * Samples a marker coordinate after checking the visible route curvature.
- *
- * A wide screen-space window decides whether the candidate sits in a bend that
- * would make any direction symbol misleading. The accepted symbol is then
- * oriented from a shorter local tangent, keeping it visually parallel to the
- * route directly underneath instead of pointing across the inside of a curve.
+ * Samples a marker coordinate and a scale-aware smoothed tangent. Using a
+ * visible chord avoids orienting an arrow from a tiny bend hidden at broad
+ * zoom levels. A tight fold with no meaningful chord is omitted.
  */
 function sampleDirectionAtDistance(
   coordinates: Coordinate[],
@@ -191,14 +154,14 @@ function sampleDirectionAtDistance(
     return null;
   }
 
-  const curvatureHalfWindow = DIRECTION_CURVATURE_HALF_WINDOW_PX * resolution;
+  const halfWindow = DIRECTION_TANGENT_HALF_WINDOW_PX * resolution;
   const before = sampleCoordinateAtDistance(
     coordinates,
-    Math.max(0, distance - curvatureHalfWindow),
+    Math.max(0, distance - halfWindow),
   );
   const after = sampleCoordinateAtDistance(
     coordinates,
-    Math.min(totalLength, distance + curvatureHalfWindow),
+    Math.min(totalLength, distance + halfWindow),
   );
 
   if (!before || !after) {
@@ -208,64 +171,18 @@ function sampleDirectionAtDistance(
     };
   }
 
-  const visibleChordLength = coordinateDistance(
-    before.coordinate,
-    after.coordinate,
-  );
+  const chordLength = coordinateDistance(before.coordinate, after.coordinate);
 
-  if (visibleChordLength / resolution < MINIMUM_VISIBLE_TANGENT_CHORD_PX) {
-    return null;
-  }
-
-  const incomingAngle = coordinateAngle(before.coordinate, centre.coordinate);
-  const outgoingAngle = coordinateAngle(centre.coordinate, after.coordinate);
-
-  if (
-    angleDifference(incomingAngle, outgoingAngle) >
-    MAXIMUM_VISIBLE_TURN_RADIANS
-  ) {
-    return null;
-  }
-
-  const localHalfWindow = DIRECTION_LOCAL_TANGENT_HALF_WINDOW_PX * resolution;
-  const localBefore = sampleCoordinateAtDistance(
-    coordinates,
-    Math.max(0, distance - localHalfWindow),
-  );
-  const localAfter = sampleCoordinateAtDistance(
-    coordinates,
-    Math.min(totalLength, distance + localHalfWindow),
-  );
-
-  if (!localBefore || !localAfter) {
-    return null;
-  }
-
-  const localChordLength = coordinateDistance(
-    localBefore.coordinate,
-    localAfter.coordinate,
-  );
-
-  if (localChordLength / resolution < MINIMUM_LOCAL_TANGENT_CHORD_PX) {
-    return null;
-  }
-
-  const visibleAngle = coordinateAngle(before.coordinate, after.coordinate);
-  const localAngle = coordinateAngle(
-    localBefore.coordinate,
-    localAfter.coordinate,
-  );
-
-  if (
-    angleDifference(visibleAngle, localAngle) >
-    MAXIMUM_LOCAL_TANGENT_DELTA_RADIANS
-  ) {
+  if (chordLength / resolution < MINIMUM_TANGENT_CHORD_PX) {
     return null;
   }
 
   return {
     coordinate: centre.coordinate,
-    rotation: -localAngle,
+    rotation: -Math.atan2(
+      after.coordinate[1] - before.coordinate[1],
+      after.coordinate[0] - before.coordinate[0],
+    ),
   };
 }
 

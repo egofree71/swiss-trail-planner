@@ -576,12 +576,9 @@ resolution-aware style function. Spacing is measured in screen pixels, arrow
 count is capped, and candidates near waypoints or endpoint badges are omitted.
 When repeated passages would place symbols on top of each other, later candidates
 try alternating screen-space phase shifts along the route and are omitted only if
-no collision-free position remains. Candidates inside tight screen-visible bends
-are also rejected: a wider window detects excessive curvature, while a shorter
-local tangent keeps each accepted symbol parallel to the line directly beneath it
-instead of pointing across the inside of a contour. Each fixed-size triangular
-symbol is centred on the route, uses a white interior and route-coloured outline,
-and stays within the visible route casing instead of protruding across the map. Open-route reversal
+no collision-free position remains. Each fixed-size triangular symbol is centred
+on the route, uses a white interior and route-coloured outline, and stays within
+the visible route casing instead of protruding across the map. Open-route reversal
 swaps the endpoint markers and arrow direction, while closed-route reversal
 preserves the physical start and changes only traversal and arrow direction,
 without separate marker state.
@@ -1065,10 +1062,9 @@ the first and last retained GPX coordinates.
 Creates resolution-aware directional line styles shared by editable and imported
 itineraries. It samples the displayed geometry at sparse screen-based intervals,
 caps arrow count, keeps hollow triangular arrowheads away from protected waypoint
-and endpoint coordinates, rejects candidates whose visible curvature is too high,
-orients accepted symbols from a shorter local tangent, desynchronizes colliding
-candidates on repeated out-and-back passages, and caches each style result until
-the map resolution changes. The fixed-size
+and endpoint coordinates, smooths their tangent across a visible route window,
+desynchronizes colliding candidates on repeated out-and-back passages, and caches
+each style result until the map resolution changes. The fixed-size
 symbols remain centred within the visible route casing. The module is purely
 presentational and never changes route geometry or hit detection.
 
