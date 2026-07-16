@@ -579,9 +579,10 @@ try alternating screen-space phase shifts along the route and are omitted only i
 no collision-free position remains. Candidates inside tight screen-visible bends
 are also rejected: a wider window detects excessive curvature, while a shorter
 local tangent keeps each accepted symbol parallel to the line directly beneath it
-instead of pointing across the inside of a contour. Each fixed-size triangular
+instead of pointing across the inside of a contour. Each fixed-size hollow triangular
 symbol is centred on the route, uses a white interior and route-coloured outline,
-and stays within the visible route casing instead of protruding across the map. Open-route reversal
+and deliberately extends slightly beyond the centre line and casing so its direction
+remains readable against the map. Open-route reversal
 swaps the endpoint markers and arrow direction, while closed-route reversal
 preserves the physical start and changes only traversal and arrow direction,
 without separate marker state.
@@ -779,16 +780,24 @@ swiss-trail-planner/
 │       └── deploy.yml
 ├── docs/
 │   └── ARCHITECTURE.md
+├── public/
+│   ├── base-map-previews/
+│   │   ├── aerial.png
+│   │   ├── color.png
+│   │   └── gray.png
+│   └── favicon.svg
 ├── src/
 │   ├── assets/
 │   │   └── public-transport-stops/
-│   │       └── boat, bus, cable-car, chairlift, funicular, train, and tram SVG symbols
+│   │       ├── boat, bus, cable-car, chairlift, funicular, train, and tram SVG symbols
+│   │       └── legacy 28-pixel PNG exports, currently unused at runtime
 │   ├── closures/
 │   │   └── trailClosures.ts
 │   ├── dangers/
 │   │   └── shootingDangerZones.ts
 │   ├── transport/
-│   │   └── publicTransportStops.ts
+│   │   ├── publicTransportStops.ts
+│   │   └── stationBoard.ts
 │   ├── components/
 │   │   ├── MapInformationPopup.tsx
 │   │   ├── MapLayersSelector.tsx
@@ -939,7 +948,9 @@ and client-side SVG symbol styling.
 Defines the locally bundled transport-mode pictograms used by the filtered stop
 overlay. The common 24-unit vector canvas, dark-blue `#2D327D` background, white
 transport silhouettes, and explicit geometry keep the symbols recognizable and
-sharp at every supported map zoom and browser pixel density.
+sharp at every supported map zoom and browser pixel density. Parallel 28-pixel
+PNG exports remain in the repository from an earlier implementation but are not
+imported by the current application.
 
 ### `src/transport/stationBoard.ts`
 
@@ -1068,9 +1079,9 @@ caps arrow count, keeps hollow triangular arrowheads away from protected waypoin
 and endpoint coordinates, rejects candidates whose visible curvature is too high,
 orients accepted symbols from a shorter local tangent, desynchronizes colliding
 candidates on repeated out-and-back passages, and caches each style result until
-the map resolution changes. The fixed-size
-symbols remain centred within the visible route casing. The module is purely
-presentational and never changes route geometry or hit detection.
+the map resolution changes. The fixed-size symbols remain centred on the route
+and extend slightly beyond its visible casing for legibility. The module is
+purely presentational and never changes route geometry or hit detection.
 
 ### `src/map/itineraryEndpoints.ts`
 
@@ -1163,6 +1174,9 @@ messages, and OpenLayers control placement.
 - `package-lock.json` locks dependency versions.
 - `vite.config.ts` configures React and the GitHub Pages base path.
 - `.github/workflows/deploy.yml` builds and deploys `dist/` to GitHub Pages.
+- `public/base-map-previews/*.png` provides the static color, grey, and aerial
+  thumbnails used by the Layers menu without another map request.
+- `public/favicon.svg` provides the browser favicon referenced by `index.html`.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
