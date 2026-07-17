@@ -12,6 +12,7 @@ time.
 - [Basic usage](#basic-usage)
 - [Data sources and limitations](#data-sources-and-limitations)
 - [Documentation](#documentation)
+- [Regression tests](#regression-tests)
 - [Production build and deployment](#production-build-and-deployment)
 - [License](#license)
 
@@ -122,6 +123,19 @@ architecture document rather than duplicated here.
   itinerary-metrics hooks, plus the separation between route state, route
   rendering, low-level pointer interaction, reconstruction, and
   public-transport loading, normalization, and display.
+
+## Regression tests
+
+The focused Vitest suite protects immutable route transformations, route editing,
+GPX parsing, route metrics, and passenger-stop filtering. Run it once with:
+
+```bash
+npm test
+```
+
+During development, use `npm run test:watch` to rerun affected tests after each
+change. GitHub Actions runs the complete suite before building and deploying the
+site.
 
 ## Production build and deployment
 

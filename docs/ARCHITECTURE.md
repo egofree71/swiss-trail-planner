@@ -171,6 +171,20 @@ public functions use JSDoc, including `@throws` when callers must handle a
 failure. Algorithmic blocks such as A*, heaps, adaptive subdivision, caching,
 and stale-result guards explain why the safeguard or heuristic exists.
 
+### 3.5 Focused regression tests
+
+Automated tests target stable domain contracts before browser presentation. The
+initial suite covers immutable route transformations, affected-section rebuilds,
+local GPX parsing, route metrics, and passenger-stop filtering. JSDOM provides
+only the browser XML primitives needed by GPX parsing; provider calls are mocked
+so the suite remains deterministic and does not depend on external services.
+
+Tests live beside the modules they protect. This keeps fixtures close to the
+relevant business rules and makes a future extraction or contract change reveal
+which behaviour needs deliberate review. OpenLayers canvas rendering and full
+pointer workflows remain validated manually until a browser-level test offers
+clear value over its maintenance cost.
+
 ## 4. Technical overview
 
 ```text
@@ -246,11 +260,18 @@ Browser
           ├── api3.geo.admin.ch (search, routing, information-layer inspection, and elevation profile)
           └── transport.opendata.ch (on-demand public-transport departures)
 
+Regression tests
+   │
+   ├── Vitest
+   ├── JSDOM for browser XML APIs
+   └── colocated route, GPX, metric, and transport-domain suites
+
 Deployment
    │
    ├── push to main
    ├── GitHub Actions
    │      ├── npm ci
+   │      ├── npm test
    │      └── npm run build
    └── GitHub Pages
 ```
@@ -269,6 +290,8 @@ selected route section.
 | OpenLayers 10 | Map, native LV95 view, layers, projections, markers, controls, and route-shaping pointer interaction |
 | proj4 | EPSG:2056 definition and OpenLayers transformation registration |
 | Vite 8 | Development server, production build, and Pages base path |
+| Vitest 4 | Deterministic regression tests for route, GPX, metric, and transport-domain contracts |
+| JSDOM | Browser XML APIs for local GPX parser tests without launching the application |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
 | GeoAdmin HTML popup API | Localized official closure and military danger-zone metadata |
@@ -833,9 +856,10 @@ also be started manually. It:
 
 1. checks out the repository;
 2. installs the exact dependencies from `package-lock.json` with `npm ci`;
-3. runs the TypeScript check and Vite build through `npm run build`;
-4. uploads `dist/` as a GitHub Pages artifact;
-5. deploys that artifact to the `github-pages` environment.
+3. runs the focused regression suite through `npm test`;
+4. runs the TypeScript check and Vite build through `npm run build`;
+5. uploads `dist/` as a GitHub Pages artifact;
+6. deploys that artifact to the `github-pages` environment.
 
 The workflow receives only the permissions required to read the repository and
 deploy Pages. Deployment concurrency is limited to one active Pages run, and a
@@ -887,6 +911,7 @@ via-helvetica/
 │   ├── dangers/
 │   │   └── shootingDangerZones.ts
 │   ├── transport/
+│   │   ├── publicTransportStopModel.test.ts
 │   │   ├── publicTransportStopModel.ts
 │   │   ├── publicTransportStops.ts
 │   │   ├── publicTransportStopsApi.ts
@@ -908,8 +933,10 @@ via-helvetica/
 │   ├── export/
 │   │   └── gpx.ts
 │   ├── import/
+│   │   ├── gpx.test.ts
 │   │   └── gpx.ts
 │   ├── metrics/
+│   │   ├── routeMetrics.test.ts
 │   │   ├── routeMetrics.ts
 │   │   └── useItineraryMetrics.ts
 │   ├── i18n/
@@ -926,6 +953,7 @@ via-helvetica/
 │   │   ├── route.ts
 │   │   ├── routeDisplay.ts
 │   │   ├── routePointerInteraction.ts
+│   │   ├── routeState.test.ts
 │   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
@@ -940,6 +968,7 @@ via-helvetica/
 │   │   └── abort.ts
 │   ├── routing/
 │   │   ├── networkRouter.ts
+│   │   ├── routeEditing.test.ts
 │   │   ├── routeEditing.ts
 │   │   ├── swissTlmApi.ts
 │   │   └── dynamicRoutingNetwork.ts
@@ -956,7 +985,8 @@ via-helvetica/
 ├── package.json
 ├── README.md
 ├── tsconfig.json
-└── vite.config.ts
+├── vite.config.ts
+└── vitest.config.ts
 ```
 
 ## 16. File responsibilities
@@ -1415,14 +1445,28 @@ Defines the full-screen layout, left-side search control, right-side map
 controls, shared information panel, route statistics, result panels, status
 messages, and OpenLayers control placement.
 
+### Regression test files
+
+The colocated `*.test.ts` files protect stable domain behaviour without opening
+a map or contacting live providers. `routeState.test.ts` covers flattening and
+open or closed reversal; `routeEditing.test.ts` covers exact connectors and
+move, insertion, and deletion rebuilds; `gpx.test.ts` covers namespaced tracks,
+segment gaps, duplicate points, elevations, and validation;
+`routeMetrics.test.ts` covers LV95 distance, segment-local elevation totals, the
+Swiss hiking-time model, and a mocked GeoAdmin profile response; and
+`publicTransportStopModel.test.ts` covers multilingual passenger-mode
+normalization and technical-record rejection.
+
 ### Remaining root files
 
 - `src/main.tsx` mounts React, the language provider, and styles.
 - `index.html` is the browser entry point.
-- `package.json` declares dependencies and npm scripts.
+- `package.json` declares dependencies and npm scripts, including one-shot and
+  watch-mode regression commands.
 - `package-lock.json` locks dependency versions.
 - `vite.config.ts` configures React and the GitHub Pages base path.
-- `.github/workflows/deploy.yml` builds and deploys `dist/` to GitHub Pages.
+- `vitest.config.ts` selects JSDOM and colocated `src/**/*.test.ts` suites.
+- `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
   thumbnails used by the Layers menu without another map request.
 - `public/favicon.svg` provides the browser favicon referenced by `index.html`.
@@ -1563,7 +1607,8 @@ messages, and OpenLayers control placement.
     browser geolocation otherwise continue to operate independently.
 50. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-51. A push to `main` triggers the Pages workflow, which builds and deploys
+51. A push to `main` triggers the Pages workflow, which installs locked
+    dependencies, runs the regression suite, builds the application, and deploys
     `dist`.
 
 ## 18. Error handling
@@ -1643,16 +1688,17 @@ to the normal GeoAdmin profile service.
   `@throws` for expected failures.
 - Explain sensitive algorithmic blocks such as A*, heaps, adaptive subdivision,
   concurrency limits, caches, and stale-result guards.
-- `npm run build` must succeed before an important commit.
+- Regression tests must not depend on live external services.
+- `npm test` and `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
 ## 20. Possible evolution
 
 The main product scope is implemented. Further work should be driven by observed
 usage or validation results rather than by a fixed feature roadmap. Possible
-follow-ups include focused automated regression tests, conservative timetable
-refresh, and a preprocessed routing graph or
-backend only if measured browser-routing limits justify that complexity.
+follow-ups include broader routing-topology fixtures, conservative timetable
+refresh, and a preprocessed routing graph or backend only if measured
+browser-routing limits justify that complexity.
 
 ## 21. When to evolve the architecture
 
