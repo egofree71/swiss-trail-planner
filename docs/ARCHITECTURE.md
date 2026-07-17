@@ -124,15 +124,40 @@ Each milestone should remain testable and usable before the next one begins.
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
-controls are separate presentational components. Editable route rendering and
-its focused route-shaping pointer interaction remain together in `src/map/route.ts`;
-the imported route stays in its own map module and shares only the current-itinerary metrics pipeline. A broader map-controller
-abstraction is still unnecessary for one bounded editing interaction.
+controls are separate presentational components. The editable-route domain lives
+in `src/map/routeState.ts`, routing-based section reconstruction lives in
+`src/routing/routeEditing.ts`, `src/map/routeDisplay.ts` renders committed and
+preview geometry, and `src/map/routePointerInteraction.ts` provides focused hit
+detection and drag primitives. `src/map/route.ts` remains a small compatibility
+facade for those two low-level modules. `src/map/useEditableRoute.ts`
+owns immutable history, snap mode, serialized routing mutations, and route-control
+actions. `src/map/useRouteInteractions.ts` owns the focused click/drag lifecycle,
+contextual guidance, and preview coordination without knowing how routes are
+calculated. `src/map/useImportedRoute.ts` owns local GPX file sessions, projected
+read-only geometry, embedded elevations, display replacement, and view framing.
+The imported route shares only the current-itinerary metrics pipeline with the
+editable route.
 
-OpenLayers map ownership remains in `App.tsx` because there is still only one
-map view. Network fetching and graph algorithms are isolated under
-`src/routing/`; several additional drawing interactions may later justify a
-dedicated hook or map-controller module.
+The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
+`src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
+ordered layers, displays, and markers as one disposable unit; the hook binds
+that runtime to React mount, unmount, startup status, and browser fullscreen
+events. Background selection, hiking-overlay persistence, zoom, fullscreen
+requests, and explicit geolocation are coordinated by
+`src/map/useMapViewControls.ts`. Optional closure, military-danger, and
+public-transport workflows are coordinated by
+`src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
+viewport loading, inspection priority, popup state, and request cancellation.
+The public-transport implementation keeps its stable facade in
+`src/transport/publicTransportStops.ts`, while provider loading, passenger-stop
+normalization, and OpenLayers rendering live in focused sibling modules.
+`src/map/useImportedRoute.ts` owns the read-only GPX workflow and invalidates
+unfinished file reads when another itinerary takes priority.
+`src/metrics/useItineraryMetrics.ts` owns current-itinerary distance, elevation
+request identity, hiking time, and bidirectional map/profile exploration.
+`App.tsx` remains the application composition point and accesses the runtime
+through one stable ref. It connects the focused hooks instead of owning their
+imperative map sessions, route history, or provider-request lifecycles.
 
 ### 3.4 Comments explain decisions
 
@@ -146,6 +171,20 @@ public functions use JSDoc, including `@throws` when callers must handle a
 failure. Algorithmic blocks such as A*, heaps, adaptive subdivision, caching,
 and stale-result guards explain why the safeguard or heuristic exists.
 
+### 3.5 Focused regression tests
+
+Automated tests target stable domain contracts before browser presentation. The
+initial suite covers immutable route transformations, affected-section rebuilds,
+local GPX parsing, route metrics, and passenger-stop filtering. JSDOM provides
+only the browser XML primitives needed by GPX parsing; provider calls are mocked
+so the suite remains deterministic and does not depend on external services.
+
+Tests live beside the modules they protect. This keeps fixtures close to the
+relevant business rules and makes a future extraction or contract change reveal
+which behaviour needs deliberate review. OpenLayers canvas rendering and full
+pointer workflows remain validated manually until a browser-level test offers
+clear value over its maintenance cost.
+
 ## 4. Technical overview
 
 ```text
@@ -157,14 +196,44 @@ Browser
    │      │      └── geo.admin.ch SearchServer
    │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
-   │      ├── route edit snapshots, single-current-itinerary imported-GPX state, statistics, and temporary routing status
+   │      ├── focused route, imported-GPX, map-control, information, and metrics state
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── owns OpenLayers lifecycle, route-editing state, and adjacent-section recalculation
-   │      ├── requests dynamic routing cells for snapped clicks
-   │      └── refreshes elevation statistics after editable-route or imported-GPX changes
+   │      ├── composes map, search, route, import, metrics, and popup capabilities
+   │      ├── coordinates which temporary workflow owns the current itinerary
+   │      └── wires focused controllers to compact presentational components
+   │
+   ├── useEditableRoute + useRouteInteractions hooks
+   │      ├── own immutable history, snap mode, undo/redo, loop, and routing status
+   │      ├── serialize dynamic swissTLM3D additions and affected-section rebuilds
+   │      └── attach focused click/drag interactions and straight previews
+   │
+   ├── useImportedRoute hook
+   │      ├── validate and parse one local GPX file with stale-read protection
+   │      ├── project and display independent read-only LV95 segments
+   │      └── reuse embedded elevations and frame the imported itinerary
+   │
+   ├── mapRuntime factory + useMapRuntime hook
+   │      ├── create and dispose the single OpenLayers map and ordered layers
+   │      ├── expose shared displays, startup status, and fullscreen state
+   │      └── synchronize browser fullscreen changes with map sizing
+   │
+   ├── useMapViewControls hook
+   │      ├── own base-map and rendered hiking-overlay choices
+   │      ├── persist hiking visibility and animate relative zoom changes
+   │      └── request fullscreen and one-shot browser geolocation
+   │
+   ├── useItineraryMetrics hook
+   │      ├── select editable or imported geometry as the current itinerary
+   │      ├── bind elevation results to exact immutable segment collections
+   │      └── synchronize map-route and elevation-profile pointer exploration
+   │
+   ├── useMapInformationLayers hook
+   │      ├── persist closure, danger-zone, and stop visibility choices
+   │      ├── load filtered passenger stops for the visible viewport
+   │      └── prioritize stop, closure, and danger-zone inspection and popup state
    │
    ├── OpenLayers Map / View (`EPSG:2056`)
    │      ├── WMTS TileLayer: national map in the native LV95 grid
@@ -191,11 +260,18 @@ Browser
           ├── api3.geo.admin.ch (search, routing, information-layer inspection, and elevation profile)
           └── transport.opendata.ch (on-demand public-transport departures)
 
+Regression tests
+   │
+   ├── Vitest
+   ├── JSDOM for browser XML APIs
+   └── colocated route, GPX, metric, and transport-domain suites
+
 Deployment
    │
    ├── push to main
    ├── GitHub Actions
    │      ├── npm ci
+   │      ├── npm test
    │      └── npm run build
    └── GitHub Pages
 ```
@@ -214,6 +290,8 @@ selected route section.
 | OpenLayers 10 | Map, native LV95 view, layers, projections, markers, controls, and route-shaping pointer interaction |
 | proj4 | EPSG:2056 definition and OpenLayers transformation registration |
 | Vite 8 | Development server, production build, and Pages base path |
+| Vitest 4 | Deterministic regression tests for route, GPX, metric, and transport-domain contracts |
+| JSDOM | Browser XML APIs for local GPX parser tests without launching the application |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
 | GeoAdmin HTML popup API | Localized official closure and military danger-zone metadata |
@@ -458,8 +536,12 @@ Selecting a result transforms its WGS 84 longitude and latitude to
 `EPSG:2056`, updates a dedicated marker, and animates the view to native level
 19 (20 metres per pixel). The marker remains a temporary location cue: it is
 cleared when a public-transport, hiking-closure, or danger-zone popup opens,
-when a GPX itinerary is loaded successfully, or when route creation starts. A
-map click that does not open an information popup leaves the marker untouched.
+when a GPX itinerary is loaded successfully, or when route creation starts.
+Those same priority changes also reset the search text, results, pending debounce,
+and request lifecycle so the field cannot retain a location whose marker no
+longer exists. Changing the interface language clears both the search control
+and its temporary marker before any localized query can be started. A map click
+that does not open an information popup leaves the marker and field untouched.
 
 ### 8.1 Interface localization
 
@@ -477,13 +559,15 @@ localization does not require a permanent settings panel.
 
 Location search passes the selected two-letter language to SearchServer. Search
 origins remain language-neutral in the API module and are translated only by the
-UI component. Changing language reruns an open search and applies the matching
-Swiss number-format locale to route figures and elevation axes.
+UI component. Changing language resets the current search and marker; subsequent
+queries use the new language. The matching Swiss number-format locale is also
+applied to route figures and elevation axes.
 
 ## 9. Browser geolocation
 
-The location control uses `navigator.geolocation.getCurrentPosition()` only
-after an explicit user action.
+`src/map/useMapViewControls.ts` calls
+`navigator.geolocation.getCurrentPosition()` only after an explicit user
+action.
 
 The browser may display a permission prompt. The application does not request
 the position during startup and does not use continuous tracking.
@@ -497,13 +581,14 @@ supported, while a deployed version must use HTTPS.
 
 ## 10. Fullscreen mode
 
-The fullscreen control calls `requestFullscreen()` on the root `.app` element,
+`src/map/useMapViewControls.ts` calls `requestFullscreen()` on the root `.app`
+element,
 so the map, search field, controls, and temporary messages remain available.
 
 The browser owns the actual fullscreen lifecycle. Pressing `Escape` exits the
 mode without application-specific keyboard handling. A `fullscreenchange`
-listener keeps the React button state synchronized even when fullscreen is
-left through the browser UI or the Escape key.
+listener in `useMapRuntime` keeps the React button state synchronized even when
+fullscreen is left through the browser UI or the Escape key.
 
 Entering or leaving fullscreen changes the viewport dimensions. The listener
 therefore schedules `map.updateSize()` on the next animation frame so
@@ -511,9 +596,12 @@ OpenLayers recalculates its canvas and visible tile area.
 
 ## 11. Manual route creation and dynamic regional routing
 
-`App.tsx` owns the route-creation mode because that state affects the map cursor,
-the visible controls, and whether the OpenLayers `singleclick` listener is
-attached.
+`src/map/useEditableRoute.ts` owns route-creation mode, immutable history, snap
+mode, serialized routing operations, and the actions exposed to the compact
+route toolbar. `src/map/useRouteInteractions.ts` attaches the OpenLayers click
+and drag listeners only while editing is active, keeps transient previews out of
+React state, and translates pointer gestures into semantic edit requests. The
+root application receives only render state and actions from these hooks.
 
 The current route is an immutable `RouteState`. Its ordered `RouteStep` array
 stores:
@@ -527,6 +615,8 @@ section from the last waypoint back to the first and its routing mode. The
 closure deliberately has no second waypoint marker, so the start remains a
 single editable point.
 
+`src/map/routeState.ts` defines `RouteState`, `RouteStep`, `RouteClosure`, and
+`RouteHistory`, together with pure flattening, identity, and reversal helpers.
 `RouteHistory` stores stacks of complete prior and undone route states. Adding,
 moving, inserting, or deleting a waypoint, reversing the route, and closing or
 reopening the loop each create one snapshot-based edit. Undo and redo exchange
@@ -571,7 +661,7 @@ A* then calculates a section between the snapped start and end positions. The
 heuristic uses a lower bound below every configured cost factor so it remains
 admissible.
 
-`src/map/route.ts` owns the OpenLayers representation. It concatenates normal
+`src/map/routeDisplay.ts` owns the OpenLayers representation. It concatenates normal
 stored sections and the optional closing section into one red `LineString` with
 a white casing, while creating exactly one red-outlined `Point` feature per
 waypoint. Red is used deliberately so planned routes do not resemble blue
@@ -595,8 +685,11 @@ swaps the endpoint markers and arrow direction, while closed-route reversal
 preserves the physical start and changes only traversal and arrow direction,
 without separate marker state.
 
-The same module creates one focused OpenLayers pointer interaction for existing
-waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
+`src/map/routePointerInteraction.ts` provides the focused OpenLayers pointer-
+interaction factory and hit-detection primitives for existing waypoints, normal
+route sections, and the optional closing section.
+`src/map/useRouteInteractions.ts` owns that
+interaction's React lifecycle. A 12-pixel point tolerance keeps small waypoints
 usable on touch screens, while a narrower line tolerance selects the closest
 stored incoming section. When several stored sections overlap at the same
 screen distance, the section latest in the current route order wins so repeated
@@ -606,23 +699,24 @@ adjacent sections replaced by straight lines. Pulling the route line inserts a
 temporary point and splits the selected section into two straight previews. No
 network request runs during either drag.
 
-On release, `App.tsx` recalculates only the affected sections. A moved point
-updates its incoming and outgoing sections; moving the first or last point of a
-closed route also refreshes the closing section. An inserted point replaces one
-normal or closing section with two sections. Both halves use the snap mode
-selected at release: straight mode preserves the dropped coordinate exactly,
-while network mode calls the dynamic router and each half can independently
-fall back to a straight segment if coverage or connectivity is missing. The
-insertion edit is committed only after a genuine drag. A click on an existing
-waypoint removes it, while a click-only press on a route section is restored and
-then handled by the normal map-click flow as a new endpoint from the current
-route end. This allows an itinerary to reuse an already drawn path without
-confusing that click with section reshaping. Closed-route endpoint deletion
-rebuilds the loop around the remaining points. Intermediate deletion reconnects
-the surrounding waypoints according to the current snap mode and falls back to
-a straight connector when no network path is available. Hover-capable pointers
-receive a compact, localized contextual label for both waypoint and route-section
-actions.
+On release, `useRouteInteractions` sends one semantic move, insertion, or
+deletion request to `useEditableRoute`, which delegates affected-section
+reconstruction to `src/routing/routeEditing.ts`. A moved point updates its incoming and outgoing
+sections; moving the first or last point of a closed route also refreshes the
+closing section. An inserted point replaces one normal or closing section with
+two sections. Both halves use the snap mode selected at release: straight mode
+preserves the dropped coordinate exactly, while network mode calls the dynamic
+router and each half can independently fall back to a straight segment if
+coverage or connectivity is missing. The insertion edit is committed only after
+a genuine drag. A click on an existing waypoint removes it, while a click-only
+press on a route section is restored and then handled by the normal map-click
+flow as a new endpoint from the current route end. This allows an itinerary to
+reuse an already drawn path without confusing that click with section reshaping.
+Closed-route endpoint deletion rebuilds the loop around the remaining points.
+Intermediate deletion reconnects the surrounding waypoints according to the
+current snap mode and falls back to a straight connector when no network path is
+available. Hover-capable pointers receive a compact, localized contextual label
+for both waypoint and route-section actions.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from snapshot history state. The snap button selects network or
@@ -640,8 +734,11 @@ bleed through the toolbar. The route toggle displays a small animated spinner
 during asynchronous network work, including recalculation after a drag or loop
 closure.
 
-`src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
-flattened LV95 route geometry. For altitude-dependent figures, it sends the
+`src/metrics/useItineraryMetrics.ts` selects the editable route or independent
+imported GPX segments as the single current itinerary, calculates distance, and
+coordinates the profile lifecycle. Its pure and provider-facing calculations
+remain in `src/metrics/routeMetrics.ts`, which calculates horizontal distance
+locally from LV95 geometry. For altitude-dependent figures, it sends the
 native route coordinates directly in a bounded POST request to GeoAdmin's
 elevation-profile service. The service applies a small moving-average offset
 before the client accumulates positive and negative elevation changes. The same ordered
@@ -667,8 +764,8 @@ vertical range with rounded axis bounds so small local variations are not
 visually exaggerated. Larger profiles retain automatic scaling with a small
 margin around their extrema. Pointer movement interpolates the profile distance
 and altitude, draws a vertical chart guide, and publishes only cumulative
-distance to the root application. A cumulative distance selected by hovering
-the map route drives the same guide and header values while the profile is open.
+distance to `useItineraryMetrics`. A cumulative distance selected by the hook's
+map listener drives the same guide and header values while the profile is open.
 
 Reversal uses `reverseRouteState()` to reverse stored geometry without issuing
 another routing request. Open routes reverse waypoint order normally. Closed
@@ -698,8 +795,8 @@ discarding cells that completed successfully.
 ## 12. Read-only GPX import
 
 `RouteImportControl` owns only the hidden file input and compact import button.
-It returns the selected `File` to `App.tsx`; imported geometry never becomes
-editable route history.
+It returns the selected `File` to `useImportedRoute`; imported geometry never
+becomes editable route history.
 
 `src/import/gpx.ts` parses common GPX tracks and routes locally with
 `DOMParser`. Each `trkseg` remains an independent line, coordinate values are
@@ -710,18 +807,23 @@ back to GeoAdmin for the complete profile. Waypoint-only GPX documents are
 rejected because they do not define an itinerary. A size limit protects the
 browser from accidental oversized files.
 
-A successful import becomes the single current itinerary: active routing is
-aborted, route-creation mode is left, editable route history is cleared, and the
-new purple read-only geometry replaces any prior GPX. Invalid imports leave the
-current itinerary untouched. Starting route creation later clears the imported
-layer immediately, without confirmation.
+`src/map/useImportedRoute.ts` owns the asynchronous file-read session, size
+validation, parsing, WGS 84 to LV95 conversion, optional embedded-elevation
+summary, purple display replacement, and view framing. A slower file read is
+ignored after a newer selection, route creation, or unmount invalidates its
+session. A successful import becomes the single current itinerary: active
+routing is aborted, route-creation mode is left, editable route history is
+cleared, and the new purple read-only geometry replaces any prior GPX. Invalid
+imports leave the current itinerary untouched. Starting route creation later
+clears the imported layer immediately, without confirmation.
 
 `src/map/importedRoute.ts` owns the purple read-only vector layer, adds sparse
 purple direction arrowheads independently to each retained GPX segment, and adds the
 shared endpoint markers to the first and last retained GPX coordinates. Endpoints
 within five LV95 metres use one combined A/B marker so small recording differences
-do not hide one symbol beneath the other. `App.tsx` fits the view to its extent
-and feeds its projected segments into the shared metrics pipeline. Distance is summed per segment. When every retained GPX point has a
+do not hide one symbol beneath the other. `useImportedRoute` fits the view to its
+extent and feeds its projected segments into the shared metrics pipeline.
+Distance is summed per segment. When every retained GPX point has a
 valid `<ele>` value, the embedded altitude function is resampled at the same
 roughly 20 metre spacing used for editable routes; this preserves the exported
 profile while avoiding visible artefacts from irregularly spaced geometry
@@ -754,9 +856,10 @@ also be started manually. It:
 
 1. checks out the repository;
 2. installs the exact dependencies from `package-lock.json` with `npm ci`;
-3. runs the TypeScript check and Vite build through `npm run build`;
-4. uploads `dist/` as a GitHub Pages artifact;
-5. deploys that artifact to the `github-pages` environment.
+3. runs the focused regression suite through `npm test`;
+4. runs the TypeScript check and Vite build through `npm run build`;
+5. uploads `dist/` as a GitHub Pages artifact;
+6. deploys that artifact to the `github-pages` environment.
 
 The workflow receives only the permissions required to read the repository and
 deploy Pages. Deployment concurrency is limited to one active Pages run, and a
@@ -808,7 +911,11 @@ via-helvetica/
 │   ├── dangers/
 │   │   └── shootingDangerZones.ts
 │   ├── transport/
+│   │   ├── publicTransportStopModel.test.ts
+│   │   ├── publicTransportStopModel.ts
 │   │   ├── publicTransportStops.ts
+│   │   ├── publicTransportStopsApi.ts
+│   │   ├── publicTransportStopsDisplay.ts
 │   │   └── stationBoard.ts
 │   ├── components/
 │   │   ├── MapInformationPopup.tsx
@@ -826,9 +933,12 @@ via-helvetica/
 │   ├── export/
 │   │   └── gpx.ts
 │   ├── import/
+│   │   ├── gpx.test.ts
 │   │   └── gpx.ts
 │   ├── metrics/
-│   │   └── routeMetrics.ts
+│   │   ├── routeMetrics.test.ts
+│   │   ├── routeMetrics.ts
+│   │   └── useItineraryMetrics.ts
 │   ├── i18n/
 │   │   ├── I18nContext.tsx
 │   │   └── translations.ts
@@ -838,13 +948,28 @@ via-helvetica/
 │   │   ├── importedRoute.ts
 │   │   ├── itineraryDirection.ts
 │   │   ├── itineraryEndpoints.ts
+│   │   ├── mapRuntime.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
+│   │   ├── routeDisplay.ts
+│   │   ├── routePointerInteraction.ts
+│   │   ├── routeState.test.ts
+│   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
+│   │   ├── useEditableRoute.ts
+│   │   ├── useImportedRoute.ts
+│   │   ├── useMapInformationLayers.ts
+│   │   ├── useMapRuntime.ts
+│   │   ├── useMapViewControls.ts
+│   │   ├── useRouteInteractions.ts
 │   │   └── userLocation.ts
+│   ├── network/
+│   │   └── abort.ts
 │   ├── routing/
 │   │   ├── networkRouter.ts
+│   │   ├── routeEditing.test.ts
+│   │   ├── routeEditing.ts
 │   │   ├── swissTlmApi.ts
 │   │   └── dynamicRoutingNetwork.ts
 │   ├── search/
@@ -860,30 +985,111 @@ via-helvetica/
 ├── package.json
 ├── README.md
 ├── tsconfig.json
-└── vite.config.ts
+├── vite.config.ts
+└── vitest.config.ts
 ```
 
 ## 16. File responsibilities
 
 ### `src/App.tsx`
 
-Owns the OpenLayers map instance and coordinates map-level behavior.
+Composes application capabilities through one shared `MapRuntime` ref.
 
-It creates the native LV95 view, WMTS/WMS and vector layers, replaces the
-selected base-map source, and handles map, geolocation, fullscreen,
-single-current-itinerary GPX loading, information-layer
-visibility and feature inspection, route-creation mode, immutable route edit
-snapshots, waypoint move and insertion recalculation, loop closing and reopening, dynamic graph loading, route
-statistics, and temporary routing status. It
-reacts to selected search results and cleans up imperative resources and pending
-requests when React unmounts.
+It retains temporary location-search selection and the GPX export dialog, then
+wires focused controllers to presentational components. Native map construction
+and browser fullscreen state are delegated to `useMapRuntime`; background,
+hiking-overlay, zoom, fullscreen requests, and geolocation are delegated to
+`useMapViewControls`; information overlays are delegated to
+`useMapInformationLayers`; editable route state and gestures are delegated to
+`useEditableRoute` and `useRouteInteractions`; imported GPX file sessions,
+geometry, display, and framing are delegated to `useImportedRoute`;
+current-itinerary statistics and profile exploration are delegated to
+`useItineraryMetrics`. App only coordinates cross-workflow ownership, such as
+clearing a GPX before route creation or clearing editable history after a valid
+import.
+
+### `src/map/useEditableRoute.ts`
+
+Owns the React-facing editable-route capability. It stores immutable route
+history and synchronous refs for stale-result guards, preserves the current snap
+choice, serializes dynamic routing operations, commits undoable additions,
+moves, insertions, deletions, reversal, and loop changes, and publishes the
+busy/message state consumed by route controls. It exposes self-contained route
+actions; the application shell coordinates unrelated search and imported-GPX
+workflows before invoking them. A successful GPX import asks the hook to abort
+editing and clear history.
+
+### `src/map/useImportedRoute.ts`
+
+Owns the React-facing read-only GPX capability. It validates the browser file
+size, protects asynchronous `File.text()` reads with a monotonically increasing
+session, parses the GPX locally, projects independent segments into LV95,
+reuses complete embedded elevations when possible, updates or clears the purple
+OpenLayers display, and frames the accepted itinerary above the bottom summary.
+The hook exposes projected segments and the optional elevation summary to
+`useItineraryMetrics`. Cross-workflow callbacks remain in `App.tsx`, so the hook
+does not know how editable history or location search are implemented.
+
+### `src/map/useRouteInteractions.ts`
+
+Owns the lifecycle of the focused OpenLayers route interaction without owning
+routing algorithms or history. It turns clicks and drags into semantic endpoint,
+move, insertion, and deletion callbacks, keeps straight drag previews local to
+the vector display, suppresses the delayed `singleclick` after a handled gesture,
+clamps contextual hover guidance inside the map, and restores committed geometry
+when a gesture is cancelled or rejected.
+
+### `src/map/mapRuntime.ts`
+
+Creates the single native-LV95 OpenLayers map as one disposable runtime. It owns
+the explicit WMTS/WMS/vector layer order, base-map replacement, shared route and
+GPX displays, information-layer displays, transient markers, initial base-map
+load reporting, and DOM-target cleanup. It contains no React state.
+
+### `src/map/useMapRuntime.ts`
+
+Bridges the imperative map runtime with React. It creates the runtime once after
+the map target mounts, exposes it through one stable ref, publishes initial
+base-map loading state, synchronizes browser fullscreen state, requests an
+OpenLayers size refresh after viewport changes, and disposes the runtime on
+unmount. Later layer changes are applied by focused hooks without recreating the
+map.
+
+### `src/map/useMapViewControls.ts`
+
+Owns map-view controls that do not mutate itinerary state. It stores the selected
+base map, restores and persists rendered hiking-overlay visibility, applies both
+choices through `MapRuntime`, animates relative zoom changes, requests fullscreen
+for the application root, and handles explicit one-shot geolocation with bounded
+LV95 validation, marker updates, and temporary localized feedback.
+
+### `src/map/useMapInformationLayers.ts`
+
+Owns the React-facing lifecycle of the three inspectable information overlays.
+It resolves and persists their independent visibility choices, applies changes
+through the shared `MapRuntime`, reloads filtered public-transport stops after
+viewport or language changes, and clears stale vectors when the stop layer is
+hidden or too far out. Outside route creation it registers one deterministic
+click pipeline: already loaded passenger stops first, hiking closures second,
+and military danger zones last. The hook owns popup state, selected stop and
+polygon highlights, language and zoom invalidation, abortable identify/popup
+requests, and cleanup. Provider contracts remain in the closure, danger,
+and focused public-transport API/model/display modules.
+
+### `src/network/abort.ts`
+
+Normalizes the browser's two cancellation signals—an aborted signal and a
+rejected `AbortError`—so intentional replacement of map or routing requests is
+ignored consistently instead of being reported as an application failure.
 
 ### `src/components/MapLayersSelector.tsx`
 
 Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
-switchable. The component does not know about OpenLayers; `App.tsx` owns the
-actual layer sources and visibility. Outside pointer presses and Escape close
+switchable. The component does not know about OpenLayers; the application shell
+supplies controlled values, while the map-view and information-layer hooks
+apply them through the shared map runtime. Outside pointer
+presses and Escape close
 the menu. It owns independent switches for rendered hiking trails, hiking
 closures, military danger zones, and public-transport stops without adding
 another permanent map button. Hiking trails appear first because they are the
@@ -945,15 +1151,32 @@ dates.
 
 ### `src/transport/publicTransportStops.ts`
 
-Owns the BAV layer identifier, abortable viewport identify requests, the
-passenger-scale identify clamp, bounded subdivision for dense results,
-multilingual attribute normalization, filtering of numeric operating-only,
-out-of-service, empty-mode, or unsupported-mode points, explicit accepted-mode
-classification, narrowly scoped name-qualifier fallback, strict deduplication by
-official feature identifier, preservation of multimodal metadata on one official
-stop, close-symbol fan layouts for distinct neighbouring stops, vector-layer
-creation, zoom-responsive symbol sizing, proportional selection highlighting,
-and client-side SVG symbol styling.
+Provides the stable public facade consumed by map, popup, and timetable modules.
+It re-exports the stop model, abortable viewport loader, and OpenLayers display
+operations without exposing how those responsibilities are implemented.
+
+### `src/transport/publicTransportStopModel.ts`
+
+Owns the BAV layer identifier, accepted passenger-mode contract, multilingual
+attribute normalization, transport classification, numeric and out-of-service
+filtering, the narrowly scoped final-name-qualifier fallback, mode priority, and
+conversion of untrusted identify results into validated `PublicTransportStop`
+objects.
+
+### `src/transport/publicTransportStopsApi.ts`
+
+Owns the abortable GeoAdmin viewport identify contract, the passenger-scale
+identify clamp, bounded recursive subdivision when a response reaches the
+200-feature limit, strict deduplication by official identifier, and delegation
+to the passenger-stop parser. It contains no OpenLayers layer or style state.
+
+### `src/transport/publicTransportStopsDisplay.ts`
+
+Owns the filtered and selected OpenLayers vector layers, locally bundled SVG
+symbols, zoom-responsive icon sizes, deterministic fan layouts for distinct
+neighbouring stops, proportional selection highlighting, and feature metadata
+used for map hit detection. It contains no provider request or multilingual
+record-filtering logic.
 
 ### `src/assets/public-transport-stops/*.svg`
 
@@ -998,14 +1221,18 @@ Owns the search-field interface:
 - result selection.
 
 It does not know about OpenLayers. It reports search activity and a typed result
-through callbacks; `App.tsx` decides which map-information panels and selections
-to clear.
+through callbacks; `App.tsx` wires search focus to the shared close action owned
+by `useMapInformationLayers`, handles and clears the selected location marker,
+and remounts the component when another map workflow or language change
+invalidates the current search context. Remounting deliberately lets the
+component clean up its own debounce and request before starting again with empty
+local state.
 
 ### `src/components/RouteControls.tsx`
 
 Renders the route-mode toggle and the contextual route action buttons. It is a
-controlled component: `App.tsx` supplies availability state and callbacks for
-snap, undo, redo, reversal, loop closure, deletion, and GPX export.
+controlled component: `useEditableRoute` supplies editing availability and
+actions through `App.tsx`; the application shell adds the GPX export action.
 
 ### `src/components/RouteImportControl.tsx`
 
@@ -1053,6 +1280,17 @@ samples, accumulates ascent and descent, and applies the published Schweizer
 Wanderwege 15th-degree hiking-time model to each sampled section. The same
 samples feed the profile chart. Requests are
 abortable so stale route histories cannot update the UI.
+
+### `src/metrics/useItineraryMetrics.ts`
+
+Owns the React-facing metrics pipeline shared by editable and imported
+itineraries. It selects the current segment collection, calculates immediate
+distance, reuses complete embedded GPX elevations, debounces and aborts GeoAdmin
+profile requests, and binds every completed response to the exact immutable
+segment-array identity that requested it. It also owns the transient route
+profile marker and the bidirectional cumulative-distance link between map and
+chart. Route-drag render state clears hover feedback without coupling this hook
+to route mutation logic.
 
 ### `src/export/gpx.ts`
 
@@ -1102,17 +1340,37 @@ editable and imported itineraries. It recognizes near-coincident imported GPX
 endpoints in native LV95 metres and stores a semantic endpoint role so editable
 markers can retain waypoint hit behaviour without owning route state.
 
+### `src/map/routeState.ts`
+
+Defines immutable route steps, the optional dedicated loop-closing section,
+complete route state, and undo/redo history contracts. It flattens normal and
+closing geometry, compares captured immutable states, and reverses open or
+closed routes without recalculation. The module has no React or OpenLayers
+rendering lifecycle.
+
+### `src/map/routeDisplay.ts`
+
+Creates the editable-route vector layer and rebuilds its line with sparse
+direction arrowheads, indexed waypoint features, and start/finish markers. It
+also draws the straight temporary previews used while moving a waypoint or
+pulling a new waypoint from a stored section. The module consumes immutable
+contracts from `routeState.ts` and owns no interaction lifecycle, route history,
+or network recalculation.
+
+### `src/map/routePointerInteraction.ts`
+
+Provides waypoint and normal/closing-section hit detection, deterministic
+newest-section selection for overlapping geometry, the focused click/drag
+interaction factory, contextual hover targets, and route-edit cursor state. It
+reports semantic pointer events and depends on `routeDisplay.ts` only for the
+route layer and its private waypoint metadata accessor. `useRouteInteractions`
+owns the React lifecycle and coordinates display previews with route mutations.
+
 ### `src/map/route.ts`
 
-Defines immutable route steps, the optional dedicated loop-closing section, and
-complete route state. It flattens normal and closing geometry, reverses complete
-routes without recalculation, creates the route vector layer, and rebuilds its
-line with sparse direction arrowheads, indexed waypoint features, and start/finish markers. It also owns waypoint and normal/closing
-section hit detection, deterministic newest-section selection for overlapping
-geometry, the focused click/drag interaction, contextual hover target reporting,
-cursor state, and straight preview rendering for moved or temporarily inserted
-waypoints. It does not own immutable route history or
-network recalculation.
+Keeps the historical editable-route import path stable by re-exporting the
+focused display and pointer-interaction APIs. It contains no rendering or
+interaction implementation.
 
 ### `src/routing/swissTlmApi.ts`
 
@@ -1127,6 +1385,15 @@ handling.
 Builds the walkable regional graph, indexes line segments, matches official
 hiking geometry, snaps waypoints, applies routing costs, and calculates A*
 paths. It contains no React or OpenLayers map lifecycle state.
+
+### `src/routing/routeEditing.ts`
+
+Coordinates immutable route edits with the dynamic router. It creates straight
+fallback steps and closures, preserves exact waypoint connectors, and rebuilds
+only the sections affected by waypoint movement, insertion, deletion, or loop
+closure. It propagates request and size-limit failures to
+`useEditableRoute`, while missing coverage or connectivity may fall back to
+straight geometry.
 
 ### `src/routing/dynamicRoutingNetwork.ts`
 
@@ -1178,14 +1445,28 @@ Defines the full-screen layout, left-side search control, right-side map
 controls, shared information panel, route statistics, result panels, status
 messages, and OpenLayers control placement.
 
+### Regression test files
+
+The colocated `*.test.ts` files protect stable domain behaviour without opening
+a map or contacting live providers. `routeState.test.ts` covers flattening and
+open or closed reversal; `routeEditing.test.ts` covers exact connectors and
+move, insertion, and deletion rebuilds; `gpx.test.ts` covers namespaced tracks,
+segment gaps, duplicate points, elevations, and validation;
+`routeMetrics.test.ts` covers LV95 distance, segment-local elevation totals, the
+Swiss hiking-time model, and a mocked GeoAdmin profile response; and
+`publicTransportStopModel.test.ts` covers multilingual passenger-mode
+normalization and technical-record rejection.
+
 ### Remaining root files
 
 - `src/main.tsx` mounts React, the language provider, and styles.
 - `index.html` is the browser entry point.
-- `package.json` declares dependencies and npm scripts.
+- `package.json` declares dependencies and npm scripts, including one-shot and
+  watch-mode regression commands.
 - `package-lock.json` locks dependency versions.
 - `vite.config.ts` configures React and the GitHub Pages base path.
-- `.github/workflows/deploy.yml` builds and deploys `dist/` to GitHub Pages.
+- `vitest.config.ts` selects JSDOM and colocated `src/**/*.test.ts` suites.
+- `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
   thumbnails used by the Layers menu without another map request.
 - `public/favicon.svg` provides the browser favicon referenced by `index.html`.
@@ -1199,34 +1480,55 @@ messages, and OpenLayers control placement.
 1. The browser registers EPSG:2056 through `proj4`, then resolves a stored or
    browser language.
 2. The language provider updates document metadata and exposes localized strings.
-3. `App` creates the native LV95 OpenLayers view, tile layers, marker layers,
-   editable route layer, and imported-route layer.
+3. `useMapRuntime` creates one disposable runtime through `mapRuntime.ts`;
+   the runtime builds the native LV95 OpenLayers view, ordered tile and vector
+   layers, editable-route display, imported-route display, and transient markers,
+   then publishes base-map startup and browser-fullscreen state.
 4. The default color base map begins loading from the native `2056` WMTS
    matrix set at `wmts.geo.admin.ch`.
-5. The Layers menu changes the base-map source or toggles information overlays.
+5. The Layers menu changes controlled layer choices. `useMapViewControls`
+   applies the base map and persisted rendered hiking-overlay preference, while
+   `useMapInformationLayers` persists and applies the three inspectable overlays.
 6. The rendered hiking overlay is enabled by default unless a stored preference
    hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
-9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
-10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
-11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices. Opening any of these panels clears the temporary location-search marker.
-12. Selecting a valid GPX clears the temporary location-search marker, converts its WGS 84 coordinates to LV95, leaves route
-    creation, clears editable route history, replaces the previous imported
-    itinerary, adds direction arrowheads independently to each retained segment,
-    and fits the map to its geometry.
+9. The public-transport stop vector layer remains disabled by default unless a
+   stored preference enables it. At detailed zoom levels,
+   `useMapInformationLayers` reloads and filters the visible passenger stops on
+   map move or language change.
+10. Outside route creation, the information-layer hook registers one map-click
+    pipeline that inspects loaded stop vectors first, then a visible hiking
+    closure, and finally a visible military danger zone.
+11. A stop opens a compact structured panel immediately and starts an abortable
+    stationboard request; closure and danger-zone polygons fetch localized
+    official popups through the shared sanitizer, while a selected danger zone
+    is highlighted from its returned GeoJSON geometry and PDF links are removed
+    from military notices. Opening any of these panels clears the temporary
+    location-search marker. Zoom, language, visibility, or route-mode changes
+    cancel obsolete information requests and clear stale selections.
+12. `useImportedRoute` validates and parses a selected GPX locally, ignores
+    obsolete file reads, converts its WGS 84 coordinates to LV95, and reuses a
+    complete embedded elevation series when available. After preparation
+    succeeds, `App.tsx` clears the temporary location-search context and asks
+    `useEditableRoute` to leave route creation and clear editable history; the
+    import hook then replaces the previous purple itinerary, adds direction
+    arrowheads independently to each retained segment, and fits the map to its
+    geometry.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
     the profile.
-14. Starting editable route creation clears the imported GPX without prompting.
-15. The route button toggles route-creation mode and the crosshair cursor;
-    entering the mode clears the temporary location-search marker. A fresh empty
-    route resets to snapping enabled, while an existing editable route keeps its
+14. Before entering editable route creation, `App.tsx` clears the temporary
+    search context and asks `useImportedRoute` to invalidate any unfinished file
+    read and remove the imported GPX without prompting.
+15. `useEditableRoute` then handles the route button, creation mode, and snap
+    state. A fresh empty route resets to snapping enabled, while an existing
+    editable route keeps its
     current snap choice.
-16. Entering route mode attaches the route-click listener, one focused route
-    drag interaction, and the contextual toolbar. The snap control is immediately
-    available before the first waypoint is placed.
+16. `useRouteInteractions` attaches the route-click listener and one focused
+    drag interaction while the contextual toolbar is visible. The snap control is
+    immediately available before the first waypoint is placed.
 17. With snapping disabled, a map click stores a direct section immediately.
 18. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
@@ -1272,16 +1574,17 @@ messages, and OpenLayers control placement.
     arrows, indexed waypoint features, and A/B endpoint markers. Reversal swaps
     open-route markers and arrow direction; a closed route keeps one combined
     marker at the same physical start while its arrows reverse.
-35. Distance is recalculated locally from the flattened route geometry, including
-    the optional closing section.
+35. `useItineraryMetrics` selects the editable geometry or imported GPX segments
+    and recalculates their local distance without inventing links across gaps.
 36. After a short debounce, an abortable profile request refreshes ascent,
-    descent, estimated walking time, and the reusable chart samples.
+    descent, estimated walking time, and reusable chart samples; the result is
+    accepted only for the exact segment collection that requested it.
 37. The profile button reveals or hides the SVG chart without another request.
-38. Moving a pointer across the displayed itinerary finds the nearest indexed
-    position and shows a transient circle on the map. When the profile is open,
-    the same cumulative distance updates its guide, altitude, and distance.
-39. Moving a pointer across the chart performs the inverse lookup and updates
-    the same transient marker above the corresponding map position.
+38. The metrics hook maps pointer movement across the displayed itinerary to a
+    cumulative distance and transient circle. When the profile is open, the same
+    distance updates its guide, altitude, and distance.
+39. Moving across the chart performs the inverse lookup through the same hook and
+    updates the transient marker above the corresponding map position.
 40. Undo and redo exchange complete stored route states without routing again.
 41. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
@@ -1290,20 +1593,22 @@ messages, and OpenLayers control placement.
 44. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-45. Changing language updates interface text, number formatting, document
-    metadata, and subsequent GeoAdmin requests without recreating the map.
+45. Changing language clears the temporary location search and marker, then
+    updates interface text, number formatting, document metadata, and subsequent
+    GeoAdmin requests without recreating the map.
 46. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-47. The fullscreen button requests fullscreen for the root application element.
-48. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+47. `useMapViewControls` requests fullscreen for the root application element.
+48. `useMapRuntime` publishes `fullscreenchange` state and resizes OpenLayers.
 49. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and
     browser geolocation otherwise continue to operate independently.
 50. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-51. A push to `main` triggers the Pages workflow, which builds and deploys
+51. A push to `main` triggers the Pages workflow, which installs locked
+    dependencies, runs the regression suite, builds the application, and deploys
     `dist`.
 
 ## 18. Error handling
@@ -1383,16 +1688,17 @@ to the normal GeoAdmin profile service.
   `@throws` for expected failures.
 - Explain sensitive algorithmic blocks such as A*, heaps, adaptive subdivision,
   concurrency limits, caches, and stale-result guards.
-- `npm run build` must succeed before an important commit.
+- Regression tests must not depend on live external services.
+- `npm test` and `npm run build` must succeed before an important commit.
 - Production asset paths must remain compatible with the configured Pages base.
 
 ## 20. Possible evolution
 
 The main product scope is implemented. Further work should be driven by observed
 usage or validation results rather than by a fixed feature roadmap. Possible
-follow-ups include focused automated regression tests, conservative timetable
-refresh, and a preprocessed routing graph or
-backend only if measured browser-routing limits justify that complexity.
+follow-ups include broader routing-topology fixtures, conservative timetable
+refresh, and a preprocessed routing graph or backend only if measured
+browser-routing limits justify that complexity.
 
 ## 21. When to evolve the architecture
 

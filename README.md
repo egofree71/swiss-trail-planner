@@ -12,6 +12,7 @@ time.
 - [Basic usage](#basic-usage)
 - [Data sources and limitations](#data-sources-and-limitations)
 - [Documentation](#documentation)
+- [Regression tests](#regression-tests)
 - [Production build and deployment](#production-build-and-deployment)
 - [License](#license)
 
@@ -82,7 +83,9 @@ http://localhost:5173/via-helvetica/
    reused; GeoAdmin supplies the profile only when they are unavailable.
    Starting a new route replaces the imported itinerary.
 6. Outside route-creation mode, click visible closures, danger zones, or public
-   transport stops to inspect their available information.
+   transport stops to inspect their available information. Starting route
+   creation, loading a GPX, opening map information, or changing the interface
+   language clears the temporary location marker, search text, and result list.
 
 The application requests browser geolocation only after the location button is
 pressed. Deployed geolocation requires HTTPS.
@@ -115,7 +118,24 @@ architecture document rather than duplicated here.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
-  data flows, and technical choices.
+  data flows, and technical choices, including the disposable OpenLayers runtime,
+  focused information, map-control, editable-route, imported-GPX, and
+  itinerary-metrics hooks, plus the separation between route state, route
+  rendering, low-level pointer interaction, reconstruction, and
+  public-transport loading, normalization, and display.
+
+## Regression tests
+
+The focused Vitest suite protects immutable route transformations, route editing,
+GPX parsing, route metrics, and passenger-stop filtering. Run it once with:
+
+```bash
+npm test
+```
+
+During development, use `npm run test:watch` to rerun affected tests after each
+change. GitHub Actions runs the complete suite before building and deploying the
+site.
 
 ## Production build and deployment
 
