@@ -791,8 +791,7 @@ via-helvetica/
 │   └── workflows/
 │       └── deploy.yml
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   └── VALIDATION.md
+│   └── ARCHITECTURE.md
 ├── public/
 │   ├── base-map-previews/
 │   │   ├── aerial.png
@@ -1193,7 +1192,6 @@ messages, and OpenLayers control placement.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
-- `docs/VALIDATION.md` records important manual and regression checks.
 - `LICENSE` contains the MIT license.
 
 ## 17. Runtime flow
