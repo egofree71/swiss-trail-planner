@@ -1,14 +1,13 @@
 /**
  * Business context: coordinates the map-centred application shell around one
- * disposable OpenLayers runtime. It connects search, geolocation, route history,
- * dynamic swissTLM3D loading, and route-editing controls while delegating map
- * construction, provider contracts, and optional information-layer workflows to
- * focused modules.
+ * disposable OpenLayers runtime. It composes search, geolocation, editable-route,
+ * imported-GPX, information-layer, and itinerary-metrics capabilities while
+ * delegating their imperative lifecycles and provider contracts to focused
+ * modules.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
 import MapBrowserEvent from 'ol/MapBrowserEvent.js';
-import type { Pixel } from 'ol/pixel.js';
 import { containsCoordinate } from 'ol/extent.js';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
@@ -45,27 +44,7 @@ import {
   useMapInformationLayers,
 } from './map/useMapInformationLayers';
 import { useMapRuntime } from './map/useMapRuntime';
-import {
-  clearRouteDragCursor,
-  createRouteDragInteraction,
-  getRouteWaypointIndexAtPixel,
-  type RouteDragTarget,
-  type RouteHoverTarget,
-  updateRouteDisplay,
-  updateRouteInsertionDragPreview,
-  updateRouteWaypointDragPreview,
-} from './map/route';
-import {
-  collectRouteCoordinates,
-  coordinateDistanceSquared,
-  getRouteState,
-  reverseRouteState,
-  routeStateMatches,
-  type RouteHistory,
-  type RouteMode,
-  type RouteState,
-  type RouteStep,
-} from './map/routeState';
+import { useEditableRoute } from './map/useEditableRoute';
 import {
   clearSearchResultMarker,
   updateSearchResultMarker,
@@ -78,19 +57,6 @@ import {
 } from './map/routeProfileMarker';
 import { updateUserLocationMarker } from './map/userLocation';
 import {
-  DynamicRoutingNetworkLoader,
-  RoutingAreaTooLargeError,
-} from './routing/dynamicRoutingNetwork';
-import {
-  connectRoutedSegmentEndpoint,
-  createStraightRouteClosure,
-  createStraightRouteStep,
-  rebuildFixedRouteSection,
-  rebuildRouteAfterWaypointDeletion,
-  rebuildRouteAfterWaypointInsertion,
-  rebuildRouteAfterWaypointMove,
-} from './routing/routeEditing';
-import {
   calculateRouteSegmentsDistance,
   createImportedRouteElevationSummary,
   estimateHikingDuration,
@@ -98,65 +64,12 @@ import {
   fetchRouteSegmentsElevationSummary,
   type RouteElevationSummary,
 } from './metrics/routeMetrics';
-import { isAbortedRequest } from './network/abort';
 import type { LocationSearchResult } from './search/locationSearch';
 
 /** Browser geolocation state used by the location control and its feedback. */
 type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
-/** Severity of a temporary route-editing message. */
-type RouteMessageType = 'info' | 'error';
-
-/** Contextual route-editing label shown only for hover-capable pointers. */
-interface RouteContextHint {
-  /** Route element currently below a hover-capable pointer. */
-  target: RouteHoverTarget;
-  /** Clamped horizontal position inside the map container. */
-  left: number;
-  /** Pointer-relative vertical position inside the map container. */
-  top: number;
-  /** Places the label below the pointer when there is no room above it. */
-  below: boolean;
-}
-
-/** Route pointer release that must not append a new endpoint through `singleclick`. */
-interface RouteInteractionRelease {
-  pixel: Pixel;
-  expiresAt: number;
-}
-
-/** Imperative route drag session kept outside React renders for responsiveness. */
-type RouteDragState =
-  | {
-      /** Existing waypoint being moved. */
-      type: 'waypoint';
-      waypointIndex: number;
-      /** Original waypoint coordinate used to ignore click-only interactions. */
-      startCoordinate: Coordinate;
-      /** Route state that owns the preview and must still be current on release. */
-      expectedState: RouteState;
-    }
-  | {
-      /** Incoming section split by the new waypoint. */
-      type: 'segment';
-      stepIndex: number;
-      /** Closest original line coordinate used to require a genuine drag. */
-      startCoordinate: Coordinate;
-      /** Route state that owns the preview and must still be current on release. */
-      expectedState: RouteState;
-    };
-
 /** Duration in milliseconds for transient geolocation feedback. */
 const LOCATION_MESSAGE_DURATION_MS = 6_000;
-/** Duration in milliseconds for actionable route errors before auto-dismissal. */
-const ROUTE_MESSAGE_DURATION_MS = 7_000;
-/** Minimum one-metre waypoint movement needed before recalculation begins. */
-const ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED = 1;
-/** Delay during which a click already handled by route editing is ignored. */
-const ROUTE_INTERACTION_CLICK_SUPPRESSION_MS = 500;
-/** Pixel tolerance for matching the delayed OpenLayers `singleclick`. */
-const ROUTE_INTERACTION_CLICK_TOLERANCE_PX = 8;
-/** Estimated half-width used to keep contextual guidance inside the viewport. */
-const ROUTE_CONTEXT_HINT_HALF_WIDTH_PX = 190;
 /** Delay in milliseconds before requesting elevations after a route mutation. */
 const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
 /** Screen-space route tolerance for the bidirectional map/profile hover link. */
@@ -196,26 +109,8 @@ export default function App() {
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
-  const routeMessageTimerRef = useRef<number | null>(null);
-  const routeHistoryRef = useRef<RouteHistory>({
-    steps: [],
-    closure: null,
-    undoStates: [],
-    redoStates: [],
-  });
-  const routeDragStateRef = useRef<RouteDragState | null>(null);
-  const routeInteractionReleaseRef =
-    useRef<RouteInteractionRelease | null>(null);
-  const routeCreationActiveRef = useRef(false);
-  const routeCreationSessionRef = useRef(0);
-  const routeOperationPendingRef = useRef(false);
-  const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
-  const routingAbortControllerRef = useRef<AbortController | null>(null);
   const routeImportSessionRef = useRef(0);
 
-  if (!routingLoaderRef.current) {
-    routingLoaderRef.current = new DynamicRoutingNetworkLoader();
-  }
 
   const [status, setStatus] = useState<MapLoadStatus>('loading');
   const [locationStatus, setLocationStatus] =
@@ -232,18 +127,6 @@ export default function App() {
   );
   const [areHikingTrailsVisible, setAreHikingTrailsVisible] =
     useState(getInitialHikingTrailsVisibility);
-  const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
-  const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
-  const [isRouteOperationPending, setIsRouteOperationPending] =
-    useState(false);
-  const [routeMessage, setRouteMessage] = useState('');
-  const [routeMessageType, setRouteMessageType] =
-    useState<RouteMessageType>('info');
-  const [routeContextHint, setRouteContextHint] =
-    useState<RouteContextHint | null>(null);
-  const [routeHistory, setRouteHistory] = useState<RouteHistory>(
-    routeHistoryRef.current,
-  );
   const [routeElevationStatus, setRouteElevationStatus] =
     useState<RouteElevationStatus>('loading');
   const [routeElevation, setRouteElevation] =
@@ -273,10 +156,92 @@ export default function App() {
     onLoadStatusChange: setStatus,
     onFullscreenChange: setIsFullscreen,
   });
-  const routeCoordinates = useMemo(
-    () => collectRouteCoordinates(routeHistory.steps, routeHistory.closure),
-    [routeHistory.steps, routeHistory.closure],
-  );
+  /**
+   * Clears both the temporary marker and the search control when another map
+   * workflow takes priority over the selected location.
+   */
+  const clearSelectedSearchResult = useCallback(() => {
+    const marker = mapRuntimeRef.current?.searchResultMarker;
+
+    if (marker) {
+      clearSearchResultMarker(marker);
+    }
+
+    setLocationSearchResetVersion((version) => version + 1);
+  }, [mapRuntimeRef]);
+
+  useEffect(() => {
+    const marker = mapRuntimeRef.current?.searchResultMarker;
+
+    // A selected location and its label belong to the same temporary search
+    // context. A language change invalidates both instead of leaving an
+    // unexplained marker after the search control has been reset.
+    if (marker) {
+      clearSearchResultMarker(marker);
+    }
+  }, [language, mapRuntimeRef]);
+
+  const handleRouteGeometryChanged = useCallback(() => {
+    // Elevations belong to the previous immutable geometry until the debounced
+    // profile request completes for the newly committed route state.
+    setRouteElevation(null);
+    setRouteElevationStatus('loading');
+  }, []);
+
+  const handleRoutePointerInteractionStarted = useCallback(() => {
+    const marker = mapRuntimeRef.current?.routeProfileMarker;
+
+    if (marker) {
+      updateRouteProfileMarker(marker, null);
+    }
+    setRouteMapHoverDistanceMeters(null);
+  }, [mapRuntimeRef]);
+
+  const handleRouteCreationStarted = useCallback(() => {
+    clearSelectedSearchResult();
+
+    if (importedRouteSegments.length === 0) {
+      return;
+    }
+
+    const importedDisplay = mapRuntimeRef.current?.importedRouteDisplay;
+
+    if (importedDisplay) {
+      updateImportedRouteDisplay(importedDisplay, []);
+    }
+
+    setImportedRouteSegments([]);
+    setImportedRouteElevationSummary(null);
+  }, [clearSelectedSearchResult, importedRouteSegments.length, mapRuntimeRef]);
+
+  const {
+    routeHistory,
+    routeCoordinates,
+    isRouteCreationActive,
+    isRouteSnapEnabled,
+    isRouteOperationPending,
+    routeMessage,
+    routeMessageType,
+    routeContextHint,
+    toggleRouteCreation,
+    toggleRouteSnap,
+    undoRoutePoint,
+    redoRoutePoint,
+    reverseRoute,
+    toggleRouteLoop,
+    deleteRoute,
+    replaceWithImportedItinerary,
+    showTemporaryRouteMessage,
+    isPointerInteractionActive,
+  } = useEditableRoute({
+    mapRuntimeRef,
+    mapTargetRef,
+    t,
+    onRouteCreationStarted: handleRouteCreationStarted,
+    onRouteGeometryChanged: handleRouteGeometryChanged,
+    onPointerInteractionStarted: handleRoutePointerInteractionStarted,
+  });
+
   const activeRouteSegments = useMemo(
     () =>
       routeCoordinates.length >= 2
@@ -315,33 +280,8 @@ export default function App() {
             ),
       );
     },
-    [routeProfilePositionIndex],
+    [mapRuntimeRef, routeProfilePositionIndex],
   );
-
-  /**
-   * Clears both the temporary marker and the search control when another map
-   * workflow takes priority over the selected location.
-   */
-  const clearSelectedSearchResult = useCallback(() => {
-    const marker = mapRuntimeRef.current?.searchResultMarker;
-
-    if (marker) {
-      clearSearchResultMarker(marker);
-    }
-
-    setLocationSearchResetVersion((version) => version + 1);
-  }, []);
-
-  useEffect(() => {
-    const marker = mapRuntimeRef.current?.searchResultMarker;
-
-    // A selected location and its label belong to the same temporary search
-    // context. A language change invalidates both instead of leaving an
-    // unexplained marker after the search control has been reset.
-    if (marker) {
-      clearSearchResultMarker(marker);
-    }
-  }, [language, mapRuntimeRef]);
 
   const {
     areTrailClosuresVisible,
@@ -362,252 +302,11 @@ export default function App() {
     onInformationSelected: clearSelectedSearchResult,
   });
 
-  /**
-   * Keeps the synchronous ref and React render state on the same immutable
-   * history object.
-   */
-  const commitRouteHistory = (history: RouteHistory) => {
-    routeHistoryRef.current = history;
-    setRouteHistory(history);
-
-    // Elevations belong to the previous immutable geometry until the debounced
-    // profile request completes for this new history state.
-    setRouteElevation(null);
-    setRouteElevationStatus('loading');
-  };
-
-  /** Records one complete route mutation and clears obsolete redo states. */
-  const commitRouteMutation = (nextState: RouteState) => {
-    const currentHistory = routeHistoryRef.current;
-
-    commitRouteHistory({
-      ...nextState,
-      undoStates: [
-        ...currentHistory.undoStates,
-        getRouteState(currentHistory),
-      ],
-      redoStates: [],
-    });
-  };
-
-  /**
-   * Commits an asynchronous route mutation only if its captured state and
-   * editing session are still current.
-   */
-  const commitAsyncRouteMutation = (
-    expectedState: RouteState,
-    nextState: RouteState,
-  ): boolean => {
-    const currentHistory = routeHistoryRef.current;
-
-    if (
-      !routeStateMatches(currentHistory, expectedState) ||
-      !routeCreationActiveRef.current
-    ) {
-      return false;
-    }
-
-    commitRouteMutation(nextState);
-    return true;
-  };
-
-  /** Appends one generated route step as a normal undoable mutation. */
-  const appendRouteStep = (
-    expectedState: RouteState,
-    step: RouteStep,
-  ): boolean =>
-    commitAsyncRouteMutation(expectedState, {
-      steps: [...expectedState.steps, step],
-      closure: null,
-    });
-
-  /** Restores the complete route state preceding the latest edit. */
-  const undoRoutePoint = () => {
-    if (routeOperationPendingRef.current) {
-      return;
-    }
-
-    const currentHistory = routeHistoryRef.current;
-
-    if (currentHistory.undoStates.length === 0) {
-      return;
-    }
-
-    const previousState =
-      currentHistory.undoStates[currentHistory.undoStates.length - 1];
-
-    commitRouteHistory({
-      ...previousState,
-      undoStates: currentHistory.undoStates.slice(0, -1),
-      redoStates: [
-        ...currentHistory.redoStates,
-        getRouteState(currentHistory),
-      ],
-    });
-  };
-
-  /** Restores the complete route state removed by the latest undo. */
-  const redoRoutePoint = () => {
-    if (routeOperationPendingRef.current) {
-      return;
-    }
-
-    const currentHistory = routeHistoryRef.current;
-
-    if (currentHistory.redoStates.length === 0) {
-      return;
-    }
-
-    const restoredState =
-      currentHistory.redoStates[currentHistory.redoStates.length - 1];
-
-    commitRouteHistory({
-      ...restoredState,
-      undoStates: [
-        ...currentHistory.undoStates,
-        getRouteState(currentHistory),
-      ],
-      redoStates: currentHistory.redoStates.slice(0, -1),
-    });
-  };
-
-  /** Reverses the exact open or closed geometry as one undoable route edit. */
-  const reverseRoute = () => {
-    if (routeOperationPendingRef.current) {
-      return;
-    }
-
-    const currentHistory = routeHistoryRef.current;
-
-    if (currentHistory.steps.length < 2) {
-      return;
-    }
-
-    commitRouteMutation(reverseRouteState(getRouteState(currentHistory)));
-  };
-
-  /** Closes an open route or removes its dedicated closing section. */
-  const toggleRouteLoop = () => {
-    const currentHistory = routeHistoryRef.current;
-
-    if (
-      routeOperationPendingRef.current ||
-      currentHistory.steps.length < 2
-    ) {
-      return;
-    }
-
-    const expectedState = getRouteState(currentHistory);
-
-    if (expectedState.closure) {
-      commitRouteMutation({
-        steps: expectedState.steps,
-        closure: null,
-      });
-      return;
-    }
-
-    if (!isRouteSnapEnabled) {
-      commitRouteMutation({
-        steps: expectedState.steps,
-        closure: createStraightRouteClosure(expectedState.steps),
-      });
-      return;
-    }
-
-    const routeCreationSession = routeCreationSessionRef.current;
-    routeOperationPendingRef.current = true;
-    setIsRouteOperationPending(true);
-    setRouteContextHint(null);
-
-    const abortController = new AbortController();
-    routingAbortControllerRef.current = abortController;
-
-    void (async () => {
-      clearRouteMessageTimer();
-      setRouteMessage('');
-
-      try {
-        const routingLoader = routingLoaderRef.current;
-        const firstStep = expectedState.steps[0];
-        const lastStep = expectedState.steps[expectedState.steps.length - 1];
-
-        if (!routingLoader || !firstStep || !lastStep) {
-          throw new Error('The dynamic routing loader is unavailable.');
-        }
-
-        const closure = await rebuildFixedRouteSection(
-          lastStep.waypoint,
-          firstStep.waypoint,
-          'network',
-          routingLoader,
-          abortController.signal,
-        );
-
-        if (
-          routeCreationSessionRef.current !== routeCreationSession ||
-          !routeStateMatches(routeHistoryRef.current, expectedState)
-        ) {
-          return;
-        }
-
-        commitAsyncRouteMutation(expectedState, {
-          steps: expectedState.steps,
-          closure,
-        });
-      } catch (error) {
-        if (isAbortedRequest(error, abortController.signal)) {
-          return;
-        }
-
-        if (routeCreationSessionRef.current !== routeCreationSession) {
-          return;
-        }
-
-        if (error instanceof RoutingAreaTooLargeError) {
-          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
-          return;
-        }
-
-        console.error('Unable to close the route loop.', error);
-        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
-      } finally {
-        const ownsCurrentOperation =
-          routingAbortControllerRef.current === abortController;
-
-        if (ownsCurrentOperation) {
-          routingAbortControllerRef.current = null;
-          routeOperationPendingRef.current = false;
-          setIsRouteOperationPending(false);
-        }
-      }
-    })();
-  };
-
-  /** Clears the complete route and its edit history while keeping creation active. */
-  const deleteRoute = () => {
-    if (
-      routeOperationPendingRef.current ||
-      routeHistoryRef.current.steps.length === 0
-    ) {
-      return;
-    }
-
-    commitRouteHistory({
-      steps: [],
-      closure: null,
-      undoStates: [],
-      redoStates: [],
-    });
-    clearRouteMessageTimer();
-    setRouteMessage('');
-  };
-
   /** Opens the route-name dialog before any GPX content is generated. */
   const requestRouteExport = () => {
     if (
-      routeOperationPendingRef.current ||
-      routeHistoryRef.current.steps.length < 2
+      isRouteOperationPending ||
+      routeHistory.steps.length < 2
     ) {
       return;
     }
@@ -620,16 +319,16 @@ export default function App() {
 
   /** Downloads the exact displayed route geometry under the chosen route name. */
   const exportRoute = (routeName: string) => {
-    if (routeOperationPendingRef.current) {
+    if (isRouteOperationPending) {
       return;
     }
 
     try {
       downloadRouteGpx(
-        routeHistoryRef.current.steps,
+        routeHistory.steps,
         routeName,
         routeElevation?.points ?? [],
-        routeHistoryRef.current.closure,
+        routeHistory.closure,
       );
       setIsRouteExportDialogOpen(false);
     } catch (error) {
@@ -695,24 +394,10 @@ export default function App() {
       }
 
       clearSelectedSearchResult();
-      routingAbortControllerRef.current?.abort();
-      routingAbortControllerRef.current = null;
-      routeOperationPendingRef.current = false;
-      routeCreationActiveRef.current = false;
-      routeCreationSessionRef.current += 1;
-      setIsRouteOperationPending(false);
-      setIsRouteCreationActive(false);
-      commitRouteHistory({
-        steps: [],
-        closure: null,
-        undoStates: [],
-        redoStates: [],
-      });
+      replaceWithImportedItinerary();
       updateImportedRouteDisplay(display, projectedSegments);
       setImportedRouteSegments(projectedSegments);
       setImportedRouteElevationSummary(embeddedElevationSummary);
-      clearRouteMessageTimer();
-      setRouteMessage('');
 
       /*
        * Fitting the loaded geometry triggers the normal WMTS tile requests for
@@ -754,320 +439,6 @@ export default function App() {
     }, LOCATION_MESSAGE_DURATION_MS);
   };
 
-  const clearRouteMessageTimer = () => {
-    if (routeMessageTimerRef.current !== null) {
-      window.clearTimeout(routeMessageTimerRef.current);
-      routeMessageTimerRef.current = null;
-    }
-  };
-
-  const setPersistentRouteMessage = (
-    message: string,
-    type: RouteMessageType = 'info',
-  ) => {
-    clearRouteMessageTimer();
-    setRouteMessageType(type);
-    setRouteMessage(message);
-  };
-
-  const showTemporaryRouteMessage = (
-    message: string,
-    type: RouteMessageType = 'info',
-  ) => {
-    setPersistentRouteMessage(message, type);
-
-    routeMessageTimerRef.current = window.setTimeout(() => {
-      setRouteMessage('');
-      routeMessageTimerRef.current = null;
-    }, ROUTE_MESSAGE_DURATION_MS);
-  };
-
-  /** Recalculates the one or two sections touching a released waypoint. */
-  const moveRouteWaypoint = (
-    dragState: Extract<RouteDragState, { type: 'waypoint' }>,
-    targetCoordinate: Coordinate,
-  ) => {
-    if (
-      routeOperationPendingRef.current ||
-      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-    ) {
-      const display = mapRuntimeRef.current?.routeDisplay;
-
-      if (display) {
-        updateRouteDisplay(
-          display,
-          routeHistoryRef.current.steps,
-          routeHistoryRef.current.closure,
-        );
-      }
-      return;
-    }
-
-    const routeCreationSession = routeCreationSessionRef.current;
-    routeOperationPendingRef.current = true;
-    setIsRouteOperationPending(true);
-    setRouteContextHint(null);
-
-    const abortController = new AbortController();
-    routingAbortControllerRef.current = abortController;
-
-    void (async () => {
-      clearRouteMessageTimer();
-      setRouteMessage('');
-
-      try {
-        const routingLoader = routingLoaderRef.current;
-
-        if (!routingLoader) {
-          throw new Error('The dynamic routing loader is unavailable.');
-        }
-
-        const nextState = await rebuildRouteAfterWaypointMove(
-          dragState.expectedState,
-          dragState.waypointIndex,
-          targetCoordinate,
-          isRouteSnapEnabled ? 'network' : 'straight',
-          routingLoader,
-          abortController.signal,
-        );
-
-        if (
-          routeCreationSessionRef.current !== routeCreationSession ||
-          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-        ) {
-          return;
-        }
-
-        commitAsyncRouteMutation(dragState.expectedState, nextState);
-      } catch (error) {
-        if (isAbortedRequest(error, abortController.signal)) {
-          return;
-        }
-
-        if (routeCreationSessionRef.current !== routeCreationSession) {
-          return;
-        }
-
-        const display = mapRuntimeRef.current?.routeDisplay;
-
-        if (display) {
-          updateRouteDisplay(
-            display,
-            routeHistoryRef.current.steps,
-            routeHistoryRef.current.closure,
-          );
-        }
-
-        if (error instanceof RoutingAreaTooLargeError) {
-          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
-          return;
-        }
-
-        console.error('Unable to recalculate the moved route waypoint.', error);
-        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
-      } finally {
-        const ownsCurrentOperation =
-          routingAbortControllerRef.current === abortController;
-
-        if (ownsCurrentOperation) {
-          routingAbortControllerRef.current = null;
-          routeOperationPendingRef.current = false;
-          setIsRouteOperationPending(false);
-        }
-      }
-    })();
-  };
-
-  /** Inserts one waypoint into a dragged route section as one undoable edit. */
-  const insertRouteWaypoint = (
-    dragState: Extract<RouteDragState, { type: 'segment' }>,
-    targetCoordinate: Coordinate,
-  ) => {
-    if (
-      routeOperationPendingRef.current ||
-      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-    ) {
-      const display = mapRuntimeRef.current?.routeDisplay;
-
-      if (display) {
-        updateRouteDisplay(
-          display,
-          routeHistoryRef.current.steps,
-          routeHistoryRef.current.closure,
-        );
-      }
-      return;
-    }
-
-    const routeCreationSession = routeCreationSessionRef.current;
-    routeOperationPendingRef.current = true;
-    setIsRouteOperationPending(true);
-    setRouteContextHint(null);
-
-    const abortController = new AbortController();
-    routingAbortControllerRef.current = abortController;
-
-    void (async () => {
-      clearRouteMessageTimer();
-      setRouteMessage('');
-
-      try {
-        const routingLoader = routingLoaderRef.current;
-
-        if (!routingLoader) {
-          throw new Error('The dynamic routing loader is unavailable.');
-        }
-
-        const nextState = await rebuildRouteAfterWaypointInsertion(
-          dragState.expectedState,
-          dragState.stepIndex,
-          targetCoordinate,
-          isRouteSnapEnabled ? 'network' : 'straight',
-          routingLoader,
-          abortController.signal,
-        );
-
-        if (
-          routeCreationSessionRef.current !== routeCreationSession ||
-          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-        ) {
-          return;
-        }
-
-        commitAsyncRouteMutation(dragState.expectedState, nextState);
-      } catch (error) {
-        if (isAbortedRequest(error, abortController.signal)) {
-          return;
-        }
-
-        if (routeCreationSessionRef.current !== routeCreationSession) {
-          return;
-        }
-
-        const display = mapRuntimeRef.current?.routeDisplay;
-
-        if (display) {
-          updateRouteDisplay(
-            display,
-            routeHistoryRef.current.steps,
-            routeHistoryRef.current.closure,
-          );
-        }
-
-        if (error instanceof RoutingAreaTooLargeError) {
-          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
-          return;
-        }
-
-        console.error('Unable to insert the dragged route waypoint.', error);
-        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
-      } finally {
-        const ownsCurrentOperation =
-          routingAbortControllerRef.current === abortController;
-
-        if (ownsCurrentOperation) {
-          routingAbortControllerRef.current = null;
-          routeOperationPendingRef.current = false;
-          setIsRouteOperationPending(false);
-        }
-      }
-    })();
-  };
-
-  /** Deletes one clicked waypoint as a single undoable route edit. */
-  const deleteRouteWaypoint = (
-    dragState: Extract<RouteDragState, { type: 'waypoint' }>,
-  ) => {
-    if (
-      routeOperationPendingRef.current ||
-      !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-    ) {
-      const display = mapRuntimeRef.current?.routeDisplay;
-
-      if (display) {
-        updateRouteDisplay(
-          display,
-          routeHistoryRef.current.steps,
-          routeHistoryRef.current.closure,
-        );
-      }
-      return;
-    }
-
-    const routeCreationSession = routeCreationSessionRef.current;
-    routeOperationPendingRef.current = true;
-    setIsRouteOperationPending(true);
-    setRouteContextHint(null);
-
-    const abortController = new AbortController();
-    routingAbortControllerRef.current = abortController;
-
-    void (async () => {
-      clearRouteMessageTimer();
-      setRouteMessage('');
-
-      try {
-        const routingLoader = routingLoaderRef.current;
-
-        if (!routingLoader) {
-          throw new Error('The dynamic routing loader is unavailable.');
-        }
-
-        const nextState = await rebuildRouteAfterWaypointDeletion(
-          dragState.expectedState,
-          dragState.waypointIndex,
-          isRouteSnapEnabled ? 'network' : 'straight',
-          routingLoader,
-          abortController.signal,
-        );
-
-        if (
-          routeCreationSessionRef.current !== routeCreationSession ||
-          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-        ) {
-          return;
-        }
-
-        commitAsyncRouteMutation(dragState.expectedState, nextState);
-      } catch (error) {
-        if (isAbortedRequest(error, abortController.signal)) {
-          return;
-        }
-
-        if (routeCreationSessionRef.current !== routeCreationSession) {
-          return;
-        }
-
-        const display = mapRuntimeRef.current?.routeDisplay;
-
-        if (display) {
-          updateRouteDisplay(
-            display,
-            routeHistoryRef.current.steps,
-            routeHistoryRef.current.closure,
-          );
-        }
-
-        if (error instanceof RoutingAreaTooLargeError) {
-          showTemporaryRouteMessage(t('route.areaTooLarge'), 'error');
-          return;
-        }
-
-        console.error('Unable to delete the route waypoint.', error);
-        showTemporaryRouteMessage(t('route.networkLoadError'), 'error');
-      } finally {
-        const ownsCurrentOperation =
-          routingAbortControllerRef.current === abortController;
-
-        if (ownsCurrentOperation) {
-          routingAbortControllerRef.current = null;
-          routeOperationPendingRef.current = false;
-          setIsRouteOperationPending(false);
-        }
-      }
-    })();
-  };
-
   const changeZoom = (delta: number) => {
     const view = mapRuntimeRef.current?.map.getView();
     const currentZoom = view?.getZoom();
@@ -1098,49 +469,6 @@ export default function App() {
     } catch (error) {
       console.error('Unable to toggle fullscreen mode.', error);
     }
-  };
-
-  /**
-   * Enters or leaves route creation. Leaving invalidates the session token and
-   * aborts any request so a late network response cannot modify the route.
-   */
-  const toggleRouteCreation = () => {
-    const nextState = !routeCreationActiveRef.current;
-
-    routeCreationActiveRef.current = nextState;
-    routeCreationSessionRef.current += 1;
-
-    if (nextState) {
-      clearSelectedSearchResult();
-
-      // A fresh route starts in the safer, expected network mode, while
-      // reopening an existing editable route preserves the user's choice.
-      if (routeHistoryRef.current.steps.length === 0) {
-        setIsRouteSnapEnabled(true);
-      }
-    }
-
-    if (nextState && importedRouteSegments.length > 0) {
-      const importedDisplay = mapRuntimeRef.current?.importedRouteDisplay;
-
-      if (importedDisplay) {
-        updateImportedRouteDisplay(importedDisplay, []);
-      }
-
-      setImportedRouteSegments([]);
-      setImportedRouteElevationSummary(null);
-    }
-
-    if (!nextState) {
-      routingAbortControllerRef.current?.abort();
-      routingAbortControllerRef.current = null;
-      routeOperationPendingRef.current = false;
-      setIsRouteOperationPending(false);
-      clearRouteMessageTimer();
-      setRouteMessage('');
-    }
-
-    setIsRouteCreationActive(nextState);
   };
 
   const selectSearchResult = (result: LocationSearchResult) => {
@@ -1246,8 +574,6 @@ export default function App() {
   useEffect(
     () => () => {
       clearLocationMessageTimer();
-      clearRouteMessageTimer();
-      routingAbortControllerRef.current?.abort();
       routeImportSessionRef.current += 1;
     },
     [],
@@ -1273,262 +599,6 @@ export default function App() {
       areHikingTrailsVisible,
     );
   }, [areHikingTrailsVisible]);
-
-  // OpenLayers features are a projection of immutable history, never the
-  // source of truth.
-  useEffect(() => {
-    const routeDisplay = mapRuntimeRef.current?.routeDisplay;
-
-    if (!routeDisplay) {
-      return;
-    }
-
-    updateRouteDisplay(
-      routeDisplay,
-      routeHistory.steps,
-      routeHistory.closure,
-    );
-  }, [routeHistory.steps, routeHistory.closure]);
-
-  /**
-   * Enables direct route shaping only while route creation is active.
-   *
-   * Existing waypoints can be moved, while dragging a normal or loop-closing
-   * section creates a temporary inserted point. Pointer movement stays local;
-   * routing begins only once the edit is released.
-   */
-  useEffect(() => {
-    const map = mapRuntimeRef.current?.map;
-    const display = mapRuntimeRef.current?.routeDisplay;
-
-    if (!map || !display || !isRouteCreationActive) {
-      return;
-    }
-
-    const interaction = createRouteDragInteraction(display, {
-      canStart: () =>
-        routeCreationActiveRef.current &&
-        !routeOperationPendingRef.current &&
-        routeHistoryRef.current.steps.length > 0,
-      getRouteState: () => getRouteState(routeHistoryRef.current),
-      onStart: (target: RouteDragTarget) => {
-        const marker = mapRuntimeRef.current?.routeProfileMarker;
-
-        if (marker) {
-          updateRouteProfileMarker(marker, null);
-        }
-        setRouteMapHoverDistanceMeters(null);
-
-        const expectedState = getRouteState(routeHistoryRef.current);
-        const { steps, closure } = expectedState;
-
-        if (target.type === 'waypoint') {
-          const step = steps[target.waypointIndex];
-
-          if (!step) {
-            return;
-          }
-
-          routeDragStateRef.current = {
-            type: 'waypoint',
-            waypointIndex: target.waypointIndex,
-            startCoordinate: [...step.waypoint],
-            expectedState,
-          };
-          updateRouteWaypointDragPreview(
-            display,
-            steps,
-            closure,
-            target.waypointIndex,
-            step.waypoint,
-          );
-          return;
-        }
-
-        const isNormalSegment =
-          target.stepIndex >= 1 &&
-          target.stepIndex < steps.length &&
-          Boolean(steps[target.stepIndex]) &&
-          Boolean(steps[target.stepIndex - 1]);
-        const isClosingSegment =
-          target.stepIndex === steps.length &&
-          steps.length >= 2 &&
-          closure !== null;
-
-        if (!isNormalSegment && !isClosingSegment) {
-          return;
-        }
-
-        routeDragStateRef.current = {
-          type: 'segment',
-          stepIndex: target.stepIndex,
-          startCoordinate: [...target.coordinate],
-          expectedState,
-        };
-        updateRouteInsertionDragPreview(
-          display,
-          steps,
-          closure,
-          target.stepIndex,
-          target.coordinate,
-        );
-      },
-      onHover: (target, pixel) => {
-        if (!target || !pixel) {
-          setRouteContextHint(null);
-          return;
-        }
-
-        const mapWidth = mapTargetRef.current?.clientWidth ?? 0;
-        const horizontalMargin = Math.min(
-          ROUTE_CONTEXT_HINT_HALF_WIDTH_PX,
-          Math.max(0, mapWidth / 2 - 12),
-        );
-        const left =
-          mapWidth > 0
-            ? Math.min(
-                Math.max(pixel[0], horizontalMargin + 12),
-                Math.max(
-                  horizontalMargin + 12,
-                  mapWidth - horizontalMargin - 12,
-                ),
-              )
-            : pixel[0];
-
-        setRouteContextHint({
-          target,
-          left,
-          top: pixel[1],
-          below: pixel[1] < 64,
-        });
-      },
-      onDrag: (target: RouteDragTarget, coordinate) => {
-        const dragState = routeDragStateRef.current;
-
-        if (
-          !dragState ||
-          dragState.type !== target.type ||
-          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-        ) {
-          return;
-        }
-
-        if (
-          dragState.type === 'waypoint' &&
-          target.type === 'waypoint' &&
-          dragState.waypointIndex === target.waypointIndex
-        ) {
-          updateRouteWaypointDragPreview(
-            display,
-            dragState.expectedState.steps,
-            dragState.expectedState.closure,
-            dragState.waypointIndex,
-            coordinate,
-          );
-          return;
-        }
-
-        if (
-          dragState.type === 'segment' &&
-          target.type === 'segment' &&
-          dragState.stepIndex === target.stepIndex
-        ) {
-          updateRouteInsertionDragPreview(
-            display,
-            dragState.expectedState.steps,
-            dragState.expectedState.closure,
-            dragState.stepIndex,
-            coordinate,
-          );
-        }
-      },
-      onEnd: (target: RouteDragTarget, coordinate, didDrag, pixel) => {
-        const dragState = routeDragStateRef.current;
-        routeDragStateRef.current = null;
-        setRouteContextHint(null);
-
-        // Waypoint clicks are handled as deletion, while every genuine drag
-        // owns its release. A click-only segment press is deliberately left
-        // unsuppressed so the normal map click can extend the route there.
-        if (target.type === 'waypoint' || didDrag) {
-          routeInteractionReleaseRef.current = {
-            pixel: [...pixel],
-            expiresAt:
-              performance.now() + ROUTE_INTERACTION_CLICK_SUPPRESSION_MS,
-          };
-        }
-
-        const targetMatchesState =
-          dragState?.type === target.type &&
-          ((dragState.type === 'waypoint' &&
-            target.type === 'waypoint' &&
-            dragState.waypointIndex === target.waypointIndex) ||
-            (dragState.type === 'segment' &&
-              target.type === 'segment' &&
-              dragState.stepIndex === target.stepIndex));
-
-        if (
-          !dragState ||
-          !targetMatchesState ||
-          !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
-        ) {
-          updateRouteDisplay(
-            display,
-            routeHistoryRef.current.steps,
-            routeHistoryRef.current.closure,
-          );
-          return;
-        }
-
-        if (dragState.type === 'waypoint' && !didDrag) {
-          deleteRouteWaypoint(dragState);
-          return;
-        }
-
-        if (
-          !containsCoordinate(MAP_EXTENT, coordinate) ||
-          coordinateDistanceSquared(
-            dragState.startCoordinate,
-            coordinate,
-          ) <= ROUTE_WAYPOINT_MOVE_DISTANCE_SQUARED ||
-          (dragState.type === 'segment' && !didDrag)
-        ) {
-          updateRouteDisplay(
-            display,
-            routeHistoryRef.current.steps,
-            routeHistoryRef.current.closure,
-          );
-          return;
-        }
-
-        if (dragState.type === 'waypoint') {
-          moveRouteWaypoint(dragState, coordinate);
-        } else {
-          insertRouteWaypoint(dragState, coordinate);
-        }
-      },
-    });
-
-    const mapTarget = map.getTargetElement();
-    const hideRouteContextHint = () => setRouteContextHint(null);
-
-    map.addInteraction(interaction);
-    mapTarget.addEventListener('pointerleave', hideRouteContextHint);
-
-    return () => {
-      mapTarget.removeEventListener('pointerleave', hideRouteContextHint);
-      map.removeInteraction(interaction);
-      clearRouteDragCursor(map);
-      routeDragStateRef.current = null;
-      routeInteractionReleaseRef.current = null;
-      setRouteContextHint(null);
-      updateRouteDisplay(
-        display,
-        routeHistoryRef.current.steps,
-        routeHistoryRef.current.closure,
-      );
-    };
-  }, [isRouteCreationActive, isRouteSnapEnabled, language]);
 
   /** Clears any stale route/profile hover position when geometry changes. */
   useEffect(() => {
@@ -1564,8 +634,8 @@ export default function App() {
 
       if (
         (pointerType && pointerType !== 'mouse' && pointerType !== 'pen') ||
-        routeDragStateRef.current !== null ||
-        routeOperationPendingRef.current
+        isPointerInteractionActive() ||
+        isRouteOperationPending
       ) {
         clearRouteMapHover();
         return;
@@ -1597,7 +667,12 @@ export default function App() {
       mapTarget.removeEventListener('pointerleave', clearRouteMapHover);
       clearRouteMapHover();
     };
-  }, [routeProfilePositionIndex]);
+  }, [
+    isPointerInteractionActive,
+    isRouteOperationPending,
+    mapRuntimeRef,
+    routeProfilePositionIndex,
+  ]);
 
   /**
    * Retrieves a fresh elevation profile after route history settles. Previous
@@ -1664,211 +739,6 @@ export default function App() {
     routeCoordinates.length,
     routeDistanceMeters,
   ]);
-
-  /**
-   * Registers the route-click interaction only while editing is active. Network
-   * operations are serialized because each new segment depends on the endpoint
-   * committed by the previous operation.
-   */
-  useEffect(() => {
-    const map = mapRuntimeRef.current?.map;
-
-    if (!map || !isRouteCreationActive) {
-      return;
-    }
-
-    const handleRouteClick = (event: MapBrowserEvent) => {
-      // OpenLayers emits `singleclick` after a pointer interaction has already
-      // handled a click. Ignore that delayed event so deleting a waypoint does
-      // not immediately append a new endpoint at the same position.
-      const interactionRelease = routeInteractionReleaseRef.current;
-
-      if (interactionRelease) {
-        const deltaX = event.pixel[0] - interactionRelease.pixel[0];
-        const deltaY = event.pixel[1] - interactionRelease.pixel[1];
-        const isMatchingRelease =
-          performance.now() <= interactionRelease.expiresAt &&
-          deltaX * deltaX + deltaY * deltaY <=
-            ROUTE_INTERACTION_CLICK_TOLERANCE_PX ** 2;
-
-        routeInteractionReleaseRef.current = null;
-
-        if (isMatchingRelease) {
-          return;
-        }
-      }
-
-      // Ignore extra clicks while the current endpoint is still being resolved.
-      if (routeOperationPendingRef.current) {
-        return;
-      }
-
-      const display = mapRuntimeRef.current?.routeDisplay;
-      const expectedState = getRouteState(routeHistoryRef.current);
-      const { steps: expectedSteps, closure: expectedClosure } = expectedState;
-
-      // A closed route must be reopened explicitly before another endpoint is added.
-      if (expectedClosure) {
-        return;
-      }
-
-      // Waypoint clicks belong to the editing interaction because they delete
-      // that point. A simple click on the route line is intentionally allowed
-      // through: it appends a new endpoint from the current route end, while a
-      // genuine line drag still inserts a waypoint into the selected section.
-      if (
-        display &&
-        getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null
-      ) {
-        return;
-      }
-
-      const clickedCoordinate: Coordinate = [...event.coordinate];
-      const routeCreationSession = routeCreationSessionRef.current;
-      const previousStep = expectedSteps[expectedSteps.length - 1];
-
-      // Straight mode stays fully local and records the same immutable step
-      // shape as network mode.
-      if (!isRouteSnapEnabled) {
-        appendRouteStep(
-          expectedState,
-          createStraightRouteStep(previousStep, clickedCoordinate),
-        );
-        return;
-      }
-
-      // The ref blocks clicks synchronously; React state drives the visible
-      // busy treatment.
-      routeOperationPendingRef.current = true;
-      setIsRouteOperationPending(true);
-
-      // One controller owns all GeoAdmin requests spawned for this click.
-      const abortController = new AbortController();
-      routingAbortControllerRef.current = abortController;
-
-      void (async () => {
-        clearRouteMessageTimer();
-        setRouteMessage('');
-
-        try {
-          const routingLoader = routingLoaderRef.current;
-
-          if (!routingLoader) {
-            throw new Error('The dynamic routing loader is unavailable.');
-          }
-
-          let step: RouteStep;
-
-          if (!previousStep) {
-            const snappedCoordinate = await routingLoader.snap(
-              clickedCoordinate,
-              abortController.signal,
-            );
-
-            if (snappedCoordinate) {
-              step = {
-                waypoint: [...snappedCoordinate],
-                segment: null,
-                mode: 'network',
-              };
-            } else {
-              // A route may begin just outside swissTLM3D coverage. Preserve
-              // the user's click so cross-border planning can continue.
-              step = createStraightRouteStep(undefined, clickedCoordinate);
-            }
-          } else {
-            const routedPath = await routingLoader.route(
-              previousStep.waypoint,
-              clickedCoordinate,
-              abortController.signal,
-            );
-
-            if (!routedPath || routedPath.coordinates.length < 2) {
-              // Snap remains enabled for later clicks; only this section falls
-              // back to a direct line when no usable network route exists.
-              step = createStraightRouteStep(
-                previousStep,
-                clickedCoordinate,
-              );
-            } else {
-              const segment = routedPath.coordinates.map(
-                (coordinate): Coordinate => [...coordinate],
-              );
-
-              // A preceding straight section may end slightly off-network.
-              // Preserve continuity without changing the snapped destination.
-              connectRoutedSegmentEndpoint(
-                segment,
-                previousStep.waypoint,
-                'start',
-              );
-
-              step = {
-                waypoint: [...segment[segment.length - 1]],
-                segment,
-                mode: 'network',
-              };
-            }
-          }
-
-          // Reject stale results after mode changes, undo/redo, or another history mutation.
-          if (
-            !routeCreationActiveRef.current ||
-            routeCreationSessionRef.current !== routeCreationSession ||
-            !routeStateMatches(routeHistoryRef.current, expectedState)
-          ) {
-            return;
-          }
-
-          appendRouteStep(expectedState, step);
-        } catch (error) {
-          // Cancellation is an expected control-flow path when the user leaves route mode.
-          if (error instanceof DOMException && error.name === 'AbortError') {
-            return;
-          }
-
-          if (routeCreationSessionRef.current !== routeCreationSession) {
-            return;
-          }
-
-          if (error instanceof RoutingAreaTooLargeError) {
-            showTemporaryRouteMessage(
-              t('route.areaTooLarge'),
-              'error',
-            );
-            return;
-          }
-
-          console.error('Unable to load or route on swissTLM3D.', error);
-          showTemporaryRouteMessage(
-            t('route.networkLoadError'),
-            'error',
-          );
-        } finally {
-          // Only the operation still registered as current may clear the shared busy state.
-          const ownsCurrentOperation =
-            routingAbortControllerRef.current === abortController;
-
-          if (ownsCurrentOperation) {
-            routingAbortControllerRef.current = null;
-            routeOperationPendingRef.current = false;
-            setIsRouteOperationPending(false);
-          }
-
-          if (routeCreationSessionRef.current !== routeCreationSession) {
-            clearRouteMessageTimer();
-            setRouteMessage('');
-          }
-        }
-      })();
-    };
-
-    map.on('singleclick', handleRouteClick);
-
-    return () => {
-      map.un('singleclick', handleRouteClick);
-    };
-  }, [isRouteCreationActive, isRouteSnapEnabled, t]);
 
   const locationButtonLabel =
     locationStatus === 'located'
@@ -1949,9 +819,7 @@ export default function App() {
           onToggle={toggleRouteCreation}
           onUndo={undoRoutePoint}
           onRedo={redoRoutePoint}
-          onToggleSnap={() =>
-            setIsRouteSnapEnabled((isSnapEnabled) => !isSnapEnabled)
-          }
+          onToggleSnap={toggleRouteSnap}
           onReverse={reverseRoute}
           onToggleLoop={toggleRouteLoop}
           onDelete={deleteRoute}

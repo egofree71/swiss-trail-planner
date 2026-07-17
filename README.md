@@ -118,8 +118,8 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices, including the disposable OpenLayers runtime,
-  the information-layer controller, and the separation between route state, edit
-  reconstruction, and rendering.
+  focused information and editable-route hooks, and the separation between route
+  state, pointer interaction, edit reconstruction, and rendering.
 
 ## Production build and deployment
 

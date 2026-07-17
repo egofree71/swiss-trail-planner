@@ -124,25 +124,26 @@ Each milestone should remain testable and usable before the next one begins.
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
-controls are separate presentational components. The editable-route domain now
-lives in `src/map/routeState.ts`, routing-based section reconstruction lives in
-`src/routing/routeEditing.ts`, and OpenLayers rendering plus the focused
-route-shaping pointer interaction remain in `src/map/route.ts`. The imported
-route stays in its own map module and shares only the current-itinerary metrics
-pipeline.
+controls are separate presentational components. The editable-route domain lives
+in `src/map/routeState.ts`, routing-based section reconstruction lives in
+`src/routing/routeEditing.ts`, and `src/map/route.ts` provides OpenLayers
+rendering, hit detection, and preview primitives. `src/map/useEditableRoute.ts`
+owns immutable history, snap mode, serialized routing mutations, and route-control
+actions. `src/map/useRouteInteractions.ts` owns the focused click/drag lifecycle,
+contextual guidance, and preview coordination without knowing how routes are
+calculated. The imported route stays in its own map module and shares only the
+current-itinerary metrics pipeline.
 
-The imperative OpenLayers runtime now lives behind `src/map/mapRuntime.ts` and
+The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
 ordered layers, displays, and markers as one disposable unit; the hook binds
 that runtime to React mount, unmount, and browser fullscreen events. Optional
 closure, military-danger, and public-transport workflows are coordinated by
 `src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
 viewport loading, inspection priority, popup state, and request cancellation.
-`App.tsx` remains the application coordinator and accesses the runtime through
-one stable ref instead of owning each OpenLayers resource or information-layer
-request separately. Route-editing orchestration should still be extracted only
-along clear functional boundaries rather than through a generic controller
-framework.
+`App.tsx` remains the application composition point and accesses the runtime
+through one stable ref. It connects the focused hooks instead of owning their
+imperative map sessions, route history, or provider-request lifecycles.
 
 ### 3.4 Comments explain decisions
 
@@ -172,10 +173,14 @@ Browser
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── coordinates route-editing and current-itinerary state
-   │      ├── delegates immutable route transformations and affected-section reconstruction
-   │      ├── requests dynamic routing cells for snapped clicks
+   │      ├── composes map, search, route, import, and metrics capabilities
+   │      ├── owns single-current-itinerary GPX state and geolocation UI
    │      └── refreshes elevation statistics after editable-route or imported-GPX changes
+   │
+   ├── useEditableRoute + useRouteInteractions hooks
+   │      ├── own immutable history, snap mode, undo/redo, loop, and routing status
+   │      ├── serialize dynamic swissTLM3D additions and affected-section rebuilds
+   │      └── attach focused click/drag interactions and straight previews
    │
    ├── mapRuntime factory + useMapRuntime hook
    │      ├── create and dispose the single OpenLayers map and ordered layers
@@ -537,9 +542,12 @@ OpenLayers recalculates its canvas and visible tile area.
 
 ## 11. Manual route creation and dynamic regional routing
 
-`App.tsx` owns the route-creation mode because that state affects the map cursor,
-the visible controls, and whether the OpenLayers `singleclick` listener is
-attached.
+`src/map/useEditableRoute.ts` owns route-creation mode, immutable history, snap
+mode, serialized routing operations, and the actions exposed to the compact
+route toolbar. `src/map/useRouteInteractions.ts` attaches the OpenLayers click
+and drag listeners only while editing is active, keeps transient previews out of
+React state, and translates pointer gestures into semantic edit requests. The
+root application receives only render state and actions from these hooks.
 
 The current route is an immutable `RouteState`. Its ordered `RouteStep` array
 stores:
@@ -623,8 +631,10 @@ swaps the endpoint markers and arrow direction, while closed-route reversal
 preserves the physical start and changes only traversal and arrow direction,
 without separate marker state.
 
-The same module creates one focused OpenLayers pointer interaction for existing
-waypoints, normal route sections, and the optional closing section. A 12-pixel point tolerance keeps small waypoints
+`src/map/route.ts` provides the focused OpenLayers pointer-interaction factory
+and hit-detection primitives for existing waypoints, normal route sections, and
+the optional closing section. `src/map/useRouteInteractions.ts` owns that
+interaction's React lifecycle. A 12-pixel point tolerance keeps small waypoints
 usable on touch screens, while a narrower line tolerance selects the closest
 stored incoming section. When several stored sections overlap at the same
 screen distance, the section latest in the current route order wins so repeated
@@ -634,8 +644,9 @@ adjacent sections replaced by straight lines. Pulling the route line inserts a
 temporary point and splits the selected section into two straight previews. No
 network request runs during either drag.
 
-On release, `App.tsx` delegates affected-section reconstruction to
-`src/routing/routeEditing.ts`. A moved point updates its incoming and outgoing
+On release, `useRouteInteractions` sends one semantic move, insertion, or
+deletion request to `useEditableRoute`, which delegates affected-section
+reconstruction to `src/routing/routeEditing.ts`. A moved point updates its incoming and outgoing
 sections; moving the first or last point of a closed route also refreshes the
 closing section. An inserted point replaces one normal or closing section with
 two sections. Both halves use the snap mode selected at release: straight mode
@@ -872,8 +883,10 @@ via-helvetica/
 │   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
+│   │   ├── useEditableRoute.ts
 │   │   ├── useMapInformationLayers.ts
 │   │   ├── useMapRuntime.ts
+│   │   ├── useRouteInteractions.ts
 │   │   └── userLocation.ts
 │   ├── network/
 │   │   └── abort.ts
@@ -902,18 +915,36 @@ via-helvetica/
 
 ### `src/App.tsx`
 
-Coordinates application state and map-level workflows through one shared
-`MapRuntime` ref.
+Composes application capabilities through one shared `MapRuntime` ref.
 
-It handles geolocation, single-current-itinerary GPX loading, route-creation
-mode, immutable route edit snapshots, loop closing and reopening, dynamic graph
-loading, route statistics, and temporary routing status. It coordinates waypoint
-edits but delegates their route reconstruction to `src/routing/routeEditing.ts`.
+It handles geolocation, single-current-itinerary GPX loading and framing, search
+selection, route export, and the shared distance/elevation/profile pipeline.
 Native map construction, layer ordering, shared display creation, fullscreen
 resize synchronization, and OpenLayers disposal are delegated to the map runtime
 modules. Information-layer visibility, viewport loading, selection, popups, and
-request cancellation are delegated to `src/map/useMapInformationLayers.ts`. App
-still aborts its own routing, import, and timer work when React unmounts.
+request cancellation are delegated to `src/map/useMapInformationLayers.ts`.
+Editable route state, controls, routing sessions, and pointer interactions are
+delegated to `useEditableRoute` and `useRouteInteractions`. App aborts only its
+remaining import and geolocation-message work when React unmounts.
+
+### `src/map/useEditableRoute.ts`
+
+Owns the React-facing editable-route capability. It stores immutable route
+history and synchronous refs for stale-result guards, preserves the current snap
+choice, serializes dynamic routing operations, commits undoable additions,
+moves, insertions, deletions, reversal, and loop changes, and publishes the
+busy/message state consumed by route controls. Starting route creation asks the
+application shell to clear an imported GPX and temporary search context;
+successful GPX import asks the hook to abort editing and clear history.
+
+### `src/map/useRouteInteractions.ts`
+
+Owns the lifecycle of the focused OpenLayers route interaction without owning
+routing algorithms or history. It turns clicks and drags into semantic endpoint,
+move, insertion, and deletion callbacks, keeps straight drag previews local to
+the vector display, suppresses the delayed `singleclick` after a handled gesture,
+clamps contextual hover guidance inside the map, and restores committed geometry
+when a gesture is cancelled or rejected.
 
 ### `src/map/mapRuntime.ts`
 
@@ -1082,8 +1113,8 @@ local state.
 ### `src/components/RouteControls.tsx`
 
 Renders the route-mode toggle and the contextual route action buttons. It is a
-controlled component: `App.tsx` supplies availability state and callbacks for
-snap, undo, redo, reversal, loop closure, deletion, and GPX export.
+controlled component: `useEditableRoute` supplies editing availability and
+actions through `App.tsx`; the application shell adds the GPX export action.
 
 ### `src/components/RouteImportControl.tsx`
 
@@ -1192,10 +1223,11 @@ rendering lifecycle.
 
 Creates the editable-route vector layer and rebuilds its line with sparse
 direction arrowheads, indexed waypoint features, and start/finish markers. It
-also owns waypoint and normal/closing section hit detection, deterministic
+also provides waypoint and normal/closing section hit detection, deterministic
 newest-section selection for overlapping geometry, the focused click/drag
-interaction, contextual hover target reporting, cursor state, and straight
-preview rendering for moved or temporarily inserted waypoints. It consumes the
+interaction factory, contextual hover target reporting, cursor state, and
+straight preview rendering for moved or temporarily inserted waypoints.
+`useRouteInteractions` owns the interaction lifecycle. The module consumes the
 immutable route contracts from `routeState.ts` and does not own route history or
 network recalculation.
 
@@ -1218,8 +1250,9 @@ paths. It contains no React or OpenLayers map lifecycle state.
 Coordinates immutable route edits with the dynamic router. It creates straight
 fallback steps and closures, preserves exact waypoint connectors, and rebuilds
 only the sections affected by waypoint movement, insertion, deletion, or loop
-closure. It propagates request and size-limit failures to `App.tsx`, while
-missing coverage or connectivity may fall back to straight geometry.
+closure. It propagates request and size-limit failures to
+`useEditableRoute`, while missing coverage or connectivity may fall back to
+straight geometry.
 
 ### `src/routing/dynamicRoutingNetwork.ts`
 
@@ -1327,13 +1360,13 @@ messages, and OpenLayers control placement.
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
     the profile.
 14. Starting editable route creation clears the imported GPX without prompting.
-15. The route button toggles route-creation mode and the crosshair cursor;
+15. `useEditableRoute` handles the route button, creation mode, and snap state;
     entering the mode clears the temporary location-search marker. A fresh empty
     route resets to snapping enabled, while an existing editable route keeps its
     current snap choice.
-16. Entering route mode attaches the route-click listener, one focused route
-    drag interaction, and the contextual toolbar. The snap control is immediately
-    available before the first waypoint is placed.
+16. `useRouteInteractions` attaches the route-click listener and one focused
+    drag interaction while the contextual toolbar is visible. The snap control is
+    immediately available before the first waypoint is placed.
 17. With snapping disabled, a map click stores a direct section immediately.
 18. The first snapped click derives and loads a local 3 × 3 cell group while
     the route toggle shows a compact spinner.
