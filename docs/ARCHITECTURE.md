@@ -146,6 +146,9 @@ requests, and explicit geolocation are coordinated by
 public-transport workflows are coordinated by
 `src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
 viewport loading, inspection priority, popup state, and request cancellation.
+The public-transport implementation keeps its stable facade in
+`src/transport/publicTransportStops.ts`, while provider loading, passenger-stop
+normalization, and OpenLayers rendering live in focused sibling modules.
 `src/map/useImportedRoute.ts` owns the read-only GPX workflow and invalidates
 unfinished file reads when another itinerary takes priority.
 `src/metrics/useItineraryMetrics.ts` owns current-itinerary distance, elevation
@@ -881,7 +884,10 @@ via-helvetica/
 │   ├── dangers/
 │   │   └── shootingDangerZones.ts
 │   ├── transport/
+│   │   ├── publicTransportStopModel.ts
 │   │   ├── publicTransportStops.ts
+│   │   ├── publicTransportStopsApi.ts
+│   │   ├── publicTransportStopsDisplay.ts
 │   │   └── stationBoard.ts
 │   ├── components/
 │   │   ├── MapInformationPopup.tsx
@@ -1032,8 +1038,8 @@ hidden or too far out. Outside route creation it registers one deterministic
 click pipeline: already loaded passenger stops first, hiking closures second,
 and military danger zones last. The hook owns popup state, selected stop and
 polygon highlights, language and zoom invalidation, abortable identify/popup
-requests, and cleanup. Provider contracts remain in the existing closure,
-danger, and transport modules.
+requests, and cleanup. Provider contracts remain in the closure, danger,
+and focused public-transport API/model/display modules.
 
 ### `src/network/abort.ts`
 
@@ -1110,15 +1116,32 @@ dates.
 
 ### `src/transport/publicTransportStops.ts`
 
-Owns the BAV layer identifier, abortable viewport identify requests, the
-passenger-scale identify clamp, bounded subdivision for dense results,
-multilingual attribute normalization, filtering of numeric operating-only,
-out-of-service, empty-mode, or unsupported-mode points, explicit accepted-mode
-classification, narrowly scoped name-qualifier fallback, strict deduplication by
-official feature identifier, preservation of multimodal metadata on one official
-stop, close-symbol fan layouts for distinct neighbouring stops, vector-layer
-creation, zoom-responsive symbol sizing, proportional selection highlighting,
-and client-side SVG symbol styling.
+Provides the stable public facade consumed by map, popup, and timetable modules.
+It re-exports the stop model, abortable viewport loader, and OpenLayers display
+operations without exposing how those responsibilities are implemented.
+
+### `src/transport/publicTransportStopModel.ts`
+
+Owns the BAV layer identifier, accepted passenger-mode contract, multilingual
+attribute normalization, transport classification, numeric and out-of-service
+filtering, the narrowly scoped final-name-qualifier fallback, mode priority, and
+conversion of untrusted identify results into validated `PublicTransportStop`
+objects.
+
+### `src/transport/publicTransportStopsApi.ts`
+
+Owns the abortable GeoAdmin viewport identify contract, the passenger-scale
+identify clamp, bounded recursive subdivision when a response reaches the
+200-feature limit, strict deduplication by official identifier, and delegation
+to the passenger-stop parser. It contains no OpenLayers layer or style state.
+
+### `src/transport/publicTransportStopsDisplay.ts`
+
+Owns the filtered and selected OpenLayers vector layers, locally bundled SVG
+symbols, zoom-responsive icon sizes, deterministic fan layouts for distinct
+neighbouring stops, proportional selection highlighting, and feature metadata
+used for map hit detection. It contains no provider request or multilingual
+record-filtering logic.
 
 ### `src/assets/public-transport-stops/*.svg`
 
