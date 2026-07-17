@@ -1,21 +1,15 @@
 /**
- * Business context: coordinates the map-centred application shell and owns the
- * imperative OpenLayers lifecycle. It connects search, geolocation, fullscreen,
- * route history, official information-layer inspection, dynamic swissTLM3D
- * loading, and route-editing controls while keeping provider/network details
+ * Business context: coordinates the map-centred application shell around one
+ * disposable OpenLayers runtime. It connects search, geolocation, route history,
+ * official information-layer inspection, dynamic swissTLM3D loading, and
+ * route-editing controls while keeping map construction and provider contracts
  * in dedicated modules.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
-import Map from 'ol/Map.js';
 import MapBrowserEvent from 'ol/MapBrowserEvent.js';
 import type { Pixel } from 'ol/pixel.js';
-import View from 'ol/View.js';
-import { defaults as defaultControls, ScaleLine } from 'ol/control.js';
 import { containsCoordinate } from 'ol/extent.js';
-import TileLayer from 'ol/layer/Tile.js';
-import type TileWMS from 'ol/source/TileWMS.js';
-import type WMTS from 'ol/source/WMTS.js';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
@@ -35,23 +29,17 @@ import RouteStatistics, {
 import {
   fetchTrailClosurePopup,
   identifyTrailClosure,
-  createTrailClosuresSource,
 } from './closures/trailClosures';
 import {
-  createShootingDangerZoneSelectionDisplay,
-  createShootingDangerZonesSource,
   fetchShootingDangerZonePopup,
   identifyShootingDangerZone,
-  type ShootingDangerZoneSelectionDisplay,
   updateShootingDangerZoneSelection,
 } from './dangers/shootingDangerZones';
 import {
-  createPublicTransportStopsDisplay,
   getPublicTransportStopFromFeature,
   loadPublicTransportStops,
   PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
   type PublicTransportStop,
-  type PublicTransportStopsDisplay,
   updatePublicTransportStopsDisplay,
   updatePublicTransportStopSelection,
 } from './transport/publicTransportStops';
@@ -63,37 +51,23 @@ import {
 } from './import/gpx';
 import { useI18n } from './i18n/I18nContext';
 import {
-  createBaseMapSource,
-  createGrayDetailMapSource,
-  createHikingTrailsSource,
   DEFAULT_BASE_MAP_STYLE,
-  DEFAULT_MAP_CENTER,
-  GRAY_DETAIL_MIN_ZOOM,
   HIKING_TRAILS_MIN_ZOOM,
   IMPORTED_ROUTE_MAX_ZOOM,
   LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
-  MAP_ZOOM,
   USER_LOCATION_ZOOM,
   type BaseMapStyle,
 } from './map/config';
-import {
-  fromWgs84,
-  LV95_VIEW_RESOLUTIONS,
-  MAP_PROJECTION_CODE,
-} from './map/projection';
-import {
-  createImportedRouteDisplay,
-  type ImportedRouteDisplay,
-  updateImportedRouteDisplay,
-} from './map/importedRoute';
+import { fromWgs84 } from './map/projection';
+import { updateImportedRouteDisplay } from './map/importedRoute';
+import type { MapLoadStatus } from './map/mapRuntime';
+import { useMapRuntime } from './map/useMapRuntime';
 import {
   clearRouteDragCursor,
   createRouteDragInteraction,
-  createRouteDisplay,
   getRouteWaypointIndexAtPixel,
   type RouteDragTarget,
-  type RouteDisplay,
   type RouteHoverTarget,
   updateRouteDisplay,
   updateRouteInsertionDragPreview,
@@ -112,23 +86,15 @@ import {
 } from './map/routeState';
 import {
   clearSearchResultMarker,
-  createSearchResultMarker,
-  type SearchResultMarker,
   updateSearchResultMarker,
 } from './map/searchResult';
 import {
-  createRouteProfileMarker,
   createRouteProfilePositionIndex,
   getClosestRouteProfilePosition,
   getRouteProfileCoordinate,
-  type RouteProfileMarker,
   updateRouteProfileMarker,
 } from './map/routeProfileMarker';
-import {
-  createUserLocationMarker,
-  type UserLocationMarker,
-  updateUserLocationMarker,
-} from './map/userLocation';
+import { updateUserLocationMarker } from './map/userLocation';
 import {
   DynamicRoutingNetworkLoader,
   RoutingAreaTooLargeError,
@@ -152,8 +118,6 @@ import {
 } from './metrics/routeMetrics';
 import type { LocationSearchResult } from './search/locationSearch';
 
-/** Base-map loading state used by the blocking startup card. */
-type LoadStatus = 'loading' | 'ready' | 'error';
 /** Browser geolocation state used by the location control and its feedback. */
 type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
 /** Severity of a temporary route-editing message. */
@@ -309,30 +273,11 @@ function isAbortedRequest(error: unknown, signal: AbortSignal): boolean {
   );
 }
 
-/** Root application component and sole owner of the OpenLayers Map instance. */
+/** Root application coordinator for UI state and map-level workflows. */
 export default function App() {
   const { language, t } = useI18n();
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<Map | null>(null);
-  const baseMapLayerRef = useRef<TileLayer<WMTS> | null>(null);
-  const grayDetailLayerRef = useRef<TileLayer<WMTS> | null>(null);
-  const hikingTrailsLayerRef = useRef<TileLayer<WMTS> | null>(null);
-  const trailClosuresLayerRef = useRef<TileLayer<TileWMS> | null>(null);
-  const shootingDangerZonesLayerRef =
-    useRef<TileLayer<TileWMS> | null>(null);
-  const shootingDangerZoneSelectionDisplayRef =
-    useRef<ShootingDangerZoneSelectionDisplay | null>(null);
-  const publicTransportStopsDisplayRef =
-    useRef<PublicTransportStopsDisplay | null>(null);
-  const activeBaseMapStyleRef = useRef<BaseMapStyle>(
-    DEFAULT_BASE_MAP_STYLE,
-  );
-  const userLocationMarkerRef = useRef<UserLocationMarker | null>(null);
-  const searchResultMarkerRef = useRef<SearchResultMarker | null>(null);
-  const routeDisplayRef = useRef<RouteDisplay | null>(null);
-  const importedRouteDisplayRef = useRef<ImportedRouteDisplay | null>(null);
-  const routeProfileMarkerRef = useRef<RouteProfileMarker | null>(null);
   const locationMessageTimerRef = useRef<number | null>(null);
   const routeMessageTimerRef = useRef<number | null>(null);
   const routeHistoryRef = useRef<RouteHistory>({
@@ -356,7 +301,7 @@ export default function App() {
     routingLoaderRef.current = new DynamicRoutingNetworkLoader();
   }
 
-  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [status, setStatus] = useState<MapLoadStatus>('loading');
   const [locationStatus, setLocationStatus] =
     useState<LocationStatus>('idle');
   const [locationMessage, setLocationMessage] = useState('');
@@ -404,6 +349,18 @@ export default function App() {
   >([]);
   const [importedRouteElevationSummary, setImportedRouteElevationSummary] =
     useState<RouteElevationSummary | null>(null);
+  const mapRuntimeRef = useMapRuntime({
+    mapTargetRef,
+    fullscreenElementRef: appRef,
+    initialVisibility: {
+      hikingTrails: areHikingTrailsVisible,
+      trailClosures: areTrailClosuresVisible,
+      shootingDangerZones: areShootingDangerZonesVisible,
+      publicTransportStops: arePublicTransportStopsVisible,
+    },
+    onLoadStatusChange: setStatus,
+    onFullscreenChange: setIsFullscreen,
+  });
   const routeCoordinates = useMemo(
     () => collectRouteCoordinates(routeHistory.steps, routeHistory.closure),
     [routeHistory.steps, routeHistory.closure],
@@ -430,7 +387,7 @@ export default function App() {
   /** Keeps the map marker synchronized with cumulative distance under the chart pointer. */
   const handleProfileHoverDistanceChange = useCallback(
     (distanceMeters: number | null) => {
-      const marker = routeProfileMarkerRef.current;
+      const marker = mapRuntimeRef.current?.routeProfileMarker;
 
       if (!marker) {
         return;
@@ -451,7 +408,7 @@ export default function App() {
 
   /** Hides the temporary marker once another map workflow takes priority. */
   const clearSelectedSearchResult = useCallback(() => {
-    const marker = searchResultMarkerRef.current;
+    const marker = mapRuntimeRef.current?.searchResultMarker;
 
     if (marker) {
       clearSearchResultMarker(marker);
@@ -465,9 +422,9 @@ export default function App() {
     setTrailClosurePopup(null);
     setShootingDangerZonePopup(null);
     setPublicTransportStopPopup(null);
-    const stopDisplay = publicTransportStopsDisplayRef.current;
+    const stopDisplay = mapRuntimeRef.current?.publicTransportStopsDisplay;
     const dangerZoneSelection =
-      shootingDangerZoneSelectionDisplayRef.current;
+      mapRuntimeRef.current?.shootingDangerZoneSelectionDisplay;
 
     if (stopDisplay) {
       updatePublicTransportStopSelection(stopDisplay, null);
@@ -762,8 +719,8 @@ export default function App() {
    * extent. A successful import replaces the editable route and its history.
    */
   const importRouteFile = async (file: File) => {
-    const map = mapRef.current;
-    const display = importedRouteDisplayRef.current;
+    const map = mapRuntimeRef.current?.map;
+    const display = mapRuntimeRef.current?.importedRouteDisplay;
 
     if (!map || !display) {
       return;
@@ -907,7 +864,7 @@ export default function App() {
       routeOperationPendingRef.current ||
       !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
-      const display = routeDisplayRef.current;
+      const display = mapRuntimeRef.current?.routeDisplay;
 
       if (display) {
         updateRouteDisplay(
@@ -964,7 +921,7 @@ export default function App() {
           return;
         }
 
-        const display = routeDisplayRef.current;
+        const display = mapRuntimeRef.current?.routeDisplay;
 
         if (display) {
           updateRouteDisplay(
@@ -1003,7 +960,7 @@ export default function App() {
       routeOperationPendingRef.current ||
       !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
-      const display = routeDisplayRef.current;
+      const display = mapRuntimeRef.current?.routeDisplay;
 
       if (display) {
         updateRouteDisplay(
@@ -1060,7 +1017,7 @@ export default function App() {
           return;
         }
 
-        const display = routeDisplayRef.current;
+        const display = mapRuntimeRef.current?.routeDisplay;
 
         if (display) {
           updateRouteDisplay(
@@ -1098,7 +1055,7 @@ export default function App() {
       routeOperationPendingRef.current ||
       !routeStateMatches(routeHistoryRef.current, dragState.expectedState)
     ) {
-      const display = routeDisplayRef.current;
+      const display = mapRuntimeRef.current?.routeDisplay;
 
       if (display) {
         updateRouteDisplay(
@@ -1154,7 +1111,7 @@ export default function App() {
           return;
         }
 
-        const display = routeDisplayRef.current;
+        const display = mapRuntimeRef.current?.routeDisplay;
 
         if (display) {
           updateRouteDisplay(
@@ -1185,7 +1142,7 @@ export default function App() {
   };
 
   const changeZoom = (delta: number) => {
-    const view = mapRef.current?.getView();
+    const view = mapRuntimeRef.current?.map.getView();
     const currentZoom = view?.getZoom();
 
     if (!view || currentZoom === undefined) {
@@ -1237,7 +1194,7 @@ export default function App() {
     }
 
     if (nextState && importedRouteSegments.length > 0) {
-      const importedDisplay = importedRouteDisplayRef.current;
+      const importedDisplay = mapRuntimeRef.current?.importedRouteDisplay;
 
       if (importedDisplay) {
         updateImportedRouteDisplay(importedDisplay, []);
@@ -1260,8 +1217,8 @@ export default function App() {
   };
 
   const selectSearchResult = (result: LocationSearchResult) => {
-    const map = mapRef.current;
-    const marker = searchResultMarkerRef.current;
+    const map = mapRuntimeRef.current?.map;
+    const marker = mapRuntimeRef.current?.searchResultMarker;
 
     if (!map || !marker) {
       return;
@@ -1286,8 +1243,8 @@ export default function App() {
   };
 
   const locateUser = () => {
-    const map = mapRef.current;
-    const marker = userLocationMarkerRef.current;
+    const map = mapRuntimeRef.current?.map;
+    const marker = mapRuntimeRef.current?.userLocationMarker;
 
     if (!map || !marker) {
       return;
@@ -1359,225 +1316,19 @@ export default function App() {
     );
   };
 
-  useEffect(() => {
-    const target = mapTargetRef.current;
-
-    if (!target) {
-      return;
-    }
-
-    const rasterSource = createBaseMapSource(DEFAULT_BASE_MAP_STYLE);
-    const grayDetailSource = createGrayDetailMapSource();
-    const hikingTrailsSource = createHikingTrailsSource();
-    const trailClosuresSource = createTrailClosuresSource();
-    const shootingDangerZonesSource = createShootingDangerZonesSource();
-    const shootingDangerZoneSelectionDisplay =
-      createShootingDangerZoneSelectionDisplay();
-    const publicTransportStopsDisplay =
-      createPublicTransportStopsDisplay();
-    const userLocationMarker = createUserLocationMarker();
-    const searchResultMarker = createSearchResultMarker();
-    const importedRouteDisplay = createImportedRouteDisplay();
-    const routeDisplay = createRouteDisplay();
-    const routeProfileMarker = createRouteProfileMarker();
-    const baseMapLayer = new TileLayer<WMTS>({
-      source: rasterSource,
-    });
-    const grayDetailLayer = new TileLayer<WMTS>({
-      source: grayDetailSource,
-      minZoom: GRAY_DETAIL_MIN_ZOOM,
-      visible: false,
-      zIndex: 1,
-    });
-    const hikingTrailsLayer = new TileLayer<WMTS>({
-      source: hikingTrailsSource,
-      minZoom: HIKING_TRAILS_MIN_ZOOM,
-      visible: areHikingTrailsVisible,
-      zIndex: 10,
-    });
-    const trailClosuresLayer = new TileLayer<TileWMS>({
-      source: trailClosuresSource,
-      minZoom: HIKING_TRAILS_MIN_ZOOM,
-      visible: areTrailClosuresVisible,
-      zIndex: 13,
-    });
-    const shootingDangerZonesLayer = new TileLayer<TileWMS>({
-      source: shootingDangerZonesSource,
-      minZoom: HIKING_TRAILS_MIN_ZOOM,
-      visible: areShootingDangerZonesVisible,
-      // Keep the underlying map and symbols readable without weakening the
-      // safety perimeter's priority above closures and transport stops.
-      opacity: 0.6,
-      zIndex: 16,
-    });
-    shootingDangerZoneSelectionDisplay.layer.setMinZoom(
-      HIKING_TRAILS_MIN_ZOOM,
-    );
-    shootingDangerZoneSelectionDisplay.layer.setVisible(
-      areShootingDangerZonesVisible,
-    );
-    shootingDangerZoneSelectionDisplay.layer.setZIndex(16.5);
-    publicTransportStopsDisplay.layer.setVisible(
-      arePublicTransportStopsVisible,
-    );
-    publicTransportStopsDisplay.selectionLayer.setVisible(
-      arePublicTransportStopsVisible,
-    );
-
-    /*
-     * OpenLayers has its own imperative lifecycle. This effect is the sole
-     * owner of the map instance, so it also removes listeners and detaches
-     * the DOM target when the React component is unmounted.
-     */
-    let firstTileLoaded = false;
-
-    const handleTileLoaded = () => {
-      if (firstTileLoaded) {
-        return;
-      }
-
-      firstTileLoaded = true;
-      setStatus('ready');
-    };
-
-    const handleTileError = () => {
-      /*
-       * A late failure affecting a single tile should not hide a map that is
-       * already usable. The error screen only represents an initial failure.
-       */
-      if (firstTileLoaded) {
-        return;
-      }
-
-      setStatus('error');
-    };
-
-    rasterSource.on('tileloadend', handleTileLoaded);
-    rasterSource.on('tileloaderror', handleTileError);
-
-    const map = new Map({
-      target,
-      layers: [
-        baseMapLayer,
-        grayDetailLayer,
-        hikingTrailsLayer,
-        trailClosuresLayer,
-        publicTransportStopsDisplay.selectionLayer,
-        publicTransportStopsDisplay.layer,
-        shootingDangerZonesLayer,
-        shootingDangerZoneSelectionDisplay.layer,
-        importedRouteDisplay.layer,
-        routeDisplay.layer,
-        searchResultMarker.layer,
-        userLocationMarker.layer,
-        routeProfileMarker.layer,
-      ],
-      view: new View({
-        projection: MAP_PROJECTION_CODE,
-        resolutions: [...LV95_VIEW_RESOLUTIONS],
-        center: DEFAULT_MAP_CENTER,
-        zoom: MAP_ZOOM.initial,
-        minZoom: MAP_ZOOM.minimum,
-        maxZoom: MAP_ZOOM.maximum,
-        extent: MAP_EXTENT,
-        constrainOnlyCenter: false,
-        /*
-         * The map extent is narrower than a typical desktop viewport. Allowing
-         * one viewport dimension to exceed it lets OpenLayers show the whole
-         * country without relaxing the geographic navigation boundary.
-         */
-        showFullExtent: true,
-        smoothExtentConstraint: false,
-      }),
-      controls: defaultControls({
-        zoom: false,
-      }).extend([
-        new ScaleLine({
-          units: 'metric',
-          bar: true,
-          text: true,
-          minWidth: 120,
-        }),
-      ]),
-    });
-
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === appRef.current);
-
-      /*
-       * The browser changes the available viewport when entering or leaving
-       * fullscreen. OpenLayers must recalculate its canvas size afterwards.
-       */
-      window.requestAnimationFrame(() => map.updateSize());
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    mapRef.current = map;
-    baseMapLayerRef.current = baseMapLayer;
-    grayDetailLayerRef.current = grayDetailLayer;
-    hikingTrailsLayerRef.current = hikingTrailsLayer;
-    trailClosuresLayerRef.current = trailClosuresLayer;
-    shootingDangerZonesLayerRef.current = shootingDangerZonesLayer;
-    shootingDangerZoneSelectionDisplayRef.current =
-      shootingDangerZoneSelectionDisplay;
-    publicTransportStopsDisplayRef.current = publicTransportStopsDisplay;
-    userLocationMarkerRef.current = userLocationMarker;
-    searchResultMarkerRef.current = searchResultMarker;
-    importedRouteDisplayRef.current = importedRouteDisplay;
-    routeDisplayRef.current = routeDisplay;
-    routeProfileMarkerRef.current = routeProfileMarker;
-
-    return () => {
+  useEffect(
+    () => () => {
       clearLocationMessageTimer();
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
       routeImportSessionRef.current += 1;
       mapInformationRequestRef.current?.abort();
-      document.removeEventListener(
-        'fullscreenchange',
-        handleFullscreenChange,
-      );
-      rasterSource.un('tileloadend', handleTileLoaded);
-      rasterSource.un('tileloaderror', handleTileError);
-      map.setTarget(undefined);
-      mapRef.current = null;
-      baseMapLayerRef.current = null;
-      grayDetailLayerRef.current = null;
-      hikingTrailsLayerRef.current = null;
-      trailClosuresLayerRef.current = null;
-      shootingDangerZonesLayerRef.current = null;
-      shootingDangerZoneSelectionDisplayRef.current = null;
-      publicTransportStopsDisplayRef.current = null;
-      userLocationMarkerRef.current = null;
-      searchResultMarkerRef.current = null;
-      importedRouteDisplayRef.current = null;
-      routeDisplayRef.current = null;
-      routeProfileMarkerRef.current = null;
-    };
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    const baseMapLayer = baseMapLayerRef.current;
-    const grayDetailLayer = grayDetailLayerRef.current;
-
-    if (!baseMapLayer || !grayDetailLayer) {
-      return;
-    }
-
-    // The 1:10,000 detail layer only complements the grey background.
-    grayDetailLayer.setVisible(baseMapStyle === 'gray');
-
-    if (activeBaseMapStyleRef.current === baseMapStyle) {
-      return;
-    }
-
-    /*
-     * Replacing only the source keeps the current view, route, markers, and
-     * overlays untouched while the selected WMTS background loads.
-     */
-    baseMapLayer.setSource(createBaseMapSource(baseMapStyle));
-    activeBaseMapStyleRef.current = baseMapStyle;
+    mapRuntimeRef.current?.setBaseMapStyle(baseMapStyle);
   }, [baseMapStyle]);
 
   useEffect(() => {
@@ -1625,17 +1376,19 @@ export default function App() {
   }, [arePublicTransportStopsVisible]);
 
   useEffect(() => {
-    hikingTrailsLayerRef.current?.setVisible(areHikingTrailsVisible);
+    mapRuntimeRef.current?.setHikingTrailsVisible(
+      areHikingTrailsVisible,
+    );
   }, [areHikingTrailsVisible]);
 
   useEffect(() => {
-    const trailClosuresLayer = trailClosuresLayerRef.current;
+    const runtime = mapRuntimeRef.current;
 
-    if (!trailClosuresLayer) {
+    if (!runtime) {
       return;
     }
 
-    trailClosuresLayer.setVisible(areTrailClosuresVisible);
+    runtime.setTrailClosuresVisible(areTrailClosuresVisible);
 
     if (!areTrailClosuresVisible && trailClosurePopup) {
       closeMapInformationPopup();
@@ -1647,16 +1400,13 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const shootingDangerZonesLayer = shootingDangerZonesLayerRef.current;
-    const selectionDisplay =
-      shootingDangerZoneSelectionDisplayRef.current;
+    const runtime = mapRuntimeRef.current;
 
-    if (!shootingDangerZonesLayer || !selectionDisplay) {
+    if (!runtime) {
       return;
     }
 
-    shootingDangerZonesLayer.setVisible(areShootingDangerZonesVisible);
-    selectionDisplay.layer.setVisible(areShootingDangerZonesVisible);
+    runtime.setShootingDangerZonesVisible(areShootingDangerZonesVisible);
 
     if (!areShootingDangerZonesVisible && shootingDangerZonePopup) {
       closeMapInformationPopup();
@@ -1668,15 +1418,16 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    const display = publicTransportStopsDisplayRef.current;
+    const runtime = mapRuntimeRef.current;
 
-    if (!map || !display) {
+    if (!runtime) {
       return;
     }
 
-    display.layer.setVisible(arePublicTransportStopsVisible);
-    display.selectionLayer.setVisible(arePublicTransportStopsVisible);
+    const { map, publicTransportStopsDisplay: display } = runtime;
+    runtime.setPublicTransportStopsVisible(
+      arePublicTransportStopsVisible,
+    );
 
     if (!arePublicTransportStopsVisible) {
       display.source.clear();
@@ -1755,7 +1506,7 @@ export default function App() {
    * danger zones, so overlapping official portrayals produce deterministic UI.
    */
   useEffect(() => {
-    const map = mapRef.current;
+    const map = mapRuntimeRef.current?.map;
     const hasVisibleInformationLayer =
       areTrailClosuresVisible ||
       areShootingDangerZonesVisible ||
@@ -1797,7 +1548,7 @@ export default function App() {
       closeMapInformationPopup();
 
       if (canInspectStops) {
-        const stopDisplay = publicTransportStopsDisplayRef.current;
+        const stopDisplay = mapRuntimeRef.current?.publicTransportStopsDisplay;
         const stop = stopDisplay
           ? map.forEachFeatureAtPixel(
               event.pixel,
@@ -1876,7 +1627,7 @@ export default function App() {
               if (dangerZone && !abortController.signal.aborted) {
                 clearSelectedSearchResult();
                 const selectionDisplay =
-                  shootingDangerZoneSelectionDisplayRef.current;
+                  mapRuntimeRef.current?.shootingDangerZoneSelectionDisplay;
 
                 if (selectionDisplay) {
                   updateShootingDangerZoneSelection(
@@ -1963,7 +1714,7 @@ export default function App() {
   // OpenLayers features are a projection of immutable history, never the
   // source of truth.
   useEffect(() => {
-    const routeDisplay = routeDisplayRef.current;
+    const routeDisplay = mapRuntimeRef.current?.routeDisplay;
 
     if (!routeDisplay) {
       return;
@@ -1984,8 +1735,8 @@ export default function App() {
    * routing begins only once the edit is released.
    */
   useEffect(() => {
-    const map = mapRef.current;
-    const display = routeDisplayRef.current;
+    const map = mapRuntimeRef.current?.map;
+    const display = mapRuntimeRef.current?.routeDisplay;
 
     if (!map || !display || !isRouteCreationActive) {
       return;
@@ -1998,7 +1749,7 @@ export default function App() {
         routeHistoryRef.current.steps.length > 0,
       getRouteState: () => getRouteState(routeHistoryRef.current),
       onStart: (target: RouteDragTarget) => {
-        const marker = routeProfileMarkerRef.current;
+        const marker = mapRuntimeRef.current?.routeProfileMarker;
 
         if (marker) {
           updateRouteProfileMarker(marker, null);
@@ -2218,7 +1969,7 @@ export default function App() {
 
   /** Clears any stale route/profile hover position when geometry changes. */
   useEffect(() => {
-    const marker = routeProfileMarkerRef.current;
+    const marker = mapRuntimeRef.current?.routeProfileMarker;
 
     if (marker) {
       updateRouteProfileMarker(marker, null);
@@ -2232,8 +1983,8 @@ export default function App() {
    * derived from screen pixels so the interaction remains stable at every zoom.
    */
   useEffect(() => {
-    const map = mapRef.current;
-    const marker = routeProfileMarkerRef.current;
+    const map = mapRuntimeRef.current?.map;
+    const marker = mapRuntimeRef.current?.routeProfileMarker;
 
     if (!map || !marker || routeProfilePositionIndex.segments.length === 0) {
       return;
@@ -2357,7 +2108,7 @@ export default function App() {
    * committed by the previous operation.
    */
   useEffect(() => {
-    const map = mapRef.current;
+    const map = mapRuntimeRef.current?.map;
 
     if (!map || !isRouteCreationActive) {
       return;
@@ -2389,7 +2140,7 @@ export default function App() {
         return;
       }
 
-      const display = routeDisplayRef.current;
+      const display = mapRuntimeRef.current?.routeDisplay;
       const expectedState = getRouteState(routeHistoryRef.current);
       const { steps: expectedSteps, closure: expectedClosure } = expectedState;
 

@@ -131,11 +131,14 @@ route-shaping pointer interaction remain in `src/map/route.ts`. The imported
 route stays in its own map module and shares only the current-itinerary metrics
 pipeline.
 
-OpenLayers map ownership remains in `App.tsx` because there is still only one
-map view, but route-domain and route-reconstruction responsibilities no longer
-belong to the root component. Further extraction should proceed incrementally:
-the next justified boundary is the map runtime and information-layer lifecycle,
-not a generic framework-level controller introduced in advance.
+The imperative OpenLayers runtime now lives behind `src/map/mapRuntime.ts` and
+`src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
+ordered layers, displays, and markers as one disposable unit; the hook binds
+that runtime to React mount, unmount, and browser fullscreen events. `App.tsx`
+remains the application coordinator and accesses the runtime through one stable
+ref instead of owning each OpenLayers resource separately. Information-layer
+loading and route-editing orchestration should still be extracted only along
+clear functional boundaries rather than through a generic controller framework.
 
 ### 3.4 Comments explain decisions
 
@@ -165,10 +168,15 @@ Browser
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── owns OpenLayers lifecycle and coordinates route-editing state
+   │      ├── coordinates route-editing and information-layer state
    │      ├── delegates immutable route transformations and affected-section reconstruction
    │      ├── requests dynamic routing cells for snapped clicks
    │      └── refreshes elevation statistics after editable-route or imported-GPX changes
+   │
+   ├── mapRuntime factory + useMapRuntime hook
+   │      ├── create and dispose the single OpenLayers map and ordered layers
+   │      ├── expose shared displays and markers through one stable runtime ref
+   │      └── synchronize browser fullscreen changes with map sizing
    │
    ├── OpenLayers Map / View (`EPSG:2056`)
    │      ├── WMTS TileLayer: national map in the native LV95 grid
@@ -844,11 +852,13 @@ via-helvetica/
 │   │   ├── importedRoute.ts
 │   │   ├── itineraryDirection.ts
 │   │   ├── itineraryEndpoints.ts
+│   │   ├── mapRuntime.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
 │   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
+│   │   ├── useMapRuntime.ts
 │   │   └── userLocation.ts
 │   ├── routing/
 │   │   ├── networkRouter.ts
@@ -875,23 +885,40 @@ via-helvetica/
 
 ### `src/App.tsx`
 
-Owns the OpenLayers map instance and coordinates map-level behavior.
+Coordinates application state and map-level workflows through one shared
+`MapRuntime` ref.
 
-It creates the native LV95 view, WMTS/WMS and vector layers, replaces the
-selected base-map source, and handles map, geolocation, fullscreen,
-single-current-itinerary GPX loading, information-layer visibility and feature
-inspection, route-creation mode, immutable route edit snapshots, loop closing
-and reopening, dynamic graph loading, route statistics, and temporary routing
-status. It coordinates waypoint edits but delegates their route reconstruction
-to `src/routing/routeEditing.ts`. It reacts to selected search results and
-cleans up imperative resources and pending requests when React unmounts.
+It handles geolocation, single-current-itinerary GPX loading, information-layer
+visibility and feature inspection, route-creation mode, immutable route edit
+snapshots, loop closing and reopening, dynamic graph loading, route statistics,
+and temporary routing status. It coordinates waypoint edits but delegates their
+route reconstruction to `src/routing/routeEditing.ts`. Native map construction,
+layer ordering, shared display creation, fullscreen resize synchronization, and
+OpenLayers disposal are delegated to the map runtime modules. App still aborts
+its own pending requests and timers when React unmounts.
+
+### `src/map/mapRuntime.ts`
+
+Creates the single native-LV95 OpenLayers map as one disposable runtime. It owns
+the explicit WMTS/WMS/vector layer order, base-map replacement, shared route and
+GPX displays, information-layer displays, transient markers, initial base-map
+load reporting, and DOM-target cleanup. It contains no React state.
+
+### `src/map/useMapRuntime.ts`
+
+Bridges the imperative map runtime with React. It creates the runtime once after
+the map target mounts, exposes it through one stable ref, synchronizes browser
+fullscreen changes, requests an OpenLayers size refresh after viewport changes,
+and disposes the runtime on unmount. Later layer-visibility changes are applied
+by focused App effects without recreating the map.
 
 ### `src/components/MapLayersSelector.tsx`
 
 Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
 switchable. The component does not know about OpenLayers; `App.tsx` owns the
-actual layer sources and visibility. Outside pointer presses and Escape close
+React visibility state and applies it through the shared map runtime. Outside
+pointer presses and Escape close
 the menu. It owns independent switches for rendered hiking trails, hiking
 closures, military danger zones, and public-transport stops without adding
 another permanent map button. Hiking trails appear first because they are the
@@ -1222,8 +1249,9 @@ messages, and OpenLayers control placement.
 1. The browser registers EPSG:2056 through `proj4`, then resolves a stored or
    browser language.
 2. The language provider updates document metadata and exposes localized strings.
-3. `App` creates the native LV95 OpenLayers view, tile layers, marker layers,
-   editable route layer, and imported-route layer.
+3. `useMapRuntime` creates one disposable runtime through `mapRuntime.ts`;
+   the runtime builds the native LV95 OpenLayers view, ordered tile and vector
+   layers, editable-route display, imported-route display, and transient markers.
 4. The default color base map begins loading from the native `2056` WMTS
    matrix set at `wmts.geo.admin.ch`.
 5. The Layers menu changes the base-map source or toggles information overlays.
