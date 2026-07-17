@@ -7,6 +7,7 @@
 import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
 import {
+  MAX_SNAP_DISTANCE,
   NoWalkableNetworkError,
   RoutingNetwork,
   type RoutedNetworkPath,
@@ -22,8 +23,6 @@ import {
  * cached for the session.
  */
 const CELL_SIZE = 2_400;
-/** Number of neighbouring cells added around a first waypoint; 1 produces a 3 x 3 local area. */
-const INITIAL_CELL_RADIUS = 1;
 /** Corridor radius in cells for the first route attempt. */
 const ROUTE_CELL_RADIUS = 1;
 /** Wider corridor radius in cells used only when the first graph is disconnected. */
@@ -177,10 +176,33 @@ function cellsAlongSegment(
   return cells;
 }
 
-/** Creates the initial neighbourhood needed to snap a first waypoint safely. */
-function createLocalCellKeys(coordinate: Coordinate): Set<CellKey> {
+/**
+ * Returns only the cells whose closed extent intersects the maximum snapping
+ * box around a first waypoint. Since the snap distance is much smaller than a
+ * routing cell, this normally loads one cell, two near an edge, or four near a
+ * corner instead of a fixed 3 x 3 neighbourhood.
+ */
+export function createLocalCellKeys(coordinate: Coordinate): Set<CellKey> {
+  const minX = coordinate[0] - MAX_SNAP_DISTANCE;
+  const minY = coordinate[1] - MAX_SNAP_DISTANCE;
+  const maxX = coordinate[0] + MAX_SNAP_DISTANCE;
+  const maxY = coordinate[1] + MAX_SNAP_DISTANCE;
+
+  // ceil(min / size) - 1 includes the cell on the far side when the closed
+  // snap box starts exactly on a shared cell boundary. floor(max / size) does
+  // the equivalent for the opposite edge.
+  const minColumn = Math.ceil(minX / CELL_SIZE) - 1;
+  const minRow = Math.ceil(minY / CELL_SIZE) - 1;
+  const maxColumn = Math.floor(maxX / CELL_SIZE);
+  const maxRow = Math.floor(maxY / CELL_SIZE);
   const cells = new Set<CellKey>();
-  addExpandedCell(cells, cellForCoordinate(coordinate), INITIAL_CELL_RADIUS);
+
+  for (let column = minColumn; column <= maxColumn; column += 1) {
+    for (let row = minRow; row <= maxRow; row += 1) {
+      cells.add(cellKey({ column, row }));
+    }
+  }
+
   return cells;
 }
 

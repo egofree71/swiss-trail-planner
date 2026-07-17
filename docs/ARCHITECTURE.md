@@ -626,11 +626,13 @@ or another network request. A new edit clears the redo states. Complete deletion
 intentionally clears all route history.
 
 When snapping is disabled, the new section is the direct line between the two
-waypoints. When snapping is enabled, the first click loads a 3 × 3 group of
-regular cells around the selected position and snaps to the resulting network.
-Later clicks load a narrow cell corridor between the previous waypoint and the
-new position. Completed cells remain cached in memory and are not requested
-again during the browser session.
+waypoints. When snapping is enabled, the first click loads only the regular
+cells whose extent intersects the maximum 260-metre snapping box around the
+selected position. This normally means one cell, two near an edge, or four near
+a corner. The point is then snapped to the resulting network. Later clicks load
+a narrow cell corridor between the previous waypoint and the new position.
+Completed cells remain cached in memory and are not requested again during the
+browser session.
 
 The same current snap choice governs route reshaping. Moving a waypoint,
 inserting one by dragging a section, or deleting one rebuilds only the affected
@@ -1536,8 +1538,9 @@ multilingual passenger-mode normalization and technical-record rejection.
     drag interaction while the contextual toolbar is visible. The snap control is
     immediately available before the first waypoint is placed.
 17. With snapping disabled, a map click stores a direct section immediately.
-18. The first snapped click derives and loads a local 3 × 3 cell group while
-    the route toggle shows a compact spinner.
+18. The first snapped click derives and loads only the one to four cells that
+    intersect its 260-metre snap box while the route toggle shows a compact
+    spinner.
 19. Dense EPSG:2056 identify requests are subdivided when either layer reaches
     200 results.
 20. Returned LV95 road vertices become graph nodes and edges; hiking geometry

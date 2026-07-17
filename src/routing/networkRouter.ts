@@ -33,7 +33,7 @@ const HIKING_MATCH_DISTANCE = 8;
  * Maximum user-to-network snapping distance in metres. Larger values may
  * attach a waypoint to an unrelated road.
  */
-const MAX_SNAP_DISTANCE = 260;
+export const MAX_SNAP_DISTANCE = 260;
 /** Dimensionless lower bound for all routing cost factors, keeping the A* heuristic admissible. */
 const MIN_COST_FACTOR = 0.45;
 /**
