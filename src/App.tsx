@@ -224,6 +224,8 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isRouteExportDialogOpen, setIsRouteExportDialogOpen] =
     useState(false);
+  const [locationSearchResetVersion, setLocationSearchResetVersion] =
+    useState(0);
   const [routeExportDefaultName, setRouteExportDefaultName] = useState('');
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
     DEFAULT_BASE_MAP_STYLE,
@@ -316,14 +318,30 @@ export default function App() {
     [routeProfilePositionIndex],
   );
 
-  /** Hides the temporary marker once another map workflow takes priority. */
+  /**
+   * Clears both the temporary marker and the search control when another map
+   * workflow takes priority over the selected location.
+   */
   const clearSelectedSearchResult = useCallback(() => {
     const marker = mapRuntimeRef.current?.searchResultMarker;
 
     if (marker) {
       clearSearchResultMarker(marker);
     }
+
+    setLocationSearchResetVersion((version) => version + 1);
   }, []);
+
+  useEffect(() => {
+    const marker = mapRuntimeRef.current?.searchResultMarker;
+
+    // A selected location and its label belong to the same temporary search
+    // context. A language change invalidates both instead of leaving an
+    // unexplained marker after the search control has been reset.
+    if (marker) {
+      clearSearchResultMarker(marker);
+    }
+  }, [language, mapRuntimeRef]);
 
   const {
     areTrailClosuresVisible,
@@ -1899,6 +1917,7 @@ export default function App() {
       )}
 
       <LocationSearch
+        key={`${language}:${locationSearchResetVersion}`}
         onSearchFocus={closeMapInformationPopup}
         onSelect={selectSearchResult}
       />

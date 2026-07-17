@@ -479,8 +479,12 @@ Selecting a result transforms its WGS 84 longitude and latitude to
 `EPSG:2056`, updates a dedicated marker, and animates the view to native level
 19 (20 metres per pixel). The marker remains a temporary location cue: it is
 cleared when a public-transport, hiking-closure, or danger-zone popup opens,
-when a GPX itinerary is loaded successfully, or when route creation starts. A
-map click that does not open an information popup leaves the marker untouched.
+when a GPX itinerary is loaded successfully, or when route creation starts.
+Those same priority changes also reset the search text, results, pending debounce,
+and request lifecycle so the field cannot retain a location whose marker no
+longer exists. Changing the interface language clears both the search control
+and its temporary marker before any localized query can be started. A map click
+that does not open an information popup leaves the marker and field untouched.
 
 ### 8.1 Interface localization
 
@@ -498,8 +502,9 @@ localization does not require a permanent settings panel.
 
 Location search passes the selected two-letter language to SearchServer. Search
 origins remain language-neutral in the API module and are translated only by the
-UI component. Changing language reruns an open search and applies the matching
-Swiss number-format locale to route figures and elevation axes.
+UI component. Changing language resets the current search and marker; subsequent
+queries use the new language. The matching Swiss number-format locale is also
+applied to route figures and elevation axes.
 
 ## 9. Browser geolocation
 
@@ -1068,7 +1073,11 @@ Owns the search-field interface:
 
 It does not know about OpenLayers. It reports search activity and a typed result
 through callbacks; `App.tsx` wires search focus to the shared close action owned
-by `useMapInformationLayers` and handles the selected location marker.
+by `useMapInformationLayers`, handles and clears the selected location marker,
+and remounts the component when another map workflow or language change
+invalidates the current search context. Remounting deliberately lets the
+component clean up its own debounce and request before starting again with empty
+local state.
 
 ### `src/components/RouteControls.tsx`
 
@@ -1388,8 +1397,9 @@ messages, and OpenLayers control placement.
 44. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-45. Changing language updates interface text, number formatting, document
-    metadata, and subsequent GeoAdmin requests without recreating the map.
+45. Changing language clears the temporary location search and marker, then
+    updates interface text, number formatting, document metadata, and subsequent
+    GeoAdmin requests without recreating the map.
 46. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.

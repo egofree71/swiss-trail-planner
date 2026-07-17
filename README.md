@@ -82,7 +82,9 @@ http://localhost:5173/via-helvetica/
    reused; GeoAdmin supplies the profile only when they are unavailable.
    Starting a new route replaces the imported itinerary.
 6. Outside route-creation mode, click visible closures, danger zones, or public
-   transport stops to inspect their available information.
+   transport stops to inspect their available information. Starting route
+   creation, loading a GPX, opening map information, or changing the interface
+   language clears the temporary location marker, search text, and result list.
 
 The application requests browser geolocation only after the location button is
 pressed. Deployed geolocation requires HTTPS.
