@@ -8,7 +8,7 @@
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import { getDistance } from 'ol/sphere.js';
-import type { RouteClosure, RouteStep } from '../map/route';
+import type { RouteClosure, RouteStep } from '../map/routeState';
 import { toWgs84 } from '../map/projection';
 import type { RouteElevationPoint } from '../metrics/routeMetrics';
 

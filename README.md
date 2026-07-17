@@ -115,7 +115,8 @@ architecture document rather than duplicated here.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
-  data flows, and technical choices.
+  data flows, and technical choices, including the separation between immutable
+  route state, routing-based edit reconstruction, and OpenLayers rendering.
 
 ## Production build and deployment
 

@@ -124,15 +124,18 @@ Each milestone should remain testable and usable before the next one begins.
 
 Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
-controls are separate presentational components. Editable route rendering and
-its focused route-shaping pointer interaction remain together in `src/map/route.ts`;
-the imported route stays in its own map module and shares only the current-itinerary metrics pipeline. A broader map-controller
-abstraction is still unnecessary for one bounded editing interaction.
+controls are separate presentational components. The editable-route domain now
+lives in `src/map/routeState.ts`, routing-based section reconstruction lives in
+`src/routing/routeEditing.ts`, and OpenLayers rendering plus the focused
+route-shaping pointer interaction remain in `src/map/route.ts`. The imported
+route stays in its own map module and shares only the current-itinerary metrics
+pipeline.
 
 OpenLayers map ownership remains in `App.tsx` because there is still only one
-map view. Network fetching and graph algorithms are isolated under
-`src/routing/`; several additional drawing interactions may later justify a
-dedicated hook or map-controller module.
+map view, but route-domain and route-reconstruction responsibilities no longer
+belong to the root component. Further extraction should proceed incrementally:
+the next justified boundary is the map runtime and information-layer lifecycle,
+not a generic framework-level controller introduced in advance.
 
 ### 3.4 Comments explain decisions
 
@@ -162,7 +165,8 @@ Browser
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── owns OpenLayers lifecycle, route-editing state, and adjacent-section recalculation
+   │      ├── owns OpenLayers lifecycle and coordinates route-editing state
+   │      ├── delegates immutable route transformations and affected-section reconstruction
    │      ├── requests dynamic routing cells for snapped clicks
    │      └── refreshes elevation statistics after editable-route or imported-GPX changes
    │
@@ -527,6 +531,8 @@ section from the last waypoint back to the first and its routing mode. The
 closure deliberately has no second waypoint marker, so the start remains a
 single editable point.
 
+`src/map/routeState.ts` defines `RouteState`, `RouteStep`, `RouteClosure`, and
+`RouteHistory`, together with pure flattening, identity, and reversal helpers.
 `RouteHistory` stores stacks of complete prior and undone route states. Adding,
 moving, inserting, or deleting a waypoint, reversing the route, and closing or
 reopening the loop each create one snapshot-based edit. Undo and redo exchange
@@ -606,23 +612,23 @@ adjacent sections replaced by straight lines. Pulling the route line inserts a
 temporary point and splits the selected section into two straight previews. No
 network request runs during either drag.
 
-On release, `App.tsx` recalculates only the affected sections. A moved point
-updates its incoming and outgoing sections; moving the first or last point of a
-closed route also refreshes the closing section. An inserted point replaces one
-normal or closing section with two sections. Both halves use the snap mode
-selected at release: straight mode preserves the dropped coordinate exactly,
-while network mode calls the dynamic router and each half can independently
-fall back to a straight segment if coverage or connectivity is missing. The
-insertion edit is committed only after a genuine drag. A click on an existing
-waypoint removes it, while a click-only press on a route section is restored and
-then handled by the normal map-click flow as a new endpoint from the current
-route end. This allows an itinerary to reuse an already drawn path without
-confusing that click with section reshaping. Closed-route endpoint deletion
-rebuilds the loop around the remaining points. Intermediate deletion reconnects
-the surrounding waypoints according to the current snap mode and falls back to
-a straight connector when no network path is available. Hover-capable pointers
-receive a compact, localized contextual label for both waypoint and route-section
-actions.
+On release, `App.tsx` delegates affected-section reconstruction to
+`src/routing/routeEditing.ts`. A moved point updates its incoming and outgoing
+sections; moving the first or last point of a closed route also refreshes the
+closing section. An inserted point replaces one normal or closing section with
+two sections. Both halves use the snap mode selected at release: straight mode
+preserves the dropped coordinate exactly, while network mode calls the dynamic
+router and each half can independently fall back to a straight segment if
+coverage or connectivity is missing. The insertion edit is committed only after
+a genuine drag. A click on an existing waypoint removes it, while a click-only
+press on a route section is restored and then handled by the normal map-click
+flow as a new endpoint from the current route end. This allows an itinerary to
+reuse an already drawn path without confusing that click with section reshaping.
+Closed-route endpoint deletion rebuilds the loop around the remaining points.
+Intermediate deletion reconnects the surrounding waypoints according to the
+current snap mode and falls back to a straight connector when no network path is
+available. Hover-capable pointers receive a compact, localized contextual label
+for both waypoint and route-section actions.
 
 `src/components/RouteControls.tsx` renders the compact toolbar. Undo and redo
 are enabled from snapshot history state. The snap button selects network or
@@ -840,11 +846,13 @@ via-helvetica/
 │   │   ├── itineraryEndpoints.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
+│   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
 │   │   └── userLocation.ts
 │   ├── routing/
 │   │   ├── networkRouter.ts
+│   │   ├── routeEditing.ts
 │   │   ├── swissTlmApi.ts
 │   │   └── dynamicRoutingNetwork.ts
 │   ├── search/
@@ -871,12 +879,12 @@ Owns the OpenLayers map instance and coordinates map-level behavior.
 
 It creates the native LV95 view, WMTS/WMS and vector layers, replaces the
 selected base-map source, and handles map, geolocation, fullscreen,
-single-current-itinerary GPX loading, information-layer
-visibility and feature inspection, route-creation mode, immutable route edit
-snapshots, waypoint move and insertion recalculation, loop closing and reopening, dynamic graph loading, route
-statistics, and temporary routing status. It
-reacts to selected search results and cleans up imperative resources and pending
-requests when React unmounts.
+single-current-itinerary GPX loading, information-layer visibility and feature
+inspection, route-creation mode, immutable route edit snapshots, loop closing
+and reopening, dynamic graph loading, route statistics, and temporary routing
+status. It coordinates waypoint edits but delegates their route reconstruction
+to `src/routing/routeEditing.ts`. It reacts to selected search results and
+cleans up imperative resources and pending requests when React unmounts.
 
 ### `src/components/MapLayersSelector.tsx`
 
@@ -1102,16 +1110,23 @@ editable and imported itineraries. It recognizes near-coincident imported GPX
 endpoints in native LV95 metres and stores a semantic endpoint role so editable
 markers can retain waypoint hit behaviour without owning route state.
 
+### `src/map/routeState.ts`
+
+Defines immutable route steps, the optional dedicated loop-closing section,
+complete route state, and undo/redo history contracts. It flattens normal and
+closing geometry, compares captured immutable states, and reverses open or
+closed routes without recalculation. The module has no React or OpenLayers
+rendering lifecycle.
+
 ### `src/map/route.ts`
 
-Defines immutable route steps, the optional dedicated loop-closing section, and
-complete route state. It flattens normal and closing geometry, reverses complete
-routes without recalculation, creates the route vector layer, and rebuilds its
-line with sparse direction arrowheads, indexed waypoint features, and start/finish markers. It also owns waypoint and normal/closing
-section hit detection, deterministic newest-section selection for overlapping
-geometry, the focused click/drag interaction, contextual hover target reporting,
-cursor state, and straight preview rendering for moved or temporarily inserted
-waypoints. It does not own immutable route history or
+Creates the editable-route vector layer and rebuilds its line with sparse
+direction arrowheads, indexed waypoint features, and start/finish markers. It
+also owns waypoint and normal/closing section hit detection, deterministic
+newest-section selection for overlapping geometry, the focused click/drag
+interaction, contextual hover target reporting, cursor state, and straight
+preview rendering for moved or temporarily inserted waypoints. It consumes the
+immutable route contracts from `routeState.ts` and does not own route history or
 network recalculation.
 
 ### `src/routing/swissTlmApi.ts`
@@ -1127,6 +1142,14 @@ handling.
 Builds the walkable regional graph, indexes line segments, matches official
 hiking geometry, snaps waypoints, applies routing costs, and calculates A*
 paths. It contains no React or OpenLayers map lifecycle state.
+
+### `src/routing/routeEditing.ts`
+
+Coordinates immutable route edits with the dynamic router. It creates straight
+fallback steps and closures, preserves exact waypoint connectors, and rebuilds
+only the sections affected by waypoint movement, insertion, deletion, or loop
+closure. It propagates request and size-limit failures to `App.tsx`, while
+missing coverage or connectivity may fall back to straight geometry.
 
 ### `src/routing/dynamicRoutingNetwork.ts`
 

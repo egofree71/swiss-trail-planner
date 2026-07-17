@@ -1,8 +1,8 @@
 /**
  * Business context: owns the OpenLayers representation and direct drag
- * interaction for the route currently edited by the user. Route history stays
- * immutable React data, while this module rebuilds the lightweight red route
- * layer and lets users move or delete existing waypoints, or pull a new
+ * interaction for the route currently edited by the user. It consumes the
+ * immutable domain state from `routeState.ts`, rebuilds the lightweight red
+ * route layer, and lets users move or delete existing waypoints, or pull a new
  * waypoint from an existing route section.
  */
 import type { Coordinate } from 'ol/coordinate.js';
@@ -23,46 +23,16 @@ import {
 } from 'ol/style.js';
 import { createDirectionalLineStyle } from './itineraryDirection';
 import {
+  collectRouteCoordinates,
+  type RouteClosure,
+  type RouteState,
+  type RouteStep,
+} from './routeState';
+import {
   createItineraryEndpointFeatures,
   ITINERARY_ENDPOINT_ROLE_PROPERTY,
   type ItineraryEndpointRole,
 } from './itineraryEndpoints';
-
-/** Geometry source used when one route step was created. */
-export type RouteMode =
-  /** Direct line between waypoints. */
-  | 'straight'
-  /** Geometry calculated on the swissTLM3D routing network. */
-  | 'network';
-
-/** Immutable history entry representing one user waypoint and its incoming segment. */
-export interface RouteStep {
-  /**
-   * Effective waypoint coordinate; network mode replaces the original click
-   * with the snapped coordinate.
-   */
-  waypoint: Coordinate;
-  /** Geometry from the previous waypoint to this one, or `null` for the first point. */
-  segment: Coordinate[] | null;
-  /** Whether the incoming segment is straight or network-routed. */
-  mode: RouteMode;
-}
-
-/** Optional final section that connects the last waypoint back to the first. */
-export interface RouteClosure {
-  /** Exact displayed geometry from the last waypoint to the first waypoint. */
-  segment: Coordinate[];
-  /** Whether the closing section is straight or network-routed. */
-  mode: RouteMode;
-}
-
-/** Complete immutable route geometry used by display and direct editing. */
-export interface RouteState {
-  /** Ordered user waypoints and their normal incoming sections. */
-  steps: RouteStep[];
-  /** Dedicated loop-closing section, without a duplicate waypoint marker. */
-  closure: RouteClosure | null;
-}
 
 /** OpenLayers resources used to render the current route. */
 export interface RouteDisplay {
@@ -133,8 +103,6 @@ export interface RouteDragCallbacks {
 const ROUTE_COLOR = '#d52b1e';
 /** Feature property used to distinguish draggable waypoints from the route line. */
 const ROUTE_WAYPOINT_INDEX_PROPERTY = 'routeWaypointIndex';
-/** Squared distance in square map units below which route vertices are duplicates. */
-const DUPLICATE_COORDINATE_DISTANCE_SQUARED = 0.01;
 /** Pointer tolerance in screen pixels, deliberately larger than the visible point on touch screens. */
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
 /** Route-line tolerance in screen pixels, matching the white casing around the red line. */
@@ -241,22 +209,6 @@ function getClosestPointOnSegment(
   };
 }
 
-/** Appends a coordinate unless it would create a sub-decimetre duplicate vertex. */
-function appendCoordinate(
-  coordinates: Coordinate[],
-  coordinate: Coordinate,
-): void {
-  const previousCoordinate = coordinates[coordinates.length - 1];
-
-  if (
-    !previousCoordinate ||
-    coordinateDistanceSquared(previousCoordinate, coordinate) >
-      DUPLICATE_COORDINATE_DISTANCE_SQUARED
-  ) {
-    coordinates.push([...coordinate]);
-  }
-}
-
 /** Returns a waypoint index only when the hit feature is one of the route points. */
 function getWaypointIndex(feature: Feature): number | null {
   const waypointIndex = feature.get(ROUTE_WAYPOINT_INDEX_PROPERTY);
@@ -279,157 +231,6 @@ function updateRouteEditCursor(
     hoverTarget === 'segment' && !isDragging,
   );
   target.classList.toggle('map--route-edit-dragging', isDragging);
-}
-
-/**
- * Flattens incoming step geometries into one continuous display line.
- * @param steps - Ordered immutable route history.
- * @returns Deduplicated route coordinates in display order.
- */
-export function collectRouteCoordinates(
-  steps: RouteStep[],
-  closure: RouteClosure | null = null,
-): Coordinate[] {
-  const coordinates: Coordinate[] = [];
-
-  for (const step of steps) {
-    if (step.segment && step.segment.length >= 2) {
-      for (const coordinate of step.segment) {
-        appendCoordinate(coordinates, coordinate);
-      }
-    } else {
-      appendCoordinate(coordinates, step.waypoint);
-    }
-  }
-
-  if (closure?.segment && closure.segment.length >= 2) {
-    for (const coordinate of closure.segment) {
-      appendCoordinate(coordinates, coordinate);
-    }
-  }
-
-  return coordinates;
-}
-
-/**
- * Reverses waypoint order and every stored incoming section without routing again.
- *
- * Each original section belongs to its destination step. After reversal, that
- * same section belongs to the former start waypoint, so both the geometry and
- * owning step must be rebuilt in the opposite direction.
- *
- * @param steps - Applied route steps in their current display order.
- * @returns A new immutable step array representing the same geometry backwards.
- */
-export function reverseRouteSteps(steps: RouteStep[]): RouteStep[] {
-  if (steps.length === 0) {
-    return [];
-  }
-
-  const lastStep = steps[steps.length - 1];
-  const reversedSteps: RouteStep[] = [
-    {
-      waypoint: [...lastStep.waypoint],
-      segment: null,
-      mode: lastStep.mode,
-    },
-  ];
-
-  for (let index = steps.length - 1; index > 0; index -= 1) {
-    const sourceStep = steps[index];
-    const destinationStep = steps[index - 1];
-    const reversedSegment = sourceStep.segment
-      ? sourceStep.segment
-          .slice()
-          .reverse()
-          .map((coordinate): Coordinate => [...coordinate])
-      : [[...sourceStep.waypoint], [...destinationStep.waypoint]];
-
-    reversedSteps.push({
-      waypoint: [...destinationStep.waypoint],
-      segment: reversedSegment,
-      mode: sourceStep.mode,
-    });
-  }
-
-  return reversedSteps;
-}
-
-
-/** Reverses one coordinate sequence without sharing mutable point arrays. */
-function reverseSegment(segment: Coordinate[]): Coordinate[] {
-  return segment
-    .slice()
-    .reverse()
-    .map((coordinate): Coordinate => [...coordinate]);
-}
-
-/**
- * Reverses a closed route while preserving its physical start waypoint.
- *
- * A loop has no inherent geometric endpoint, but the user's first waypoint is
- * still meaningful as the start shown by the combined A/B marker. Reversal
- * therefore rotates section ownership around that fixed waypoint instead of
- * making the former last waypoint the new start.
- */
-function reverseClosedRouteState(state: RouteState): RouteState {
-  const { steps, closure } = state;
-
-  if (!closure || steps.length < 2) {
-    return state;
-  }
-
-  const reversedSteps: RouteStep[] = [
-    {
-      ...steps[0],
-      waypoint: [...steps[0].waypoint],
-      segment: null,
-    },
-    {
-      waypoint: [...steps[steps.length - 1].waypoint],
-      segment: reverseSegment(closure.segment),
-      mode: closure.mode,
-    },
-  ];
-
-  for (let index = steps.length - 1; index > 1; index -= 1) {
-    const sourceStep = steps[index];
-    const destinationStep = steps[index - 1];
-    const reversedSegment = sourceStep.segment
-      ? reverseSegment(sourceStep.segment)
-      : [[...sourceStep.waypoint], [...destinationStep.waypoint]];
-
-    reversedSteps.push({
-      waypoint: [...destinationStep.waypoint],
-      segment: reversedSegment,
-      mode: sourceStep.mode,
-    });
-  }
-
-  const firstNormalSection = steps[1];
-  const reversedClosure: RouteClosure = {
-    segment: firstNormalSection.segment
-      ? reverseSegment(firstNormalSection.segment)
-      : [[...firstNormalSection.waypoint], [...steps[0].waypoint]],
-    mode: firstNormalSection.mode,
-  };
-
-  return {
-    steps: reversedSteps,
-    closure: reversedClosure,
-  };
-}
-
-/** Reverses an open or closed route without recalculating any geometry. */
-export function reverseRouteState(state: RouteState): RouteState {
-  if (state.closure) {
-    return reverseClosedRouteState(state);
-  }
-
-  return {
-    steps: reverseRouteSteps(state.steps),
-    closure: null,
-  };
 }
 
 /**
