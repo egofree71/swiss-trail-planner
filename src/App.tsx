@@ -1,9 +1,9 @@
 /**
  * Business context: coordinates the map-centred application shell around one
  * disposable OpenLayers runtime. It connects search, geolocation, route history,
- * official information-layer inspection, dynamic swissTLM3D loading, and
- * route-editing controls while keeping map construction and provider contracts
- * in dedicated modules.
+ * dynamic swissTLM3D loading, and route-editing controls while delegating map
+ * construction, provider contracts, and optional information-layer workflows to
+ * focused modules.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
@@ -17,32 +17,11 @@ import RouteImportControl from './components/RouteImportControl';
 import RouteControls from './components/RouteControls';
 import RouteExportDialog from './components/RouteExportDialog';
 import PublicTransportStopPopup from './components/PublicTransportStopPopup';
-import ShootingDangerZonePopup, {
-  type ShootingDangerZonePopupStatus,
-} from './components/ShootingDangerZonePopup';
-import TrailClosurePopup, {
-  type TrailClosurePopupStatus,
-} from './components/TrailClosurePopup';
+import ShootingDangerZonePopup from './components/ShootingDangerZonePopup';
+import TrailClosurePopup from './components/TrailClosurePopup';
 import RouteStatistics, {
   type RouteElevationStatus,
 } from './components/RouteStatistics';
-import {
-  fetchTrailClosurePopup,
-  identifyTrailClosure,
-} from './closures/trailClosures';
-import {
-  fetchShootingDangerZonePopup,
-  identifyShootingDangerZone,
-  updateShootingDangerZoneSelection,
-} from './dangers/shootingDangerZones';
-import {
-  getPublicTransportStopFromFeature,
-  loadPublicTransportStops,
-  PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
-  type PublicTransportStop,
-  updatePublicTransportStopsDisplay,
-  updatePublicTransportStopSelection,
-} from './transport/publicTransportStops';
 import { downloadRouteGpx } from './export/gpx';
 import {
   GpxImportError,
@@ -52,7 +31,6 @@ import {
 import { useI18n } from './i18n/I18nContext';
 import {
   DEFAULT_BASE_MAP_STYLE,
-  HIKING_TRAILS_MIN_ZOOM,
   IMPORTED_ROUTE_MAX_ZOOM,
   LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
@@ -62,6 +40,10 @@ import {
 import { fromWgs84 } from './map/projection';
 import { updateImportedRouteDisplay } from './map/importedRoute';
 import type { MapLoadStatus } from './map/mapRuntime';
+import {
+  resolveInitialMapInformationLayerVisibility,
+  useMapInformationLayers,
+} from './map/useMapInformationLayers';
 import { useMapRuntime } from './map/useMapRuntime';
 import {
   clearRouteDragCursor,
@@ -116,6 +98,7 @@ import {
   fetchRouteSegmentsElevationSummary,
   type RouteElevationSummary,
 } from './metrics/routeMetrics';
+import { isAbortedRequest } from './network/abort';
 import type { LocationSearchResult } from './search/locationSearch';
 
 /** Browser geolocation state used by the location control and its feedback. */
@@ -181,16 +164,6 @@ const ROUTE_PROFILE_HOVER_TOLERANCE_PX = 10;
 /** Browser preference key for the rendered hiking-trail overlay. */
 const HIKING_TRAILS_VISIBILITY_STORAGE_KEY =
   'via-helvetica.hiking-trails-visible';
-/** Browser preference key for the safety-information overlay. */
-const TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY =
-  'via-helvetica.trail-closures-visible';
-/** Browser preference key for the military danger-zone overlay. */
-const SHOOTING_DANGER_ZONES_VISIBILITY_STORAGE_KEY =
-  'via-helvetica.shooting-danger-zones-visible';
-/** Browser preference key for the optional public-transport stop overlay. */
-const PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY =
-  'via-helvetica.public-transport-stops-visible';
-
 /** Restores the hiking-trail preference, which is enabled by default. */
 function getInitialHikingTrailsVisibility(): boolean {
   try {
@@ -205,54 +178,6 @@ function getInitialHikingTrailsVisibility(): boolean {
 }
 
 /**
- * Restores the explicit closure-layer preference. Safety information is shown
- * by default when no choice has been stored yet.
- */
-function getInitialTrailClosuresVisibility(): boolean {
-  try {
-    return (
-      window.localStorage.getItem(
-        TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY,
-      ) !== 'false'
-    );
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Restores the explicit danger-zone preference. Published military shooting
- * areas are safety information and are therefore shown by default.
- */
-function getInitialShootingDangerZonesVisibility(): boolean {
-  try {
-    return (
-      window.localStorage.getItem(
-        SHOOTING_DANGER_ZONES_VISIBILITY_STORAGE_KEY,
-      ) !== 'false'
-    );
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Restores the explicit stop-layer preference. Stops remain hidden by default
- * because their dense point symbols are an optional planning aid.
- */
-function getInitialPublicTransportStopsVisibility(): boolean {
-  try {
-    return (
-      window.localStorage.getItem(
-        PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY,
-      ) === 'true'
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Builds an unambiguous local timestamp for the proposed GPX name. The ISO-like
  * date order works consistently in every interface language, while the colon
  * remains readable inside the GPX and is sanitized only for the filename.
@@ -263,14 +188,6 @@ function createRouteExportDefaultName(baseName: string, date = new Date()): stri
   const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
   return `${baseName} — ${datePart} ${timePart}`;
-}
-
-/** Identifies the normal cancellation path shared by abortable map requests. */
-function isAbortedRequest(error: unknown, signal: AbortSignal): boolean {
-  return (
-    signal.aborted ||
-    (error instanceof DOMException && error.name === 'AbortError')
-  );
 }
 
 /** Root application coordinator for UI state and map-level workflows. */
@@ -295,7 +212,6 @@ export default function App() {
   const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
   const routingAbortControllerRef = useRef<AbortController | null>(null);
   const routeImportSessionRef = useRef(0);
-  const mapInformationRequestRef = useRef<AbortController | null>(null);
 
   if (!routingLoaderRef.current) {
     routingLoaderRef.current = new DynamicRoutingNetworkLoader();
@@ -314,18 +230,6 @@ export default function App() {
   );
   const [areHikingTrailsVisible, setAreHikingTrailsVisible] =
     useState(getInitialHikingTrailsVisibility);
-  const [areTrailClosuresVisible, setAreTrailClosuresVisible] =
-    useState(getInitialTrailClosuresVisibility);
-  const [areShootingDangerZonesVisible, setAreShootingDangerZonesVisible] =
-    useState(getInitialShootingDangerZonesVisibility);
-  const [arePublicTransportStopsVisible, setArePublicTransportStopsVisible] =
-    useState(getInitialPublicTransportStopsVisibility);
-  const [trailClosurePopup, setTrailClosurePopup] =
-    useState<TrailClosurePopupStatus | null>(null);
-  const [shootingDangerZonePopup, setShootingDangerZonePopup] =
-    useState<ShootingDangerZonePopupStatus | null>(null);
-  const [publicTransportStopPopup, setPublicTransportStopPopup] =
-    useState<PublicTransportStop | null>(null);
   const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
   const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
   const [isRouteOperationPending, setIsRouteOperationPending] =
@@ -349,14 +253,20 @@ export default function App() {
   >([]);
   const [importedRouteElevationSummary, setImportedRouteElevationSummary] =
     useState<RouteElevationSummary | null>(null);
+  const initialMapInformationVisibility = useMemo(
+    resolveInitialMapInformationLayerVisibility,
+    [],
+  );
   const mapRuntimeRef = useMapRuntime({
     mapTargetRef,
     fullscreenElementRef: appRef,
     initialVisibility: {
       hikingTrails: areHikingTrailsVisible,
-      trailClosures: areTrailClosuresVisible,
-      shootingDangerZones: areShootingDangerZonesVisible,
-      publicTransportStops: arePublicTransportStopsVisible,
+      trailClosures: initialMapInformationVisibility.trailClosures,
+      shootingDangerZones:
+        initialMapInformationVisibility.shootingDangerZones,
+      publicTransportStops:
+        initialMapInformationVisibility.publicTransportStops,
     },
     onLoadStatusChange: setStatus,
     onFullscreenChange: setIsFullscreen,
@@ -415,25 +325,24 @@ export default function App() {
     }
   }, []);
 
-  /** Closes any information-layer metadata and cancels its active request. */
-  const closeMapInformationPopup = useCallback(() => {
-    mapInformationRequestRef.current?.abort();
-    mapInformationRequestRef.current = null;
-    setTrailClosurePopup(null);
-    setShootingDangerZonePopup(null);
-    setPublicTransportStopPopup(null);
-    const stopDisplay = mapRuntimeRef.current?.publicTransportStopsDisplay;
-    const dangerZoneSelection =
-      mapRuntimeRef.current?.shootingDangerZoneSelectionDisplay;
-
-    if (stopDisplay) {
-      updatePublicTransportStopSelection(stopDisplay, null);
-    }
-
-    if (dangerZoneSelection) {
-      updateShootingDangerZoneSelection(dangerZoneSelection, null);
-    }
-  }, []);
+  const {
+    areTrailClosuresVisible,
+    setAreTrailClosuresVisible,
+    areShootingDangerZonesVisible,
+    setAreShootingDangerZonesVisible,
+    arePublicTransportStopsVisible,
+    setArePublicTransportStopsVisible,
+    trailClosurePopup,
+    shootingDangerZonePopup,
+    publicTransportStopPopup,
+    closeMapInformationPopup,
+  } = useMapInformationLayers({
+    mapRuntimeRef,
+    initialVisibility: initialMapInformationVisibility,
+    language,
+    isRouteCreationActive,
+    onInformationSelected: clearSelectedSearchResult,
+  });
 
   /**
    * Keeps the synchronous ref and React render state on the same immutable
@@ -1322,7 +1231,6 @@ export default function App() {
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
       routeImportSessionRef.current += 1;
-      mapInformationRequestRef.current?.abort();
     },
     [],
   );
@@ -1343,373 +1251,10 @@ export default function App() {
   }, [areHikingTrailsVisible]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        TRAIL_CLOSURES_VISIBILITY_STORAGE_KEY,
-        String(areTrailClosuresVisible),
-      );
-    } catch {
-      // Layer visibility remains functional when browser storage is unavailable.
-    }
-  }, [areTrailClosuresVisible]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SHOOTING_DANGER_ZONES_VISIBILITY_STORAGE_KEY,
-        String(areShootingDangerZonesVisible),
-      );
-    } catch {
-      // Layer visibility remains functional when browser storage is unavailable.
-    }
-  }, [areShootingDangerZonesVisible]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY,
-        String(arePublicTransportStopsVisible),
-      );
-    } catch {
-      // Layer visibility remains functional when browser storage is unavailable.
-    }
-  }, [arePublicTransportStopsVisible]);
-
-  useEffect(() => {
     mapRuntimeRef.current?.setHikingTrailsVisible(
       areHikingTrailsVisible,
     );
   }, [areHikingTrailsVisible]);
-
-  useEffect(() => {
-    const runtime = mapRuntimeRef.current;
-
-    if (!runtime) {
-      return;
-    }
-
-    runtime.setTrailClosuresVisible(areTrailClosuresVisible);
-
-    if (!areTrailClosuresVisible && trailClosurePopup) {
-      closeMapInformationPopup();
-    }
-  }, [
-    areTrailClosuresVisible,
-    closeMapInformationPopup,
-    trailClosurePopup,
-  ]);
-
-  useEffect(() => {
-    const runtime = mapRuntimeRef.current;
-
-    if (!runtime) {
-      return;
-    }
-
-    runtime.setShootingDangerZonesVisible(areShootingDangerZonesVisible);
-
-    if (!areShootingDangerZonesVisible && shootingDangerZonePopup) {
-      closeMapInformationPopup();
-    }
-  }, [
-    areShootingDangerZonesVisible,
-    closeMapInformationPopup,
-    shootingDangerZonePopup,
-  ]);
-
-  useEffect(() => {
-    const runtime = mapRuntimeRef.current;
-
-    if (!runtime) {
-      return;
-    }
-
-    const { map, publicTransportStopsDisplay: display } = runtime;
-    runtime.setPublicTransportStopsVisible(
-      arePublicTransportStopsVisible,
-    );
-
-    if (!arePublicTransportStopsVisible) {
-      display.source.clear();
-      closeMapInformationPopup();
-      return;
-    }
-
-    let abortController: AbortController | null = null;
-
-    const loadVisibleStops = () => {
-      const imageSize = map.getSize();
-      const zoom = map.getView().getZoom();
-
-      if (
-        !imageSize ||
-        zoom === undefined ||
-        zoom <= PUBLIC_TRANSPORT_STOPS_MIN_ZOOM
-      ) {
-        abortController?.abort();
-        display.source.clear();
-        return;
-      }
-
-      abortController?.abort();
-      abortController = new AbortController();
-      const request = abortController;
-
-      void loadPublicTransportStops(
-        {
-          extent: map.getView().calculateExtent(imageSize),
-          imageSize: [imageSize[0], imageSize[1]],
-          language,
-        },
-        request.signal,
-      )
-        .then((stops) => {
-          if (!request.signal.aborted) {
-            updatePublicTransportStopsDisplay(display, stops);
-          }
-        })
-        .catch((error: unknown) => {
-          if (
-            request.signal.aborted ||
-            (error instanceof DOMException && error.name === 'AbortError')
-          ) {
-            return;
-          }
-
-          // Optional stop information must never block route planning.
-          console.error('Unable to load public-transport stops.', error);
-        });
-    };
-
-    map.on('moveend', loadVisibleStops);
-    loadVisibleStops();
-
-    return () => {
-      map.un('moveend', loadVisibleStops);
-      abortController?.abort();
-    };
-  }, [
-    arePublicTransportStopsVisible,
-    closeMapInformationPopup,
-    language,
-  ]);
-
-  // Closure and shooting-danger popup templates are localized server-side,
-  // while stop names and modes are reloaded for the selected language.
-  useEffect(() => {
-    closeMapInformationPopup();
-  }, [closeMapInformationPopup, language]);
-
-  /**
-   * Registers one prioritized click pipeline for optional information layers.
-   * Already loaded passenger stops win first, then closures, then military
-   * danger zones, so overlapping official portrayals produce deterministic UI.
-   */
-  useEffect(() => {
-    const map = mapRuntimeRef.current?.map;
-    const hasVisibleInformationLayer =
-      areTrailClosuresVisible ||
-      areShootingDangerZonesVisible ||
-      arePublicTransportStopsVisible;
-
-    if (!map || !hasVisibleInformationLayer || isRouteCreationActive) {
-      if (isRouteCreationActive) {
-        closeMapInformationPopup();
-      }
-      return;
-    }
-
-    const handleInformationLayerClick = (
-      event: MapBrowserEvent,
-    ) => {
-      const imageSize = map.getSize();
-      const zoom = map.getView().getZoom();
-
-      if (!imageSize || zoom === undefined) {
-        return;
-      }
-
-      const canInspectStops =
-        arePublicTransportStopsVisible &&
-        zoom > PUBLIC_TRANSPORT_STOPS_MIN_ZOOM;
-      const canInspectClosures =
-        areTrailClosuresVisible && zoom > HIKING_TRAILS_MIN_ZOOM;
-      const canInspectShootingDangerZones =
-        areShootingDangerZonesVisible && zoom > HIKING_TRAILS_MIN_ZOOM;
-
-      if (
-        !canInspectStops &&
-        !canInspectClosures &&
-        !canInspectShootingDangerZones
-      ) {
-        return;
-      }
-
-      closeMapInformationPopup();
-
-      if (canInspectStops) {
-        const stopDisplay = mapRuntimeRef.current?.publicTransportStopsDisplay;
-        const stop = stopDisplay
-          ? map.forEachFeatureAtPixel(
-              event.pixel,
-              (feature) => getPublicTransportStopFromFeature(feature),
-              {
-                hitTolerance: 8,
-                layerFilter: (layer) => layer === stopDisplay.layer,
-              },
-            )
-          : undefined;
-
-        // Stops are already filtered and localized during viewport loading, so
-        // opening their compact popup requires no additional network request.
-        if (stop && stopDisplay) {
-          clearSelectedSearchResult();
-          updatePublicTransportStopSelection(stopDisplay, stop);
-          setPublicTransportStopPopup(stop);
-          return;
-        }
-      }
-
-      if (!canInspectClosures && !canInspectShootingDangerZones) {
-        return;
-      }
-
-      const abortController = new AbortController();
-      mapInformationRequestRef.current = abortController;
-      const context = {
-        coordinate: [...event.coordinate] as Coordinate,
-        mapExtent: map.getView().calculateExtent(imageSize),
-        imageSize: [imageSize[0], imageSize[1]] as [number, number],
-        language,
-      };
-
-      void (async () => {
-        try {
-          if (canInspectClosures) {
-            try {
-              const closure = await identifyTrailClosure(
-                context,
-                abortController.signal,
-              );
-
-              if (closure && !abortController.signal.aborted) {
-                clearSelectedSearchResult();
-                setTrailClosurePopup({ state: 'loading', html: null });
-                const html = await fetchTrailClosurePopup(
-                  closure,
-                  abortController.signal,
-                );
-
-                if (!abortController.signal.aborted) {
-                  setTrailClosurePopup({ state: 'ready', html });
-                }
-                return;
-              }
-            } catch (error: unknown) {
-              if (isAbortedRequest(error, abortController.signal)) {
-                return;
-              }
-
-              console.error('Unable to load trail-closure details.', error);
-              clearSelectedSearchResult();
-              setTrailClosurePopup({ state: 'error', html: null });
-              return;
-            }
-          }
-
-          if (canInspectShootingDangerZones) {
-            try {
-              const dangerZone = await identifyShootingDangerZone(
-                context,
-                abortController.signal,
-              );
-
-              if (dangerZone && !abortController.signal.aborted) {
-                clearSelectedSearchResult();
-                const selectionDisplay =
-                  mapRuntimeRef.current?.shootingDangerZoneSelectionDisplay;
-
-                if (selectionDisplay) {
-                  updateShootingDangerZoneSelection(
-                    selectionDisplay,
-                    dangerZone,
-                  );
-                }
-
-                setShootingDangerZonePopup({
-                  state: 'loading',
-                  html: null,
-                });
-                const html = await fetchShootingDangerZonePopup(
-                  dangerZone,
-                  abortController.signal,
-                );
-
-                if (!abortController.signal.aborted) {
-                  setShootingDangerZonePopup({ state: 'ready', html });
-                }
-              }
-            } catch (error: unknown) {
-              if (isAbortedRequest(error, abortController.signal)) {
-                return;
-              }
-
-              console.error(
-                'Unable to load shooting danger-zone details.',
-                error,
-              );
-              clearSelectedSearchResult();
-              setShootingDangerZonePopup({ state: 'error', html: null });
-            }
-          }
-        } finally {
-          if (mapInformationRequestRef.current === abortController) {
-            mapInformationRequestRef.current = null;
-          }
-        }
-      })();
-    };
-
-    const handleInformationLayerZoomChange = () => {
-      const zoom = map.getView().getZoom();
-
-      if (zoom === undefined) {
-        closeMapInformationPopup();
-        return;
-      }
-
-      const isAnyLayerVisibleAtZoom =
-        (arePublicTransportStopsVisible &&
-          zoom > PUBLIC_TRANSPORT_STOPS_MIN_ZOOM) ||
-        ((areTrailClosuresVisible || areShootingDangerZonesVisible) &&
-          zoom > HIKING_TRAILS_MIN_ZOOM);
-
-      if (!isAnyLayerVisibleAtZoom) {
-        closeMapInformationPopup();
-      }
-    };
-
-    map.on('singleclick', handleInformationLayerClick);
-    map.getView().on('change:resolution', handleInformationLayerZoomChange);
-
-    return () => {
-      map.un('singleclick', handleInformationLayerClick);
-      map.getView().un(
-        'change:resolution',
-        handleInformationLayerZoomChange,
-      );
-      mapInformationRequestRef.current?.abort();
-      mapInformationRequestRef.current = null;
-    };
-  }, [
-    arePublicTransportStopsVisible,
-    areShootingDangerZonesVisible,
-    areTrailClosuresVisible,
-    clearSelectedSearchResult,
-    closeMapInformationPopup,
-    isRouteCreationActive,
-    language,
-  ]);
 
   // OpenLayers features are a projection of immutable history, never the
   // source of truth.

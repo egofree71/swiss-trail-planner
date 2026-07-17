@@ -134,11 +134,15 @@ pipeline.
 The imperative OpenLayers runtime now lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
 ordered layers, displays, and markers as one disposable unit; the hook binds
-that runtime to React mount, unmount, and browser fullscreen events. `App.tsx`
-remains the application coordinator and accesses the runtime through one stable
-ref instead of owning each OpenLayers resource separately. Information-layer
-loading and route-editing orchestration should still be extracted only along
-clear functional boundaries rather than through a generic controller framework.
+that runtime to React mount, unmount, and browser fullscreen events. Optional
+closure, military-danger, and public-transport workflows are coordinated by
+`src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
+viewport loading, inspection priority, popup state, and request cancellation.
+`App.tsx` remains the application coordinator and accesses the runtime through
+one stable ref instead of owning each OpenLayers resource or information-layer
+request separately. Route-editing orchestration should still be extracted only
+along clear functional boundaries rather than through a generic controller
+framework.
 
 ### 3.4 Comments explain decisions
 
@@ -168,7 +172,7 @@ Browser
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── coordinates route-editing and information-layer state
+   │      ├── coordinates route-editing and current-itinerary state
    │      ├── delegates immutable route transformations and affected-section reconstruction
    │      ├── requests dynamic routing cells for snapped clicks
    │      └── refreshes elevation statistics after editable-route or imported-GPX changes
@@ -177,6 +181,11 @@ Browser
    │      ├── create and dispose the single OpenLayers map and ordered layers
    │      ├── expose shared displays and markers through one stable runtime ref
    │      └── synchronize browser fullscreen changes with map sizing
+   │
+   ├── useMapInformationLayers hook
+   │      ├── persist closure, danger-zone, and stop visibility choices
+   │      ├── load filtered passenger stops for the visible viewport
+   │      └── prioritize stop, closure, and danger-zone inspection and popup state
    │
    ├── OpenLayers Map / View (`EPSG:2056`)
    │      ├── WMTS TileLayer: national map in the native LV95 grid
@@ -858,8 +867,11 @@ via-helvetica/
 │   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
+│   │   ├── useMapInformationLayers.ts
 │   │   ├── useMapRuntime.ts
 │   │   └── userLocation.ts
+│   ├── network/
+│   │   └── abort.ts
 │   ├── routing/
 │   │   ├── networkRouter.ts
 │   │   ├── routeEditing.ts
@@ -888,14 +900,15 @@ via-helvetica/
 Coordinates application state and map-level workflows through one shared
 `MapRuntime` ref.
 
-It handles geolocation, single-current-itinerary GPX loading, information-layer
-visibility and feature inspection, route-creation mode, immutable route edit
-snapshots, loop closing and reopening, dynamic graph loading, route statistics,
-and temporary routing status. It coordinates waypoint edits but delegates their
-route reconstruction to `src/routing/routeEditing.ts`. Native map construction,
-layer ordering, shared display creation, fullscreen resize synchronization, and
-OpenLayers disposal are delegated to the map runtime modules. App still aborts
-its own pending requests and timers when React unmounts.
+It handles geolocation, single-current-itinerary GPX loading, route-creation
+mode, immutable route edit snapshots, loop closing and reopening, dynamic graph
+loading, route statistics, and temporary routing status. It coordinates waypoint
+edits but delegates their route reconstruction to `src/routing/routeEditing.ts`.
+Native map construction, layer ordering, shared display creation, fullscreen
+resize synchronization, and OpenLayers disposal are delegated to the map runtime
+modules. Information-layer visibility, viewport loading, selection, popups, and
+request cancellation are delegated to `src/map/useMapInformationLayers.ts`. App
+still aborts its own routing, import, and timer work when React unmounts.
 
 ### `src/map/mapRuntime.ts`
 
@@ -910,15 +923,36 @@ Bridges the imperative map runtime with React. It creates the runtime once after
 the map target mounts, exposes it through one stable ref, synchronizes browser
 fullscreen changes, requests an OpenLayers size refresh after viewport changes,
 and disposes the runtime on unmount. Later layer-visibility changes are applied
-by focused App effects without recreating the map.
+by focused feature hooks or the small hiking-overlay effect without recreating
+the map.
+
+### `src/map/useMapInformationLayers.ts`
+
+Owns the React-facing lifecycle of the three inspectable information overlays.
+It resolves and persists their independent visibility choices, applies changes
+through the shared `MapRuntime`, reloads filtered public-transport stops after
+viewport or language changes, and clears stale vectors when the stop layer is
+hidden or too far out. Outside route creation it registers one deterministic
+click pipeline: already loaded passenger stops first, hiking closures second,
+and military danger zones last. The hook owns popup state, selected stop and
+polygon highlights, language and zoom invalidation, abortable identify/popup
+requests, and cleanup. Provider contracts remain in the existing closure,
+danger, and transport modules.
+
+### `src/network/abort.ts`
+
+Normalizes the browser's two cancellation signals—an aborted signal and a
+rejected `AbortError`—so intentional replacement of map or routing requests is
+ignored consistently instead of being reported as an application failure.
 
 ### `src/components/MapLayersSelector.tsx`
 
 Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
-switchable. The component does not know about OpenLayers; `App.tsx` owns the
-React visibility state and applies it through the shared map runtime. Outside
-pointer presses and Escape close
+switchable. The component does not know about OpenLayers; the application shell
+supplies controlled values, while the information-layer hook and the small
+hiking-overlay effect apply them through the shared map runtime. Outside pointer
+presses and Escape close
 the menu. It owns independent switches for rendered hiking trails, hiking
 closures, military danger zones, and public-transport stops without adding
 another permanent map button. Hiking trails appear first because they are the
@@ -1033,8 +1067,8 @@ Owns the search-field interface:
 - result selection.
 
 It does not know about OpenLayers. It reports search activity and a typed result
-through callbacks; `App.tsx` decides which map-information panels and selections
-to clear.
+through callbacks; `App.tsx` wires search focus to the shared close action owned
+by `useMapInformationLayers` and handles the selected location marker.
 
 ### `src/components/RouteControls.tsx`
 
@@ -1254,14 +1288,27 @@ messages, and OpenLayers control placement.
    layers, editable-route display, imported-route display, and transient markers.
 4. The default color base map begins loading from the native `2056` WMTS
    matrix set at `wmts.geo.admin.ch`.
-5. The Layers menu changes the base-map source or toggles information overlays.
+5. The Layers menu changes the base-map source or updates controlled overlay
+   visibility. `useMapInformationLayers` persists and applies the three
+   inspectable overlay choices through the existing runtime.
 6. The rendered hiking overlay is enabled by default unless a stored preference
    hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
-9. The public-transport stop vector layer remains disabled by default unless a stored preference enables it. At detailed zoom levels, move-end events load and filter the visible passenger stops.
-10. A map click inspects the loaded stop vectors first, then a visible hiking closure, and finally a visible military danger zone.
-11. A stop opens a compact structured panel immediately and starts an abortable stationboard request; closure and danger-zone polygons fetch localized official popups through the shared sanitizer, while a selected danger zone is highlighted from its returned GeoJSON geometry and PDF links are removed from military notices. Opening any of these panels clears the temporary location-search marker.
+9. The public-transport stop vector layer remains disabled by default unless a
+   stored preference enables it. At detailed zoom levels,
+   `useMapInformationLayers` reloads and filters the visible passenger stops on
+   map move or language change.
+10. Outside route creation, the information-layer hook registers one map-click
+    pipeline that inspects loaded stop vectors first, then a visible hiking
+    closure, and finally a visible military danger zone.
+11. A stop opens a compact structured panel immediately and starts an abortable
+    stationboard request; closure and danger-zone polygons fetch localized
+    official popups through the shared sanitizer, while a selected danger zone
+    is highlighted from its returned GeoJSON geometry and PDF links are removed
+    from military notices. Opening any of these panels clears the temporary
+    location-search marker. Zoom, language, visibility, or route-mode changes
+    cancel obsolete information requests and clear stale selections.
 12. Selecting a valid GPX clears the temporary location-search marker, converts its WGS 84 coordinates to LV95, leaves route
     creation, clears editable route history, replaces the previous imported
     itinerary, adds direction arrowheads independently to each retained segment,
