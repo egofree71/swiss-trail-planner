@@ -56,8 +56,6 @@ export interface UseEditableRouteOptions {
   mapTargetRef: RefObject<HTMLDivElement | null>;
   /** Typed interface translation helper. */
   t: (key: TranslationKey) => string;
-  /** Clears temporary workflows and imported GPX state before editing starts. */
-  onRouteCreationStarted: () => void;
 }
 
 /** State and actions exposed to the application shell and route controls. */
@@ -674,8 +672,6 @@ export function useEditableRoute(
     routeCreationSessionRef.current += 1;
 
     if (nextState) {
-      options.onRouteCreationStarted();
-
       // A fresh route starts in the expected network mode, while reopening an
       // existing editable route preserves the user's current choice.
       if (routeHistoryRef.current.steps.length === 0) {
@@ -690,7 +686,7 @@ export function useEditableRoute(
     }
 
     setIsRouteCreationActive(nextState);
-  }, [clearRouteMessage, options.onRouteCreationStarted]);
+  }, [clearRouteMessage]);
 
   const toggleRouteSnap = useCallback(() => {
     setIsRouteSnapEnabled((enabled) => !enabled);

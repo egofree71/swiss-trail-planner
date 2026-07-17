@@ -131,8 +131,10 @@ rendering, hit detection, and preview primitives. `src/map/useEditableRoute.ts`
 owns immutable history, snap mode, serialized routing mutations, and route-control
 actions. `src/map/useRouteInteractions.ts` owns the focused click/drag lifecycle,
 contextual guidance, and preview coordination without knowing how routes are
-calculated. The imported route stays in its own map module and shares only the
-current-itinerary metrics pipeline.
+calculated. `src/map/useImportedRoute.ts` owns local GPX file sessions, projected
+read-only geometry, embedded elevations, display replacement, and view framing.
+The imported route shares only the current-itinerary metrics pipeline with the
+editable route.
 
 The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
@@ -144,6 +146,8 @@ requests, and explicit geolocation are coordinated by
 public-transport workflows are coordinated by
 `src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
 viewport loading, inspection priority, popup state, and request cancellation.
+`src/map/useImportedRoute.ts` owns the read-only GPX workflow and invalidates
+unfinished file reads when another itinerary takes priority.
 `src/metrics/useItineraryMetrics.ts` owns current-itinerary distance, elevation
 request identity, hiking time, and bidirectional map/profile exploration.
 `App.tsx` remains the application composition point and accesses the runtime
@@ -173,19 +177,24 @@ Browser
    │      │      └── geo.admin.ch SearchServer
    │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
-   │      ├── route edit snapshots, single-current-itinerary imported-GPX state, statistics, and temporary routing status
+   │      ├── focused route, imported-GPX, map-control, information, and metrics state
    │      ├── browser Geolocation API
    │      └── browser Fullscreen API
    │
    ├── App.tsx
    │      ├── composes map, search, route, import, metrics, and popup capabilities
-   │      ├── owns the remaining single-current-itinerary GPX import state
+   │      ├── coordinates which temporary workflow owns the current itinerary
    │      └── wires focused controllers to compact presentational components
    │
    ├── useEditableRoute + useRouteInteractions hooks
    │      ├── own immutable history, snap mode, undo/redo, loop, and routing status
    │      ├── serialize dynamic swissTLM3D additions and affected-section rebuilds
    │      └── attach focused click/drag interactions and straight previews
+   │
+   ├── useImportedRoute hook
+   │      ├── validate and parse one local GPX file with stale-read protection
+   │      ├── project and display independent read-only LV95 segments
+   │      └── reuse embedded elevations and frame the imported itinerary
    │
    ├── mapRuntime factory + useMapRuntime hook
    │      ├── create and dispose the single OpenLayers map and ordered layers
@@ -757,8 +766,8 @@ discarding cells that completed successfully.
 ## 12. Read-only GPX import
 
 `RouteImportControl` owns only the hidden file input and compact import button.
-It returns the selected `File` to `App.tsx`; imported geometry never becomes
-editable route history.
+It returns the selected `File` to `useImportedRoute`; imported geometry never
+becomes editable route history.
 
 `src/import/gpx.ts` parses common GPX tracks and routes locally with
 `DOMParser`. Each `trkseg` remains an independent line, coordinate values are
@@ -769,18 +778,23 @@ back to GeoAdmin for the complete profile. Waypoint-only GPX documents are
 rejected because they do not define an itinerary. A size limit protects the
 browser from accidental oversized files.
 
-A successful import becomes the single current itinerary: active routing is
-aborted, route-creation mode is left, editable route history is cleared, and the
-new purple read-only geometry replaces any prior GPX. Invalid imports leave the
-current itinerary untouched. Starting route creation later clears the imported
-layer immediately, without confirmation.
+`src/map/useImportedRoute.ts` owns the asynchronous file-read session, size
+validation, parsing, WGS 84 to LV95 conversion, optional embedded-elevation
+summary, purple display replacement, and view framing. A slower file read is
+ignored after a newer selection, route creation, or unmount invalidates its
+session. A successful import becomes the single current itinerary: active
+routing is aborted, route-creation mode is left, editable route history is
+cleared, and the new purple read-only geometry replaces any prior GPX. Invalid
+imports leave the current itinerary untouched. Starting route creation later
+clears the imported layer immediately, without confirmation.
 
 `src/map/importedRoute.ts` owns the purple read-only vector layer, adds sparse
 purple direction arrowheads independently to each retained GPX segment, and adds the
 shared endpoint markers to the first and last retained GPX coordinates. Endpoints
 within five LV95 metres use one combined A/B marker so small recording differences
-do not hide one symbol beneath the other. `App.tsx` fits the view to its extent
-and feeds its projected segments into the shared metrics pipeline. Distance is summed per segment. When every retained GPX point has a
+do not hide one symbol beneath the other. `useImportedRoute` fits the view to its
+extent and feeds its projected segments into the shared metrics pipeline.
+Distance is summed per segment. When every retained GPX point has a
 valid `<ele>` value, the embedded altitude function is resampled at the same
 roughly 20 metre spacing used for editable routes; this preserves the exported
 profile while avoiding visible artefacts from irregularly spaced geometry
@@ -905,6 +919,7 @@ via-helvetica/
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
 │   │   ├── useEditableRoute.ts
+│   │   ├── useImportedRoute.ts
 │   │   ├── useMapInformationLayers.ts
 │   │   ├── useMapRuntime.ts
 │   │   ├── useMapViewControls.ts
@@ -939,16 +954,18 @@ via-helvetica/
 
 Composes application capabilities through one shared `MapRuntime` ref.
 
-It retains the current imported-GPX geometry and framing workflow, temporary
-location-search selection, and the GPX export dialog, then wires focused
-controllers to presentational components. Native map construction and browser
-fullscreen state are delegated to `useMapRuntime`; background, hiking-overlay,
-zoom, fullscreen requests, and geolocation are delegated to
+It retains temporary location-search selection and the GPX export dialog, then
+wires focused controllers to presentational components. Native map construction
+and browser fullscreen state are delegated to `useMapRuntime`; background,
+hiking-overlay, zoom, fullscreen requests, and geolocation are delegated to
 `useMapViewControls`; information overlays are delegated to
 `useMapInformationLayers`; editable route state and gestures are delegated to
-`useEditableRoute` and `useRouteInteractions`; current-itinerary statistics and
-profile exploration are delegated to `useItineraryMetrics`. App invalidates only
-an unfinished file import when React unmounts.
+`useEditableRoute` and `useRouteInteractions`; imported GPX file sessions,
+geometry, display, and framing are delegated to `useImportedRoute`;
+current-itinerary statistics and profile exploration are delegated to
+`useItineraryMetrics`. App only coordinates cross-workflow ownership, such as
+clearing a GPX before route creation or clearing editable history after a valid
+import.
 
 ### `src/map/useEditableRoute.ts`
 
@@ -956,9 +973,21 @@ Owns the React-facing editable-route capability. It stores immutable route
 history and synchronous refs for stale-result guards, preserves the current snap
 choice, serializes dynamic routing operations, commits undoable additions,
 moves, insertions, deletions, reversal, and loop changes, and publishes the
-busy/message state consumed by route controls. Starting route creation asks the
-application shell to clear an imported GPX and temporary search context;
-successful GPX import asks the hook to abort editing and clear history.
+busy/message state consumed by route controls. It exposes self-contained route
+actions; the application shell coordinates unrelated search and imported-GPX
+workflows before invoking them. A successful GPX import asks the hook to abort
+editing and clear history.
+
+### `src/map/useImportedRoute.ts`
+
+Owns the React-facing read-only GPX capability. It validates the browser file
+size, protects asynchronous `File.text()` reads with a monotonically increasing
+session, parses the GPX locally, projects independent segments into LV95,
+reuses complete embedded elevations when possible, updates or clears the purple
+OpenLayers display, and frames the accepted itinerary above the bottom summary.
+The hook exposes projected segments and the optional elevation summary to
+`useItineraryMetrics`. Cross-workflow callbacks remain in `App.tsx`, so the hook
+does not know how editable history or location search are implemented.
 
 ### `src/map/useRouteInteractions.ts`
 
@@ -1394,18 +1423,24 @@ messages, and OpenLayers control placement.
     from military notices. Opening any of these panels clears the temporary
     location-search marker. Zoom, language, visibility, or route-mode changes
     cancel obsolete information requests and clear stale selections.
-12. Selecting a valid GPX clears the temporary location-search marker, converts its WGS 84 coordinates to LV95, leaves route
-    creation, clears editable route history, replaces the previous imported
-    itinerary, adds direction arrowheads independently to each retained segment,
-    and fits the map to its geometry.
+12. `useImportedRoute` validates and parses a selected GPX locally, ignores
+    obsolete file reads, converts its WGS 84 coordinates to LV95, and reuses a
+    complete embedded elevation series when available. After preparation
+    succeeds, `App.tsx` clears the temporary location-search context and asks
+    `useEditableRoute` to leave route creation and clear editable history; the
+    import hook then replaces the previous purple itinerary, adds direction
+    arrowheads independently to each retained segment, and fits the map to its
+    geometry.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
     embedded elevations are regularly resampled; otherwise GeoAdmin supplies
     the profile.
-14. Starting editable route creation clears the imported GPX without prompting.
-15. `useEditableRoute` handles the route button, creation mode, and snap state;
-    entering the mode clears the temporary location-search marker. A fresh empty
-    route resets to snapping enabled, while an existing editable route keeps its
+14. Before entering editable route creation, `App.tsx` clears the temporary
+    search context and asks `useImportedRoute` to invalidate any unfinished file
+    read and remove the imported GPX without prompting.
+15. `useEditableRoute` then handles the route button, creation mode, and snap
+    state. A fresh empty route resets to snapping enabled, while an existing
+    editable route keeps its
     current snap choice.
 16. `useRouteInteractions` attaches the route-click listener and one focused
     drag interaction while the contextual toolbar is visible. The snap control is

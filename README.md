@@ -118,9 +118,9 @@ architecture document rather than duplicated here.
 
 - [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
   data flows, and technical choices, including the disposable OpenLayers runtime,
-  focused information, map-control, editable-route, and itinerary-metrics hooks,
-  plus the separation between route state, pointer interaction, reconstruction,
-  and rendering.
+  focused information, map-control, editable-route, imported-GPX, and
+  itinerary-metrics hooks, plus the separation between route state, pointer
+  interaction, reconstruction, and rendering.
 
 ## Production build and deployment
 

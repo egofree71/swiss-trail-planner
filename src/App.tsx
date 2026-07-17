@@ -6,7 +6,6 @@
  * modules.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Coordinate } from 'ol/coordinate.js';
 import { containsCoordinate } from 'ol/extent.js';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
@@ -19,19 +18,11 @@ import ShootingDangerZonePopup from './components/ShootingDangerZonePopup';
 import TrailClosurePopup from './components/TrailClosurePopup';
 import RouteStatistics from './components/RouteStatistics';
 import { downloadRouteGpx } from './export/gpx';
-import {
-  MAX_GPX_FILE_SIZE_BYTES,
-  parseGpxRoute,
-} from './import/gpx';
 import { useI18n } from './i18n/I18nContext';
-import {
-  IMPORTED_ROUTE_MAX_ZOOM,
-  LOCATION_SEARCH_ZOOM,
-  MAP_EXTENT,
-} from './map/config';
-import { updateImportedRouteDisplay } from './map/importedRoute';
+import { LOCATION_SEARCH_ZOOM, MAP_EXTENT } from './map/config';
 import { fromWgs84 } from './map/projection';
 import { useEditableRoute } from './map/useEditableRoute';
+import { useImportedRoute } from './map/useImportedRoute';
 import {
   resolveInitialMapInformationLayerVisibility,
   useMapInformationLayers,
@@ -45,10 +36,6 @@ import {
   clearSearchResultMarker,
   updateSearchResultMarker,
 } from './map/searchResult';
-import {
-  createImportedRouteElevationSummary,
-  type RouteElevationSummary,
-} from './metrics/routeMetrics';
 import { useItineraryMetrics } from './metrics/useItineraryMetrics';
 import type { LocationSearchResult } from './search/locationSearch';
 
@@ -70,18 +57,12 @@ export default function App() {
   const { language, t } = useI18n();
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
-  const routeImportSessionRef = useRef(0);
 
   const [isRouteExportDialogOpen, setIsRouteExportDialogOpen] =
     useState(false);
   const [locationSearchResetVersion, setLocationSearchResetVersion] =
     useState(0);
   const [routeExportDefaultName, setRouteExportDefaultName] = useState('');
-  const [importedRouteSegments, setImportedRouteSegments] = useState<
-    Coordinate[][]
-  >([]);
-  const [importedRouteElevationSummary, setImportedRouteElevationSummary] =
-    useState<RouteElevationSummary | null>(null);
   const initialHikingTrailsVisibility = useMemo(
     resolveInitialHikingTrailsVisibility,
     [],
@@ -151,23 +132,6 @@ export default function App() {
     }
   }, [language, mapRuntimeRef]);
 
-  const handleRouteCreationStarted = useCallback(() => {
-    clearSelectedSearchResult();
-
-    if (importedRouteSegments.length === 0) {
-      return;
-    }
-
-    const importedDisplay = mapRuntimeRef.current?.importedRouteDisplay;
-
-    if (importedDisplay) {
-      updateImportedRouteDisplay(importedDisplay, []);
-    }
-
-    setImportedRouteSegments([]);
-    setImportedRouteElevationSummary(null);
-  }, [clearSelectedSearchResult, importedRouteSegments.length, mapRuntimeRef]);
-
   const {
     routeHistory,
     routeCoordinates,
@@ -192,8 +156,43 @@ export default function App() {
     mapRuntimeRef,
     mapTargetRef,
     t,
-    onRouteCreationStarted: handleRouteCreationStarted,
   });
+
+  const handleImportedRouteAccepted = useCallback(() => {
+    clearSelectedSearchResult();
+    replaceWithImportedItinerary();
+  }, [clearSelectedSearchResult, replaceWithImportedItinerary]);
+
+  const handleImportedRouteError = useCallback(
+    (message: string) => showTemporaryRouteMessage(message, 'error'),
+    [showTemporaryRouteMessage],
+  );
+
+  const {
+    segments: importedRouteSegments,
+    elevationSummary: importedRouteElevationSummary,
+    importRouteFile,
+    clearImportedRoute,
+  } = useImportedRoute({
+    mapRuntimeRef,
+    t,
+    onImportAccepted: handleImportedRouteAccepted,
+    onImportError: handleImportedRouteError,
+  });
+
+  const handleToggleRouteCreation = useCallback(() => {
+    if (!isRouteCreationActive) {
+      clearSelectedSearchResult();
+      clearImportedRoute();
+    }
+
+    toggleRouteCreation();
+  }, [
+    clearImportedRoute,
+    clearSelectedSearchResult,
+    isRouteCreationActive,
+    toggleRouteCreation,
+  ]);
 
   const {
     activeRouteSegments,
@@ -297,94 +296,6 @@ export default function App() {
     }
   };
 
-  /**
-   * Loads one GPX as the single current read-only itinerary and frames its full
-   * extent. A successful import replaces the editable route and its history.
-   */
-  const importRouteFile = async (file: File) => {
-    const map = mapRuntimeRef.current?.map;
-    const display = mapRuntimeRef.current?.importedRouteDisplay;
-
-    if (!map || !display) {
-      return;
-    }
-
-    const importSession = ++routeImportSessionRef.current;
-
-    if (file.size > MAX_GPX_FILE_SIZE_BYTES) {
-      showTemporaryRouteMessage(t('route.importTooLarge'), 'error');
-      return;
-    }
-
-    try {
-      const importedRoute = parseGpxRoute(await file.text(), file.name);
-
-      // A slower previous file read must not replace a newer user selection.
-      if (importSession !== routeImportSessionRef.current) {
-        return;
-      }
-
-      const projectedSegments = importedRoute.segments.map((segment) =>
-        segment.coordinates.map((coordinate) => fromWgs84(coordinate)),
-      );
-      let embeddedElevationSummary: RouteElevationSummary | null = null;
-
-      if (
-        importedRoute.segments.every(
-          (segment) => segment.elevationsMeters !== null,
-        )
-      ) {
-        try {
-          embeddedElevationSummary = createImportedRouteElevationSummary(
-            importedRoute.segments.map((segment, index) => ({
-              coordinates: projectedSegments[index],
-              elevationsMeters: segment.elevationsMeters ?? [],
-            })),
-          );
-        } catch (error) {
-          // Geometry remains usable when unusual embedded elevations cannot be measured.
-          console.warn(
-            'Unable to use GPX elevations; falling back to GeoAdmin.',
-            error,
-          );
-        }
-      }
-
-      clearSelectedSearchResult();
-      replaceWithImportedItinerary();
-      updateImportedRouteDisplay(display, projectedSegments);
-      setImportedRouteSegments(projectedSegments);
-      setImportedRouteElevationSummary(embeddedElevationSummary);
-
-      /*
-       * Fitting the loaded geometry triggers the normal WMTS tile requests for
-       * that location. A bottom margin leaves room for the imported itinerary statistics.
-       */
-      const importedExtent = display.source.getExtent();
-
-      if (importedExtent) {
-        map.getView().fit(importedExtent, {
-          duration: 600,
-          maxZoom: IMPORTED_ROUTE_MAX_ZOOM,
-          padding: [80, 80, 180, 80],
-        });
-      }
-    } catch (error) {
-      if (importSession !== routeImportSessionRef.current) {
-        return;
-      }
-
-      console.error('Unable to import the GPX route.', error);
-      showTemporaryRouteMessage(t('route.importError'), 'error');
-    }
-  };
-
-  useEffect(
-    () => () => {
-      routeImportSessionRef.current += 1;
-    },
-    [],
-  );
 
   return (
     <main
@@ -453,7 +364,7 @@ export default function App() {
           canExport={
             !isRouteOperationPending && routeHistory.steps.length > 1
           }
-          onToggle={toggleRouteCreation}
+          onToggle={handleToggleRouteCreation}
           onUndo={undoRoutePoint}
           onRedo={redoRoutePoint}
           onToggleSnap={toggleRouteSnap}
