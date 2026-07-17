@@ -65,7 +65,7 @@ It can:
 - place sparse screen-scaled arrows along editable and imported itineraries to show travel direction without covering visible waypoints or endpoint markers;
 - close the route with a dedicated final section back to the first waypoint, or reopen it without losing the normal route;
 - clear the complete route;
-- export the displayed route geometry and smoothed elevations as a GPX 1.1 track;
+- export the displayed route geometry, geographic metadata bounds, and smoothed elevations as a GPX 1.1 track;
 - load one external GPX track or route as the current read-only itinerary;
 - replace the editable route on successful GPX import and clear the imported GPX when a new editable route starts;
 - calculate imported GPX distance, ascent, descent, walking time, and elevation profile without inventing links across separate track segments;
@@ -175,9 +175,10 @@ and stale-result guards explain why the safeguard or heuristic exists.
 
 Automated tests target stable domain contracts before browser presentation. The
 initial suite covers immutable route transformations, affected-section rebuilds,
-local GPX parsing, route metrics, and passenger-stop filtering. JSDOM provides
-only the browser XML primitives needed by GPX parsing; provider calls are mocked
-so the suite remains deterministic and does not depend on external services.
+local GPX parsing and export, route metrics, and passenger-stop filtering. JSDOM
+provides the browser XML primitives needed by GPX import and export tests;
+provider calls are mocked so the suite remains deterministic and does not
+depend on external services.
 
 Tests live beside the modules they protect. This keeps fixtures close to the
 relevant business rules and makes a future extraction or contract change reveal
@@ -264,7 +265,7 @@ Regression tests
    │
    ├── Vitest
    ├── JSDOM for browser XML APIs
-   └── colocated route, GPX, metric, and transport-domain suites
+   └── colocated route, GPX import/export, metric, and transport-domain suites
 
 Deployment
    │
@@ -290,8 +291,8 @@ selected route section.
 | OpenLayers 10 | Map, native LV95 view, layers, projections, markers, controls, and route-shaping pointer interaction |
 | proj4 | EPSG:2056 definition and OpenLayers transformation registration |
 | Vite 8 | Development server, production build, and Pages base path |
-| Vitest 4 | Deterministic regression tests for route, GPX, metric, and transport-domain contracts |
-| JSDOM | Browser XML APIs for local GPX parser tests without launching the application |
+| Vitest 4 | Deterministic regression tests for route, GPX import/export, metric, and transport-domain contracts |
+| JSDOM | Browser XML APIs for local GPX import and export tests without launching the application |
 | geo.admin.ch SearchServer | Official location search |
 | GeoAdmin identify API | On-demand swissTLM3D geometries and information-feature selection |
 | GeoAdmin HTML popup API | Localized official closure and military danger-zone metadata |
@@ -931,6 +932,7 @@ via-helvetica/
 │   │   ├── ShootingDangerZonePopup.tsx
 │   │   └── TrailClosurePopup.tsx
 │   ├── export/
+│   │   ├── gpx.test.ts
 │   │   └── gpx.ts
 │   ├── import/
 │   │   ├── gpx.test.ts
@@ -1300,11 +1302,13 @@ geometry to WGS 84, builds a GPX 1.1 track, and starts a browser
 download through a temporary object URL. Section endpoints are never removed,
 which preserves waypoint order and loop closure. The name entered in the export
 dialog is XML-escaped for metadata and the track node, sanitized for a portable
-filename, and used for both outputs. The module merges in regularly spaced
-profile distances, skips profile samples within one metre of a retained geometry
-vertex, and interpolates smoothed terrain altitude into `<ele>` values. If no
-valid profile is available, it exports the same simplified geometry without
-elevations.
+filename, and used for both outputs. The module projects regularly spaced
+profile samples onto route distance, removes samples within one metre of retained
+geometry, merges the two already sorted distance collections in one linear pass,
+and advances monotonic interpolation cursors while assigning coordinates and
+smoothed `<ele>` values. It calculates `<bounds>` from the exact exported WGS 84
+track points. If no valid profile is available, it exports the same simplified
+geometry without elevations.
 
 ### `src/import/gpx.ts`
 
@@ -1450,12 +1454,14 @@ messages, and OpenLayers control placement.
 The colocated `*.test.ts` files protect stable domain behaviour without opening
 a map or contacting live providers. `routeState.test.ts` covers flattening and
 open or closed reversal; `routeEditing.test.ts` covers exact connectors and
-move, insertion, and deletion rebuilds; `gpx.test.ts` covers namespaced tracks,
-segment gaps, duplicate points, elevations, and validation;
-`routeMetrics.test.ts` covers LV95 distance, segment-local elevation totals, the
-Swiss hiking-time model, and a mocked GeoAdmin profile response; and
-`publicTransportStopModel.test.ts` covers multilingual passenger-mode
-normalization and technical-record rejection.
+move, insertion, and deletion rebuilds; `import/gpx.test.ts` covers namespaced
+tracks, segment gaps, duplicate points, elevations, and validation;
+`export/gpx.test.ts` covers section-local simplification, waypoint and loop
+preservation, XML metadata and bounds, profile normalization, elevation
+interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
+distance, segment-local elevation totals, the Swiss hiking-time model, and a
+mocked GeoAdmin profile response; and `publicTransportStopModel.test.ts` covers
+multilingual passenger-mode normalization and technical-record rejection.
 
 ### Remaining root files
 
@@ -1591,7 +1597,8 @@ normalization and technical-record rejection.
 42. Deletion clears the current route and all undo/redo states and hides the summary.
 43. GPX export opens a modal naming form before any XML is generated.
 44. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
-    route vertices with regular elevation samples, and downloads a GPX track
+    route vertices with regular elevation samples in one ordered pass, calculates
+    geographic metadata bounds from the final points, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
 45. Changing language clears the temporary location search and marker, then
     updates interface text, number formatting, document metadata, and subsequent

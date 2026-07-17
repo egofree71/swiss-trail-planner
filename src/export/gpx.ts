@@ -71,6 +71,14 @@ interface MeasuredRoute {
   totalDistanceMeters: number;
 }
 
+/** Geographic bounds written into GPX metadata for faster initial framing. */
+interface GpxBounds {
+  minLatitude: number;
+  minLongitude: number;
+  maxLatitude: number;
+  maxLongitude: number;
+}
+
 /**
  * Escapes text inserted into XML nodes.
  * @param value - Untrusted or application-provided text.
@@ -305,45 +313,56 @@ function measureRoute(coordinates: Coordinate[]): MeasuredRoute {
 /**
  * Returns the route coordinate at a cumulative distance.
  *
- * Interpolation is performed in the map projection between adjacent original
- * vertices. Since route segments are short, this preserves the displayed path
- * while the cumulative lookup itself uses geodesic metre distances.
+ * Interpolation remains in the map projection between adjacent original
+ * vertices, while cumulative lookup uses geodesic metre distances. The caller
+ * processes targets in ascending order and reuses the returned upper index, so
+ * the cursor crosses every route segment at most once.
  *
  * @param route - Pre-measured route geometry.
  * @param distanceMeters - Target cumulative distance from the route start.
- * @returns Interpolated WGS 84 longitude/latitude coordinate.
+ * @param upperIndex - First candidate vertex after the previous target.
+ * @returns Interpolated WGS 84 coordinate and the reusable upper index.
  */
 function coordinateAtDistance(
   route: MeasuredRoute,
   distanceMeters: number,
-): Coordinate {
+  upperIndex: number,
+): { coordinate: Coordinate; upperIndex: number } {
   if (distanceMeters <= 0) {
-    return [...route.lonLatCoordinates[0]];
+    return {
+      coordinate: [...route.lonLatCoordinates[0]],
+      upperIndex,
+    };
   }
 
   if (distanceMeters >= route.totalDistanceMeters) {
-    return [...route.lonLatCoordinates[route.lonLatCoordinates.length - 1]];
+    return {
+      coordinate: [
+        ...route.lonLatCoordinates[route.lonLatCoordinates.length - 1],
+      ],
+      upperIndex: route.cumulativeDistances.length - 1,
+    };
   }
 
-  let upperIndex = 1;
+  let resolvedUpperIndex = Math.max(1, upperIndex);
 
   while (
-    upperIndex < route.cumulativeDistances.length &&
-    route.cumulativeDistances[upperIndex] < distanceMeters
+    resolvedUpperIndex < route.cumulativeDistances.length - 1 &&
+    route.cumulativeDistances[resolvedUpperIndex] < distanceMeters
   ) {
-    upperIndex += 1;
+    resolvedUpperIndex += 1;
   }
 
-  const lowerIndex = Math.max(0, upperIndex - 1);
+  const lowerIndex = resolvedUpperIndex - 1;
   const lowerDistance = route.cumulativeDistances[lowerIndex];
-  const upperDistance = route.cumulativeDistances[upperIndex];
+  const upperDistance = route.cumulativeDistances[resolvedUpperIndex];
   const segmentDistance = upperDistance - lowerDistance;
   const fraction =
     segmentDistance > 0
       ? (distanceMeters - lowerDistance) / segmentDistance
       : 0;
   const lowerCoordinate = route.coordinates[lowerIndex];
-  const upperCoordinate = route.coordinates[upperIndex];
+  const upperCoordinate = route.coordinates[resolvedUpperIndex];
   const interpolatedMapCoordinate: Coordinate = [
     lowerCoordinate[0] +
       (upperCoordinate[0] - lowerCoordinate[0]) * fraction,
@@ -351,7 +370,10 @@ function coordinateAtDistance(
       (upperCoordinate[1] - lowerCoordinate[1]) * fraction,
   ];
 
-  return toWgs84(interpolatedMapCoordinate);
+  return {
+    coordinate: toWgs84(interpolatedMapCoordinate),
+    upperIndex: resolvedUpperIndex,
+  };
 }
 
 /**
@@ -393,35 +415,47 @@ function normalizeElevationPoints(
 
 /**
  * Interpolates smoothed elevation at one distance along the profile.
+ *
+ * Profile distances are consumed in ascending order, so the reusable cursor
+ * advances monotonically and visits each profile section at most once.
+ *
  * @param points - Strictly increasing normalized elevation samples.
  * @param distanceMeters - Distance in the profile service's own distance scale.
- * @returns Interpolated elevation in metres.
+ * @param upperIndex - First candidate sample after the previous target.
+ * @returns Interpolated elevation and the reusable upper index.
  */
 function elevationAtDistance(
   points: RouteElevationPoint[],
   distanceMeters: number,
-): number {
+  upperIndex: number,
+): { elevationMeters: number; upperIndex: number } {
   if (distanceMeters <= points[0].distanceMeters) {
-    return points[0].elevationMeters;
+    return {
+      elevationMeters: points[0].elevationMeters,
+      upperIndex,
+    };
   }
 
   const lastPoint = points[points.length - 1];
 
   if (distanceMeters >= lastPoint.distanceMeters) {
-    return lastPoint.elevationMeters;
+    return {
+      elevationMeters: lastPoint.elevationMeters,
+      upperIndex: points.length - 1,
+    };
   }
 
-  let upperIndex = 1;
+  let resolvedUpperIndex = Math.max(1, upperIndex);
 
   while (
-    upperIndex < points.length &&
-    points[upperIndex].distanceMeters < distanceMeters
+    resolvedUpperIndex < points.length - 1 &&
+    points[resolvedUpperIndex].distanceMeters < distanceMeters
   ) {
-    upperIndex += 1;
+    resolvedUpperIndex += 1;
   }
 
-  const lowerPoint = points[upperIndex - 1];
-  const upperPoint = points[upperIndex];
+  const lowerPoint = points[resolvedUpperIndex - 1];
+  const upperPoint = points[resolvedUpperIndex];
   const profileSectionDistance =
     upperPoint.distanceMeters - lowerPoint.distanceMeters;
   const fraction =
@@ -430,10 +464,99 @@ function elevationAtDistance(
         profileSectionDistance
       : 0;
 
-  return (
-    lowerPoint.elevationMeters +
-    (upperPoint.elevationMeters - lowerPoint.elevationMeters) * fraction
-  );
+  return {
+    elevationMeters:
+      lowerPoint.elevationMeters +
+      (upperPoint.elevationMeters - lowerPoint.elevationMeters) * fraction,
+    upperIndex: resolvedUpperIndex,
+  };
+}
+
+/** Merges two sorted distance collections without repeated array insertion. */
+function mergeSortedDistances(
+  geometryDistances: number[],
+  profileDistances: number[],
+): number[] {
+  const mergedDistances: number[] = [];
+  let geometryIndex = 0;
+  let profileIndex = 0;
+
+  while (
+    geometryIndex < geometryDistances.length ||
+    profileIndex < profileDistances.length
+  ) {
+    const geometryDistance = geometryDistances[geometryIndex];
+    const profileDistance = profileDistances[profileIndex];
+
+    if (
+      profileDistance === undefined ||
+      (geometryDistance !== undefined && geometryDistance <= profileDistance)
+    ) {
+      mergedDistances.push(geometryDistance);
+      geometryIndex += 1;
+    } else {
+      mergedDistances.push(profileDistance);
+      profileIndex += 1;
+    }
+  }
+
+  return mergedDistances;
+}
+
+/**
+ * Projects profile samples onto route distance and removes samples already
+ * represented by a nearby geometry vertex or accepted profile sample.
+ */
+function collectAdditionalProfileDistances(
+  route: MeasuredRoute,
+  points: RouteElevationPoint[],
+  firstProfileDistance: number,
+  profileDistanceSpan: number,
+): number[] {
+  const profileRouteDistances: number[] = [];
+  let nextGeometryIndex = 0;
+
+  for (const point of points) {
+    const routeDistance = Math.min(
+      route.totalDistanceMeters,
+      Math.max(
+        0,
+        ((point.distanceMeters - firstProfileDistance) /
+          profileDistanceSpan) *
+          route.totalDistanceMeters,
+      ),
+    );
+
+    while (
+      nextGeometryIndex < route.cumulativeDistances.length &&
+      route.cumulativeDistances[nextGeometryIndex] < routeDistance
+    ) {
+      nextGeometryIndex += 1;
+    }
+
+    const previousGeometryDistance =
+      route.cumulativeDistances[nextGeometryIndex - 1];
+    const nextGeometryDistance =
+      route.cumulativeDistances[nextGeometryIndex];
+    const previousProfileDistance =
+      profileRouteDistances[profileRouteDistances.length - 1];
+    const isNearExistingDistance =
+      (previousGeometryDistance !== undefined &&
+        Math.abs(routeDistance - previousGeometryDistance) <=
+          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS) ||
+      (nextGeometryDistance !== undefined &&
+        Math.abs(nextGeometryDistance - routeDistance) <=
+          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS) ||
+      (previousProfileDistance !== undefined &&
+        Math.abs(routeDistance - previousProfileDistance) <=
+          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS);
+
+    if (!isNearExistingDistance) {
+      profileRouteDistances.push(routeDistance);
+    }
+  }
+
+  return profileRouteDistances;
 }
 
 /**
@@ -473,59 +596,44 @@ function createElevationAwareTrackPoints(
     return null;
   }
 
-  const mergedDistances = route.cumulativeDistances.slice();
+  const additionalProfileDistances = collectAdditionalProfileDistances(
+    route,
+    normalizedElevationPoints,
+    firstProfileDistance,
+    profileDistanceSpan,
+  );
+  const mergedDistances = mergeSortedDistances(
+    route.cumulativeDistances,
+    additionalProfileDistances,
+  );
+  const trackPoints: GpxTrackPoint[] = [];
+  let routeUpperIndex = 1;
+  let profileUpperIndex = 1;
 
-  for (const point of normalizedElevationPoints) {
-    const routeDistance = Math.min(
-      route.totalDistanceMeters,
-      Math.max(
-        0,
-        ((point.distanceMeters - firstProfileDistance) /
-          profileDistanceSpan) *
-          route.totalDistanceMeters,
-      ),
-    );
-    let lowerIndex = 0;
-    let upperIndex = mergedDistances.length;
-
-    while (lowerIndex < upperIndex) {
-      const middleIndex = Math.floor((lowerIndex + upperIndex) / 2);
-
-      if (mergedDistances[middleIndex] < routeDistance) {
-        lowerIndex = middleIndex + 1;
-      } else {
-        upperIndex = middleIndex;
-      }
-    }
-
-    const previousDistance = mergedDistances[lowerIndex - 1];
-    const nextDistance = mergedDistances[lowerIndex];
-    const isNearExistingDistance =
-      (previousDistance !== undefined &&
-        Math.abs(routeDistance - previousDistance) <=
-          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS) ||
-      (nextDistance !== undefined &&
-        Math.abs(nextDistance - routeDistance) <=
-          GPX_PROFILE_SAMPLE_MERGE_TOLERANCE_METERS);
-
-    if (!isNearExistingDistance) {
-      mergedDistances.splice(lowerIndex, 0, routeDistance);
-    }
-  }
-
-  return mergedDistances.map((routeDistance): GpxTrackPoint => {
+  for (const routeDistance of mergedDistances) {
     const profileDistance =
       firstProfileDistance +
       (routeDistance / route.totalDistanceMeters) * profileDistanceSpan;
+    const coordinateResult = coordinateAtDistance(
+      route,
+      routeDistance,
+      routeUpperIndex,
+    );
+    const elevationResult = elevationAtDistance(
+      normalizedElevationPoints,
+      profileDistance,
+      profileUpperIndex,
+    );
 
-    return {
-      coordinate: coordinateAtDistance(route, routeDistance),
-      elevationMeters: elevationAtDistance(
-        normalizedElevationPoints,
-        profileDistance,
-      ),
-    };
-  });
+    routeUpperIndex = coordinateResult.upperIndex;
+    profileUpperIndex = elevationResult.upperIndex;
+    trackPoints.push({
+      coordinate: coordinateResult.coordinate,
+      elevationMeters: elevationResult.elevationMeters,
+    });
+  }
+
+  return trackPoints;
 }
 
 /** Creates geometry-only GPX points when no valid elevation profile is available. */
@@ -534,6 +642,39 @@ function createGeometryTrackPoints(route: MeasuredRoute): GpxTrackPoint[] {
     coordinate: [...coordinate],
     elevationMeters: null,
   }));
+}
+
+/** Calculates geographic bounds from the exact points written to the GPX track. */
+function calculateTrackBounds(trackPoints: GpxTrackPoint[]): GpxBounds {
+  let minLatitude = Number.POSITIVE_INFINITY;
+  let minLongitude = Number.POSITIVE_INFINITY;
+  let maxLatitude = Number.NEGATIVE_INFINITY;
+  let maxLongitude = Number.NEGATIVE_INFINITY;
+
+  for (const point of trackPoints) {
+    const [longitude, latitude] = point.coordinate;
+    minLatitude = Math.min(minLatitude, latitude);
+    minLongitude = Math.min(minLongitude, longitude);
+    maxLatitude = Math.max(maxLatitude, latitude);
+    maxLongitude = Math.max(maxLongitude, longitude);
+  }
+
+  return {
+    minLatitude,
+    minLongitude,
+    maxLatitude,
+    maxLongitude,
+  };
+}
+
+/** Serializes GPX metadata bounds with the same precision as track points. */
+function serializeBounds(bounds: GpxBounds): string {
+  return (
+    `<bounds minlat="${bounds.minLatitude.toFixed(GPX_COORDINATE_PRECISION)}" ` +
+    `minlon="${bounds.minLongitude.toFixed(GPX_COORDINATE_PRECISION)}" ` +
+    `maxlat="${bounds.maxLatitude.toFixed(GPX_COORDINATE_PRECISION)}" ` +
+    `maxlon="${bounds.maxLongitude.toFixed(GPX_COORDINATE_PRECISION)}" />`
+  );
 }
 
 /** Serializes one GPX track point with optional elevation. */
@@ -578,6 +719,7 @@ export function createRouteGpx(
   const serializedTrackPoints = trackPoints
     .map(serializeTrackPoint)
     .join('\n');
+  const serializedBounds = serializeBounds(calculateTrackBounds(trackPoints));
   const escapedRouteName = escapeXml(routeName);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -585,6 +727,7 @@ export function createRouteGpx(
   <metadata>
     <name>${escapedRouteName}</name>
     <time>${generatedAt.toISOString()}</time>
+    ${serializedBounds}
   </metadata>
   <trk>
     <name>${escapedRouteName}</name>
