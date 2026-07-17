@@ -126,8 +126,10 @@ Provider and geographic configuration live in `src/map/config.ts`. Marker
 creation is isolated in small map modules, while location search and route
 controls are separate presentational components. The editable-route domain lives
 in `src/map/routeState.ts`, routing-based section reconstruction lives in
-`src/routing/routeEditing.ts`, and `src/map/route.ts` provides OpenLayers
-rendering, hit detection, and preview primitives. `src/map/useEditableRoute.ts`
+`src/routing/routeEditing.ts`, `src/map/routeDisplay.ts` renders committed and
+preview geometry, and `src/map/routePointerInteraction.ts` provides focused hit
+detection and drag primitives. `src/map/route.ts` remains a small compatibility
+facade for those two low-level modules. `src/map/useEditableRoute.ts`
 owns immutable history, snap mode, serialized routing mutations, and route-control
 actions. `src/map/useRouteInteractions.ts` owns the focused click/drag lifecycle,
 contextual guidance, and preview coordination without knowing how routes are
@@ -636,7 +638,7 @@ A* then calculates a section between the snapped start and end positions. The
 heuristic uses a lower bound below every configured cost factor so it remains
 admissible.
 
-`src/map/route.ts` owns the OpenLayers representation. It concatenates normal
+`src/map/routeDisplay.ts` owns the OpenLayers representation. It concatenates normal
 stored sections and the optional closing section into one red `LineString` with
 a white casing, while creating exactly one red-outlined `Point` feature per
 waypoint. Red is used deliberately so planned routes do not resemble blue
@@ -660,9 +662,10 @@ swaps the endpoint markers and arrow direction, while closed-route reversal
 preserves the physical start and changes only traversal and arrow direction,
 without separate marker state.
 
-`src/map/route.ts` provides the focused OpenLayers pointer-interaction factory
-and hit-detection primitives for existing waypoints, normal route sections, and
-the optional closing section. `src/map/useRouteInteractions.ts` owns that
+`src/map/routePointerInteraction.ts` provides the focused OpenLayers pointer-
+interaction factory and hit-detection primitives for existing waypoints, normal
+route sections, and the optional closing section.
+`src/map/useRouteInteractions.ts` owns that
 interaction's React lifecycle. A 12-pixel point tolerance keeps small waypoints
 usable on touch screens, while a narrower line tolerance selects the closest
 stored incoming section. When several stored sections overlap at the same
@@ -921,6 +924,8 @@ via-helvetica/
 │   │   ├── mapRuntime.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
+│   │   ├── routeDisplay.ts
+│   │   ├── routePointerInteraction.ts
 │   │   ├── routeState.ts
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
@@ -1313,17 +1318,29 @@ closing geometry, compares captured immutable states, and reverses open or
 closed routes without recalculation. The module has no React or OpenLayers
 rendering lifecycle.
 
-### `src/map/route.ts`
+### `src/map/routeDisplay.ts`
 
 Creates the editable-route vector layer and rebuilds its line with sparse
 direction arrowheads, indexed waypoint features, and start/finish markers. It
-also provides waypoint and normal/closing section hit detection, deterministic
+also draws the straight temporary previews used while moving a waypoint or
+pulling a new waypoint from a stored section. The module consumes immutable
+contracts from `routeState.ts` and owns no interaction lifecycle, route history,
+or network recalculation.
+
+### `src/map/routePointerInteraction.ts`
+
+Provides waypoint and normal/closing-section hit detection, deterministic
 newest-section selection for overlapping geometry, the focused click/drag
-interaction factory, contextual hover target reporting, cursor state, and
-straight preview rendering for moved or temporarily inserted waypoints.
-`useRouteInteractions` owns the interaction lifecycle. The module consumes the
-immutable route contracts from `routeState.ts` and does not own route history or
-network recalculation.
+interaction factory, contextual hover targets, and route-edit cursor state. It
+reports semantic pointer events and depends on `routeDisplay.ts` only for the
+route layer and its private waypoint metadata accessor. `useRouteInteractions`
+owns the React lifecycle and coordinates display previews with route mutations.
+
+### `src/map/route.ts`
+
+Keeps the historical editable-route import path stable by re-exporting the
+focused display and pointer-interaction APIs. It contains no rendering or
+interaction implementation.
 
 ### `src/routing/swissTlmApi.ts`
 
