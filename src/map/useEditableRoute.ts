@@ -58,10 +58,6 @@ export interface UseEditableRouteOptions {
   t: (key: TranslationKey) => string;
   /** Clears temporary workflows and imported GPX state before editing starts. */
   onRouteCreationStarted: () => void;
-  /** Invalidates elevation data whenever committed editable geometry changes. */
-  onRouteGeometryChanged: () => void;
-  /** Clears the shared map/profile hover state when a route drag starts. */
-  onPointerInteractionStarted: () => void;
 }
 
 /** State and actions exposed to the application shell and route controls. */
@@ -103,7 +99,9 @@ export interface EditableRouteController {
     message: string,
     type?: RouteMessageType,
   ) => void;
-  /** Returns whether a route pointer drag is currently in progress. */
+  /** React render state indicating that a route drag owns the pointer. */
+  isRoutePointerInteractionActive: boolean;
+  /** Synchronous accessor used by imperative map pointer listeners. */
   isPointerInteractionActive: () => boolean;
 }
 
@@ -204,9 +202,8 @@ export function useEditableRoute(
     (history: RouteHistory) => {
       routeHistoryRef.current = history;
       setRouteHistory(history);
-      options.onRouteGeometryChanged();
     },
-    [options.onRouteGeometryChanged],
+    [],
   );
 
   /** Records one complete route mutation and clears obsolete redo states. */
@@ -711,20 +708,22 @@ export function useEditableRoute(
     clearRouteMessage();
   }, [clearRouteMessage, commitRouteHistory]);
 
-  const { routeContextHint, isPointerInteractionActive } =
-    useRouteInteractions({
-      mapRuntimeRef: options.mapRuntimeRef,
-      mapTargetRef: options.mapTargetRef,
-      isActive: isRouteCreationActive,
-      isEditingActive,
-      isOperationPending,
-      getCurrentRouteState,
-      onPointerInteractionStarted: options.onPointerInteractionStarted,
-      onAppendEndpoint: appendRouteEndpoint,
-      onMoveWaypoint: moveRouteWaypoint,
-      onInsertWaypoint: insertRouteWaypoint,
-      onDeleteWaypoint: deleteRouteWaypoint,
-    });
+  const {
+    routeContextHint,
+    isInteractionActive: isRoutePointerInteractionActive,
+    isPointerInteractionActive,
+  } = useRouteInteractions({
+    mapRuntimeRef: options.mapRuntimeRef,
+    mapTargetRef: options.mapTargetRef,
+    isActive: isRouteCreationActive,
+    isEditingActive,
+    isOperationPending,
+    getCurrentRouteState,
+    onAppendEndpoint: appendRouteEndpoint,
+    onMoveWaypoint: moveRouteWaypoint,
+    onInsertWaypoint: insertRouteWaypoint,
+    onDeleteWaypoint: deleteRouteWaypoint,
+  });
 
   // OpenLayers features are a projection of immutable history, never the source
   // of truth for route edits or undo/redo.
@@ -759,6 +758,7 @@ export function useEditableRoute(
     routeMessage,
     routeMessageType,
     routeContextHint,
+    isRoutePointerInteractionActive,
     toggleRouteCreation,
     toggleRouteSnap,
     undoRoutePoint,

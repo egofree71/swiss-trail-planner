@@ -7,7 +7,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
-import MapBrowserEvent from 'ol/MapBrowserEvent.js';
 import { containsCoordinate } from 'ol/extent.js';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
@@ -18,77 +17,40 @@ import RouteExportDialog from './components/RouteExportDialog';
 import PublicTransportStopPopup from './components/PublicTransportStopPopup';
 import ShootingDangerZonePopup from './components/ShootingDangerZonePopup';
 import TrailClosurePopup from './components/TrailClosurePopup';
-import RouteStatistics, {
-  type RouteElevationStatus,
-} from './components/RouteStatistics';
+import RouteStatistics from './components/RouteStatistics';
 import { downloadRouteGpx } from './export/gpx';
 import {
-  GpxImportError,
   MAX_GPX_FILE_SIZE_BYTES,
   parseGpxRoute,
 } from './import/gpx';
 import { useI18n } from './i18n/I18nContext';
 import {
-  DEFAULT_BASE_MAP_STYLE,
   IMPORTED_ROUTE_MAX_ZOOM,
   LOCATION_SEARCH_ZOOM,
   MAP_EXTENT,
-  USER_LOCATION_ZOOM,
-  type BaseMapStyle,
 } from './map/config';
-import { fromWgs84 } from './map/projection';
 import { updateImportedRouteDisplay } from './map/importedRoute';
-import type { MapLoadStatus } from './map/mapRuntime';
+import { fromWgs84 } from './map/projection';
+import { useEditableRoute } from './map/useEditableRoute';
 import {
   resolveInitialMapInformationLayerVisibility,
   useMapInformationLayers,
 } from './map/useMapInformationLayers';
 import { useMapRuntime } from './map/useMapRuntime';
-import { useEditableRoute } from './map/useEditableRoute';
+import {
+  resolveInitialHikingTrailsVisibility,
+  useMapViewControls,
+} from './map/useMapViewControls';
 import {
   clearSearchResultMarker,
   updateSearchResultMarker,
 } from './map/searchResult';
 import {
-  createRouteProfilePositionIndex,
-  getClosestRouteProfilePosition,
-  getRouteProfileCoordinate,
-  updateRouteProfileMarker,
-} from './map/routeProfileMarker';
-import { updateUserLocationMarker } from './map/userLocation';
-import {
-  calculateRouteSegmentsDistance,
   createImportedRouteElevationSummary,
-  estimateHikingDuration,
-  fetchRouteElevationSummary,
-  fetchRouteSegmentsElevationSummary,
   type RouteElevationSummary,
 } from './metrics/routeMetrics';
+import { useItineraryMetrics } from './metrics/useItineraryMetrics';
 import type { LocationSearchResult } from './search/locationSearch';
-
-/** Browser geolocation state used by the location control and its feedback. */
-type LocationStatus = 'idle' | 'locating' | 'located' | 'error';
-/** Duration in milliseconds for transient geolocation feedback. */
-const LOCATION_MESSAGE_DURATION_MS = 6_000;
-/** Delay in milliseconds before requesting elevations after a route mutation. */
-const ELEVATION_REQUEST_DEBOUNCE_MS = 250;
-/** Screen-space route tolerance for the bidirectional map/profile hover link. */
-const ROUTE_PROFILE_HOVER_TOLERANCE_PX = 10;
-/** Browser preference key for the rendered hiking-trail overlay. */
-const HIKING_TRAILS_VISIBILITY_STORAGE_KEY =
-  'via-helvetica.hiking-trails-visible';
-/** Restores the hiking-trail preference, which is enabled by default. */
-function getInitialHikingTrailsVisibility(): boolean {
-  try {
-    return (
-      window.localStorage.getItem(
-        HIKING_TRAILS_VISIBILITY_STORAGE_KEY,
-      ) !== 'false'
-    );
-  } catch {
-    return true;
-  }
-}
 
 /**
  * Builds an unambiguous local timestamp for the proposed GPX name. The ISO-like
@@ -108,54 +70,62 @@ export default function App() {
   const { language, t } = useI18n();
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
-  const locationMessageTimerRef = useRef<number | null>(null);
   const routeImportSessionRef = useRef(0);
 
-
-  const [status, setStatus] = useState<MapLoadStatus>('loading');
-  const [locationStatus, setLocationStatus] =
-    useState<LocationStatus>('idle');
-  const [locationMessage, setLocationMessage] = useState('');
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isRouteExportDialogOpen, setIsRouteExportDialogOpen] =
     useState(false);
   const [locationSearchResetVersion, setLocationSearchResetVersion] =
     useState(0);
   const [routeExportDefaultName, setRouteExportDefaultName] = useState('');
-  const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>(
-    DEFAULT_BASE_MAP_STYLE,
-  );
-  const [areHikingTrailsVisible, setAreHikingTrailsVisible] =
-    useState(getInitialHikingTrailsVisibility);
-  const [routeElevationStatus, setRouteElevationStatus] =
-    useState<RouteElevationStatus>('loading');
-  const [routeElevation, setRouteElevation] =
-    useState<RouteElevationSummary | null>(null);
-  const [routeMapHoverDistanceMeters, setRouteMapHoverDistanceMeters] =
-    useState<number | null>(null);
   const [importedRouteSegments, setImportedRouteSegments] = useState<
     Coordinate[][]
   >([]);
   const [importedRouteElevationSummary, setImportedRouteElevationSummary] =
     useState<RouteElevationSummary | null>(null);
+  const initialHikingTrailsVisibility = useMemo(
+    resolveInitialHikingTrailsVisibility,
+    [],
+  );
   const initialMapInformationVisibility = useMemo(
     resolveInitialMapInformationLayerVisibility,
     [],
   );
-  const mapRuntimeRef = useMapRuntime({
+  const {
+    runtimeRef: mapRuntimeRef,
+    status,
+    isFullscreen,
+  } = useMapRuntime({
     mapTargetRef,
     fullscreenElementRef: appRef,
     initialVisibility: {
-      hikingTrails: areHikingTrailsVisible,
+      hikingTrails: initialHikingTrailsVisibility,
       trailClosures: initialMapInformationVisibility.trailClosures,
       shootingDangerZones:
         initialMapInformationVisibility.shootingDangerZones,
       publicTransportStops:
         initialMapInformationVisibility.publicTransportStops,
     },
-    onLoadStatusChange: setStatus,
-    onFullscreenChange: setIsFullscreen,
   });
+  const {
+    baseMapStyle,
+    setBaseMapStyle,
+    areHikingTrailsVisible,
+    setAreHikingTrailsVisible,
+    locationStatus,
+    locationMessage,
+    locationButtonLabel,
+    fullscreenButtonLabel,
+    changeZoom,
+    toggleFullscreen,
+    locateUser,
+  } = useMapViewControls({
+    mapRuntimeRef,
+    fullscreenElementRef: appRef,
+    initialHikingTrailsVisibility,
+    isFullscreen,
+    t,
+  });
+
   /**
    * Clears both the temporary marker and the search control when another map
    * workflow takes priority over the selected location.
@@ -180,22 +150,6 @@ export default function App() {
       clearSearchResultMarker(marker);
     }
   }, [language, mapRuntimeRef]);
-
-  const handleRouteGeometryChanged = useCallback(() => {
-    // Elevations belong to the previous immutable geometry until the debounced
-    // profile request completes for the newly committed route state.
-    setRouteElevation(null);
-    setRouteElevationStatus('loading');
-  }, []);
-
-  const handleRoutePointerInteractionStarted = useCallback(() => {
-    const marker = mapRuntimeRef.current?.routeProfileMarker;
-
-    if (marker) {
-      updateRouteProfileMarker(marker, null);
-    }
-    setRouteMapHoverDistanceMeters(null);
-  }, [mapRuntimeRef]);
 
   const handleRouteCreationStarted = useCallback(() => {
     clearSelectedSearchResult();
@@ -223,6 +177,7 @@ export default function App() {
     routeMessage,
     routeMessageType,
     routeContextHint,
+    isRoutePointerInteractionActive,
     toggleRouteCreation,
     toggleRouteSnap,
     undoRoutePoint,
@@ -238,50 +193,25 @@ export default function App() {
     mapTargetRef,
     t,
     onRouteCreationStarted: handleRouteCreationStarted,
-    onRouteGeometryChanged: handleRouteGeometryChanged,
-    onPointerInteractionStarted: handleRoutePointerInteractionStarted,
   });
 
-  const activeRouteSegments = useMemo(
-    () =>
-      routeCoordinates.length >= 2
-        ? [routeCoordinates]
-        : importedRouteSegments,
-    [importedRouteSegments, routeCoordinates],
-  );
-  const routeProfilePositionIndex = useMemo(
-    () => createRouteProfilePositionIndex(activeRouteSegments),
-    [activeRouteSegments],
-  );
-  const routeDistanceMeters = useMemo(
-    () => calculateRouteSegmentsDistance(activeRouteSegments),
-    [activeRouteSegments],
-  );
-  const routeDurationMinutes = routeElevation
-    ? estimateHikingDuration(routeElevation.points)
-    : null;
-
-  /** Keeps the map marker synchronized with cumulative distance under the chart pointer. */
-  const handleProfileHoverDistanceChange = useCallback(
-    (distanceMeters: number | null) => {
-      const marker = mapRuntimeRef.current?.routeProfileMarker;
-
-      if (!marker) {
-        return;
-      }
-
-      updateRouteProfileMarker(
-        marker,
-        distanceMeters === null
-          ? null
-          : getRouteProfileCoordinate(
-              routeProfilePositionIndex,
-              distanceMeters,
-            ),
-      );
-    },
-    [mapRuntimeRef, routeProfilePositionIndex],
-  );
+  const {
+    activeRouteSegments,
+    distanceMeters: routeDistanceMeters,
+    elevationStatus: routeElevationStatus,
+    elevation: routeElevation,
+    durationMinutes: routeDurationMinutes,
+    mapHoverDistanceMeters: routeMapHoverDistanceMeters,
+    handleProfileHoverDistanceChange,
+  } = useItineraryMetrics({
+    mapRuntimeRef,
+    editableRouteCoordinates: routeCoordinates,
+    importedRouteSegments,
+    importedRouteElevationSummary,
+    isRoutePointerInteractionActive,
+    isPointerInteractionActive,
+    isRouteOperationPending,
+  });
 
   const {
     areTrailClosuresVisible,
@@ -301,6 +231,33 @@ export default function App() {
     isRouteCreationActive,
     onInformationSelected: clearSelectedSearchResult,
   });
+
+  /** Places a temporary marker and frames one official search result. */
+  const selectSearchResult = (result: LocationSearchResult) => {
+    const map = mapRuntimeRef.current?.map;
+    const marker = mapRuntimeRef.current?.searchResultMarker;
+
+    if (!map || !marker) {
+      return;
+    }
+
+    const coordinate = fromWgs84([
+      result.longitude,
+      result.latitude,
+    ]);
+
+    if (!containsCoordinate(MAP_EXTENT, coordinate)) {
+      return;
+    }
+
+    updateSearchResultMarker(marker, coordinate);
+
+    map.getView().animate({
+      center: coordinate,
+      zoom: LOCATION_SEARCH_ZOOM,
+      duration: 600,
+    });
+  };
 
   /** Opens the route-name dialog before any GPX content is generated. */
   const requestRouteExport = () => {
@@ -422,332 +379,12 @@ export default function App() {
     }
   };
 
-  const clearLocationMessageTimer = () => {
-    if (locationMessageTimerRef.current !== null) {
-      window.clearTimeout(locationMessageTimerRef.current);
-      locationMessageTimerRef.current = null;
-    }
-  };
-
-  const showTemporaryLocationMessage = (message: string) => {
-    clearLocationMessageTimer();
-    setLocationMessage(message);
-
-    locationMessageTimerRef.current = window.setTimeout(() => {
-      setLocationMessage('');
-      locationMessageTimerRef.current = null;
-    }, LOCATION_MESSAGE_DURATION_MS);
-  };
-
-  const changeZoom = (delta: number) => {
-    const view = mapRuntimeRef.current?.map.getView();
-    const currentZoom = view?.getZoom();
-
-    if (!view || currentZoom === undefined) {
-      return;
-    }
-
-    view.animate({
-      zoom: currentZoom + delta,
-      duration: 200,
-    });
-  };
-
-  const toggleFullscreen = async () => {
-    const app = appRef.current;
-
-    if (!app || !document.fullscreenEnabled) {
-      return;
-    }
-
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await app.requestFullscreen();
-      }
-    } catch (error) {
-      console.error('Unable to toggle fullscreen mode.', error);
-    }
-  };
-
-  const selectSearchResult = (result: LocationSearchResult) => {
-    const map = mapRuntimeRef.current?.map;
-    const marker = mapRuntimeRef.current?.searchResultMarker;
-
-    if (!map || !marker) {
-      return;
-    }
-
-    const coordinate = fromWgs84([
-      result.longitude,
-      result.latitude,
-    ]);
-
-    if (!containsCoordinate(MAP_EXTENT, coordinate)) {
-      return;
-    }
-
-    updateSearchResultMarker(marker, coordinate);
-
-    map.getView().animate({
-      center: coordinate,
-      zoom: LOCATION_SEARCH_ZOOM,
-      duration: 600,
-    });
-  };
-
-  const locateUser = () => {
-    const map = mapRuntimeRef.current?.map;
-    const marker = mapRuntimeRef.current?.userLocationMarker;
-
-    if (!map || !marker) {
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      setLocationStatus('error');
-      showTemporaryLocationMessage(
-        t('geolocation.unavailable'),
-      );
-      return;
-    }
-
-    clearLocationMessageTimer();
-    setLocationMessage(t('geolocation.searching'));
-    setLocationStatus('locating');
-
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        const coordinate = fromWgs84([
-          coords.longitude,
-          coords.latitude,
-        ]);
-
-        if (!containsCoordinate(MAP_EXTENT, coordinate)) {
-          setLocationStatus('error');
-          showTemporaryLocationMessage(
-            t('geolocation.outside'),
-          );
-          return;
-        }
-
-        updateUserLocationMarker(marker, coordinate);
-
-        const view = map.getView();
-        const currentZoom = view.getZoom() ?? USER_LOCATION_ZOOM;
-
-        view.animate({
-          center: coordinate,
-          zoom: Math.max(currentZoom, USER_LOCATION_ZOOM),
-          duration: 600,
-        });
-
-        clearLocationMessageTimer();
-        setLocationMessage('');
-        setLocationStatus('located');
-      },
-      (error) => {
-        const messages: Record<number, string> = {
-          [GeolocationPositionError.PERMISSION_DENIED]:
-            t('geolocation.permissionDenied'),
-          [GeolocationPositionError.POSITION_UNAVAILABLE]:
-            t('geolocation.positionUnavailable'),
-          [GeolocationPositionError.TIMEOUT]:
-            t('geolocation.timeout'),
-        };
-
-        setLocationStatus('error');
-        showTemporaryLocationMessage(
-          messages[error.code] ??
-            t('geolocation.error'),
-        );
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10_000,
-        maximumAge: 30_000,
-      },
-    );
-  };
-
   useEffect(
     () => () => {
-      clearLocationMessageTimer();
       routeImportSessionRef.current += 1;
     },
     [],
   );
-
-  useEffect(() => {
-    mapRuntimeRef.current?.setBaseMapStyle(baseMapStyle);
-  }, [baseMapStyle]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        HIKING_TRAILS_VISIBILITY_STORAGE_KEY,
-        String(areHikingTrailsVisible),
-      );
-    } catch {
-      // Layer visibility remains functional when browser storage is unavailable.
-    }
-  }, [areHikingTrailsVisible]);
-
-  useEffect(() => {
-    mapRuntimeRef.current?.setHikingTrailsVisible(
-      areHikingTrailsVisible,
-    );
-  }, [areHikingTrailsVisible]);
-
-  /** Clears any stale route/profile hover position when geometry changes. */
-  useEffect(() => {
-    const marker = mapRuntimeRef.current?.routeProfileMarker;
-
-    if (marker) {
-      updateRouteProfileMarker(marker, null);
-    }
-    setRouteMapHoverDistanceMeters(null);
-  }, [routeProfilePositionIndex]);
-
-  /**
-   * Mirrors map pointer movement onto the route and, when open, the elevation
-   * profile. The nearest route coordinate is found in LV95 with a tolerance
-   * derived from screen pixels so the interaction remains stable at every zoom.
-   */
-  useEffect(() => {
-    const map = mapRuntimeRef.current?.map;
-    const marker = mapRuntimeRef.current?.routeProfileMarker;
-
-    if (!map || !marker || routeProfilePositionIndex.segments.length === 0) {
-      return;
-    }
-
-    const clearRouteMapHover = () => {
-      updateRouteProfileMarker(marker, null);
-      setRouteMapHoverDistanceMeters(null);
-    };
-
-    const handleRoutePointerMove = (event: MapBrowserEvent) => {
-      const pointerType =
-        (event.originalEvent as PointerEvent).pointerType;
-
-      if (
-        (pointerType && pointerType !== 'mouse' && pointerType !== 'pen') ||
-        isPointerInteractionActive() ||
-        isRouteOperationPending
-      ) {
-        clearRouteMapHover();
-        return;
-      }
-
-      const resolution = map.getView().getResolution();
-
-      if (!resolution) {
-        clearRouteMapHover();
-        return;
-      }
-
-      const position = getClosestRouteProfilePosition(
-        routeProfilePositionIndex,
-        event.coordinate,
-        resolution * ROUTE_PROFILE_HOVER_TOLERANCE_PX,
-      );
-
-      updateRouteProfileMarker(marker, position?.coordinate ?? null);
-      setRouteMapHoverDistanceMeters(position?.distanceMeters ?? null);
-    };
-
-    const mapTarget = map.getTargetElement();
-    map.on('pointermove', handleRoutePointerMove);
-    mapTarget.addEventListener('pointerleave', clearRouteMapHover);
-
-    return () => {
-      map.un('pointermove', handleRoutePointerMove);
-      mapTarget.removeEventListener('pointerleave', clearRouteMapHover);
-      clearRouteMapHover();
-    };
-  }, [
-    isPointerInteractionActive,
-    isRouteOperationPending,
-    mapRuntimeRef,
-    routeProfilePositionIndex,
-  ]);
-
-  /**
-   * Retrieves a fresh elevation profile after route history settles. Previous
-   * requests are aborted so rapid undo/redo actions cannot publish stale data.
-   */
-  useEffect(() => {
-    if (activeRouteSegments.length === 0 || routeDistanceMeters <= 0) {
-      setRouteElevation(null);
-      setRouteElevationStatus('loading');
-      return;
-    }
-
-    if (
-      routeCoordinates.length < 2 &&
-      importedRouteElevationSummary !== null
-    ) {
-      setRouteElevation(importedRouteElevationSummary);
-      setRouteElevationStatus('ready');
-      return;
-    }
-
-    const abortController = new AbortController();
-    setRouteElevation(null);
-    setRouteElevationStatus('loading');
-
-    const requestTimer = window.setTimeout(() => {
-      const elevationRequest =
-        activeRouteSegments.length === 1
-          ? fetchRouteElevationSummary(
-              activeRouteSegments[0],
-              routeDistanceMeters,
-              abortController.signal,
-            )
-          : fetchRouteSegmentsElevationSummary(
-              activeRouteSegments,
-              abortController.signal,
-            );
-
-      void elevationRequest
-        .then((summary) => {
-          if (!abortController.signal.aborted) {
-            setRouteElevation(summary);
-            setRouteElevationStatus('ready');
-          }
-        })
-        .catch((error: unknown) => {
-          if (abortController.signal.aborted) {
-            return;
-          }
-
-          console.error('Unable to load the route elevation profile.', error);
-          setRouteElevation(null);
-          setRouteElevationStatus('error');
-        });
-    }, ELEVATION_REQUEST_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(requestTimer);
-      abortController.abort();
-    };
-  }, [
-    activeRouteSegments,
-    importedRouteElevationSummary,
-    routeCoordinates.length,
-    routeDistanceMeters,
-  ]);
-
-  const locationButtonLabel =
-    locationStatus === 'located'
-      ? t('geolocation.recenter')
-      : t('geolocation.show');
-
-  const fullscreenButtonLabel = isFullscreen
-    ? t('map.fullscreenExit')
-    : t('map.fullscreenEnter');
 
   return (
     <main

@@ -1,10 +1,10 @@
 /**
  * Business context: bridges React's component lifecycle with the imperative
  * OpenLayers runtime. It creates the single Via Helvetica map after the target
- * element mounts, synchronizes browser fullscreen state, and guarantees that
- * map listeners and the DOM target are released on unmount.
+ * element mounts, publishes its startup and fullscreen state, and guarantees
+ * that listeners and the DOM target are released on unmount.
  */
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   createMapRuntime,
   type MapLoadStatus,
@@ -20,20 +20,30 @@ export interface UseMapRuntimeOptions {
   fullscreenElementRef: RefObject<HTMLElement | null>;
   /** Persisted overlay choices captured when the runtime is first created. */
   initialVisibility: MapRuntimeVisibility;
-  /** Receives initial base-map loading changes. */
-  onLoadStatusChange: (status: MapLoadStatus) => void;
-  /** Keeps the React fullscreen button synchronized with browser events. */
-  onFullscreenChange: (isFullscreen: boolean) => void;
+}
+
+/** Runtime resources and browser state exposed to the application shell. */
+export interface MapRuntimeController {
+  /** Stable ref containing the runtime after the map target mounts. */
+  runtimeRef: RefObject<MapRuntime | null>;
+  /** Blocking startup state of the initial official base map. */
+  status: MapLoadStatus;
+  /** Whether the Via Helvetica root currently owns browser fullscreen. */
+  isFullscreen: boolean;
 }
 
 /**
  * Owns the OpenLayers runtime for the lifetime of one mounted application.
  *
- * @param options - DOM refs, initial visibility, and React state callbacks.
- * @returns A stable ref containing the runtime after the map target mounts.
+ * @param options - DOM refs and persisted initial layer visibility.
+ * @returns Runtime resources plus startup and fullscreen render state.
  */
-export function useMapRuntime(options: UseMapRuntimeOptions) {
+export function useMapRuntime(
+  options: UseMapRuntimeOptions,
+): MapRuntimeController {
   const runtimeRef = useRef<MapRuntime | null>(null);
+  const [status, setStatus] = useState<MapLoadStatus>('loading');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   // Later React renders carry updated visibility state, but recreating the map
   // would discard its view and interactions. Only construction options are kept.
   const initialOptionsRef = useRef(options);
@@ -49,12 +59,12 @@ export function useMapRuntime(options: UseMapRuntimeOptions) {
     const runtime = createMapRuntime({
       target,
       visibility: initialOptions.initialVisibility,
-      onLoadStatusChange: initialOptions.onLoadStatusChange,
+      onLoadStatusChange: setStatus,
     });
     runtimeRef.current = runtime;
 
     const handleFullscreenChange = () => {
-      initialOptions.onFullscreenChange(
+      setIsFullscreen(
         document.fullscreenElement ===
           initialOptions.fullscreenElementRef.current,
       );
@@ -79,5 +89,9 @@ export function useMapRuntime(options: UseMapRuntimeOptions) {
     };
   }, []);
 
-  return runtimeRef;
+  return {
+    runtimeRef,
+    status,
+    isFullscreen,
+  };
 }

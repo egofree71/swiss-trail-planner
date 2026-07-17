@@ -69,6 +69,9 @@ const SWISS_HIKING_TIME_COEFFICIENTS = [
  */
 const SWISS_HIKING_TIME_MAX_SLOPE_PERCENT = 40;
 
+/** Availability state for altitude-dependent itinerary figures. */
+export type RouteElevationStatus = 'loading' | 'ready' | 'error';
+
 /** One ordered elevation sample along the route. */
 export interface RouteElevationPoint {
   /** Cumulative distance from the start of the route in metres. */

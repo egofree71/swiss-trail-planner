@@ -137,10 +137,15 @@ current-itinerary metrics pipeline.
 The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
 ordered layers, displays, and markers as one disposable unit; the hook binds
-that runtime to React mount, unmount, and browser fullscreen events. Optional
-closure, military-danger, and public-transport workflows are coordinated by
+that runtime to React mount, unmount, startup status, and browser fullscreen
+events. Background selection, hiking-overlay persistence, zoom, fullscreen
+requests, and explicit geolocation are coordinated by
+`src/map/useMapViewControls.ts`. Optional closure, military-danger, and
+public-transport workflows are coordinated by
 `src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
 viewport loading, inspection priority, popup state, and request cancellation.
+`src/metrics/useItineraryMetrics.ts` owns current-itinerary distance, elevation
+request identity, hiking time, and bidirectional map/profile exploration.
 `App.tsx` remains the application composition point and accesses the runtime
 through one stable ref. It connects the focused hooks instead of owning their
 imperative map sessions, route history, or provider-request lifecycles.
@@ -173,9 +178,9 @@ Browser
    │      └── browser Fullscreen API
    │
    ├── App.tsx
-   │      ├── composes map, search, route, import, and metrics capabilities
-   │      ├── owns single-current-itinerary GPX state and geolocation UI
-   │      └── refreshes elevation statistics after editable-route or imported-GPX changes
+   │      ├── composes map, search, route, import, metrics, and popup capabilities
+   │      ├── owns the remaining single-current-itinerary GPX import state
+   │      └── wires focused controllers to compact presentational components
    │
    ├── useEditableRoute + useRouteInteractions hooks
    │      ├── own immutable history, snap mode, undo/redo, loop, and routing status
@@ -184,8 +189,18 @@ Browser
    │
    ├── mapRuntime factory + useMapRuntime hook
    │      ├── create and dispose the single OpenLayers map and ordered layers
-   │      ├── expose shared displays and markers through one stable runtime ref
+   │      ├── expose shared displays, startup status, and fullscreen state
    │      └── synchronize browser fullscreen changes with map sizing
+   │
+   ├── useMapViewControls hook
+   │      ├── own base-map and rendered hiking-overlay choices
+   │      ├── persist hiking visibility and animate relative zoom changes
+   │      └── request fullscreen and one-shot browser geolocation
+   │
+   ├── useItineraryMetrics hook
+   │      ├── select editable or imported geometry as the current itinerary
+   │      ├── bind elevation results to exact immutable segment collections
+   │      └── synchronize map-route and elevation-profile pointer exploration
    │
    ├── useMapInformationLayers hook
    │      ├── persist closure, danger-zone, and stop visibility choices
@@ -513,8 +528,9 @@ applied to route figures and elevation axes.
 
 ## 9. Browser geolocation
 
-The location control uses `navigator.geolocation.getCurrentPosition()` only
-after an explicit user action.
+`src/map/useMapViewControls.ts` calls
+`navigator.geolocation.getCurrentPosition()` only after an explicit user
+action.
 
 The browser may display a permission prompt. The application does not request
 the position during startup and does not use continuous tracking.
@@ -528,13 +544,14 @@ supported, while a deployed version must use HTTPS.
 
 ## 10. Fullscreen mode
 
-The fullscreen control calls `requestFullscreen()` on the root `.app` element,
+`src/map/useMapViewControls.ts` calls `requestFullscreen()` on the root `.app`
+element,
 so the map, search field, controls, and temporary messages remain available.
 
 The browser owns the actual fullscreen lifecycle. Pressing `Escape` exits the
 mode without application-specific keyboard handling. A `fullscreenchange`
-listener keeps the React button state synchronized even when fullscreen is
-left through the browser UI or the Escape key.
+listener in `useMapRuntime` keeps the React button state synchronized even when
+fullscreen is left through the browser UI or the Escape key.
 
 Entering or leaving fullscreen changes the viewport dimensions. The listener
 therefore schedules `map.updateSize()` on the next animation frame so
@@ -679,8 +696,11 @@ bleed through the toolbar. The route toggle displays a small animated spinner
 during asynchronous network work, including recalculation after a drag or loop
 closure.
 
-`src/metrics/routeMetrics.ts` calculates horizontal distance locally from the
-flattened LV95 route geometry. For altitude-dependent figures, it sends the
+`src/metrics/useItineraryMetrics.ts` selects the editable route or independent
+imported GPX segments as the single current itinerary, calculates distance, and
+coordinates the profile lifecycle. Its pure and provider-facing calculations
+remain in `src/metrics/routeMetrics.ts`, which calculates horizontal distance
+locally from LV95 geometry. For altitude-dependent figures, it sends the
 native route coordinates directly in a bounded POST request to GeoAdmin's
 elevation-profile service. The service applies a small moving-average offset
 before the client accumulates positive and negative elevation changes. The same ordered
@@ -706,8 +726,8 @@ vertical range with rounded axis bounds so small local variations are not
 visually exaggerated. Larger profiles retain automatic scaling with a small
 margin around their extrema. Pointer movement interpolates the profile distance
 and altitude, draws a vertical chart guide, and publishes only cumulative
-distance to the root application. A cumulative distance selected by hovering
-the map route drives the same guide and header values while the profile is open.
+distance to `useItineraryMetrics`. A cumulative distance selected by the hook's
+map listener drives the same guide and header values while the profile is open.
 
 Reversal uses `reverseRouteState()` to reverse stored geometry without issuing
 another routing request. Open routes reverse waypoint order normally. Closed
@@ -867,7 +887,8 @@ via-helvetica/
 │   ├── import/
 │   │   └── gpx.ts
 │   ├── metrics/
-│   │   └── routeMetrics.ts
+│   │   ├── routeMetrics.ts
+│   │   └── useItineraryMetrics.ts
 │   ├── i18n/
 │   │   ├── I18nContext.tsx
 │   │   └── translations.ts
@@ -886,6 +907,7 @@ via-helvetica/
 │   │   ├── useEditableRoute.ts
 │   │   ├── useMapInformationLayers.ts
 │   │   ├── useMapRuntime.ts
+│   │   ├── useMapViewControls.ts
 │   │   ├── useRouteInteractions.ts
 │   │   └── userLocation.ts
 │   ├── network/
@@ -917,15 +939,16 @@ via-helvetica/
 
 Composes application capabilities through one shared `MapRuntime` ref.
 
-It handles geolocation, single-current-itinerary GPX loading and framing, search
-selection, route export, and the shared distance/elevation/profile pipeline.
-Native map construction, layer ordering, shared display creation, fullscreen
-resize synchronization, and OpenLayers disposal are delegated to the map runtime
-modules. Information-layer visibility, viewport loading, selection, popups, and
-request cancellation are delegated to `src/map/useMapInformationLayers.ts`.
-Editable route state, controls, routing sessions, and pointer interactions are
-delegated to `useEditableRoute` and `useRouteInteractions`. App aborts only its
-remaining import and geolocation-message work when React unmounts.
+It retains the current imported-GPX geometry and framing workflow, temporary
+location-search selection, and the GPX export dialog, then wires focused
+controllers to presentational components. Native map construction and browser
+fullscreen state are delegated to `useMapRuntime`; background, hiking-overlay,
+zoom, fullscreen requests, and geolocation are delegated to
+`useMapViewControls`; information overlays are delegated to
+`useMapInformationLayers`; editable route state and gestures are delegated to
+`useEditableRoute` and `useRouteInteractions`; current-itinerary statistics and
+profile exploration are delegated to `useItineraryMetrics`. App invalidates only
+an unfinished file import when React unmounts.
 
 ### `src/map/useEditableRoute.ts`
 
@@ -956,11 +979,19 @@ load reporting, and DOM-target cleanup. It contains no React state.
 ### `src/map/useMapRuntime.ts`
 
 Bridges the imperative map runtime with React. It creates the runtime once after
-the map target mounts, exposes it through one stable ref, synchronizes browser
-fullscreen changes, requests an OpenLayers size refresh after viewport changes,
-and disposes the runtime on unmount. Later layer-visibility changes are applied
-by focused feature hooks or the small hiking-overlay effect without recreating
-the map.
+the map target mounts, exposes it through one stable ref, publishes initial
+base-map loading state, synchronizes browser fullscreen state, requests an
+OpenLayers size refresh after viewport changes, and disposes the runtime on
+unmount. Later layer changes are applied by focused hooks without recreating the
+map.
+
+### `src/map/useMapViewControls.ts`
+
+Owns map-view controls that do not mutate itinerary state. It stores the selected
+base map, restores and persists rendered hiking-overlay visibility, applies both
+choices through `MapRuntime`, animates relative zoom changes, requests fullscreen
+for the application root, and handles explicit one-shot geolocation with bounded
+LV95 validation, marker updates, and temporary localized feedback.
 
 ### `src/map/useMapInformationLayers.ts`
 
@@ -986,8 +1017,8 @@ ignored consistently instead of being reported as an application failure.
 Renders one floating Layers button and a temporary menu with two sections. Base
 maps are mutually exclusive, while information overlays are independently
 switchable. The component does not know about OpenLayers; the application shell
-supplies controlled values, while the information-layer hook and the small
-hiking-overlay effect apply them through the shared map runtime. Outside pointer
+supplies controlled values, while the map-view and information-layer hooks
+apply them through the shared map runtime. Outside pointer
 presses and Escape close
 the menu. It owns independent switches for rendered hiking trails, hiking
 closures, military danger zones, and public-transport stops without adding
@@ -1163,6 +1194,17 @@ Wanderwege 15th-degree hiking-time model to each sampled section. The same
 samples feed the profile chart. Requests are
 abortable so stale route histories cannot update the UI.
 
+### `src/metrics/useItineraryMetrics.ts`
+
+Owns the React-facing metrics pipeline shared by editable and imported
+itineraries. It selects the current segment collection, calculates immediate
+distance, reuses complete embedded GPX elevations, debounces and aborts GeoAdmin
+profile requests, and binds every completed response to the exact immutable
+segment-array identity that requested it. It also owns the transient route
+profile marker and the bidirectional cumulative-distance link between map and
+chart. Route-drag render state clears hover feedback without coupling this hook
+to route mutation logic.
+
 ### `src/export/gpx.ts`
 
 Simplifies every normal or closing route section independently with iterative
@@ -1327,12 +1369,13 @@ messages, and OpenLayers control placement.
 2. The language provider updates document metadata and exposes localized strings.
 3. `useMapRuntime` creates one disposable runtime through `mapRuntime.ts`;
    the runtime builds the native LV95 OpenLayers view, ordered tile and vector
-   layers, editable-route display, imported-route display, and transient markers.
+   layers, editable-route display, imported-route display, and transient markers,
+   then publishes base-map startup and browser-fullscreen state.
 4. The default color base map begins loading from the native `2056` WMTS
    matrix set at `wmts.geo.admin.ch`.
-5. The Layers menu changes the base-map source or updates controlled overlay
-   visibility. `useMapInformationLayers` persists and applies the three
-   inspectable overlay choices through the existing runtime.
+5. The Layers menu changes controlled layer choices. `useMapViewControls`
+   applies the base map and persisted rendered hiking-overlay preference, while
+   `useMapInformationLayers` persists and applies the three inspectable overlays.
 6. The rendered hiking overlay is enabled by default unless a stored preference
    hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
@@ -1412,16 +1455,17 @@ messages, and OpenLayers control placement.
     arrows, indexed waypoint features, and A/B endpoint markers. Reversal swaps
     open-route markers and arrow direction; a closed route keeps one combined
     marker at the same physical start while its arrows reverse.
-35. Distance is recalculated locally from the flattened route geometry, including
-    the optional closing section.
+35. `useItineraryMetrics` selects the editable geometry or imported GPX segments
+    and recalculates their local distance without inventing links across gaps.
 36. After a short debounce, an abortable profile request refreshes ascent,
-    descent, estimated walking time, and the reusable chart samples.
+    descent, estimated walking time, and reusable chart samples; the result is
+    accepted only for the exact segment collection that requested it.
 37. The profile button reveals or hides the SVG chart without another request.
-38. Moving a pointer across the displayed itinerary finds the nearest indexed
-    position and shows a transient circle on the map. When the profile is open,
-    the same cumulative distance updates its guide, altitude, and distance.
-39. Moving a pointer across the chart performs the inverse lookup and updates
-    the same transient marker above the corresponding map position.
+38. The metrics hook maps pointer movement across the displayed itinerary to a
+    cumulative distance and transient circle. When the profile is open, the same
+    distance updates its guide, altitude, and distance.
+39. Moving across the chart performs the inverse lookup through the same hook and
+    updates the transient marker above the corresponding map position.
 40. Undo and redo exchange complete stored route states without routing again.
 41. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
@@ -1436,8 +1480,8 @@ messages, and OpenLayers control placement.
 46. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-47. The fullscreen button requests fullscreen for the root application element.
-48. A `fullscreenchange` event synchronizes UI state and resizes OpenLayers.
+47. `useMapViewControls` requests fullscreen for the root application element.
+48. `useMapRuntime` publishes `fullscreenchange` state and resizes OpenLayers.
 49. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Location search and

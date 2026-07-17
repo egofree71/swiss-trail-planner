@@ -53,8 +53,6 @@ export interface UseRouteInteractionsOptions {
   isOperationPending: () => boolean;
   /** Returns the latest immutable route state, never an OpenLayers preview. */
   getCurrentRouteState: () => RouteState;
-  /** Clears shared route/profile hover state before a drag preview starts. */
-  onPointerInteractionStarted: () => void;
   /** Adds one endpoint from the current route end. */
   onAppendEndpoint: (
     expectedState: RouteState,
@@ -83,7 +81,9 @@ export interface UseRouteInteractionsOptions {
 export interface RouteInteractionsController {
   /** Current waypoint/section contextual guidance, or null outside a target. */
   routeContextHint: RouteContextHint | null;
-  /** Returns whether a direct route drag is currently in progress. */
+  /** React render state indicating that a route drag currently owns the pointer. */
+  isInteractionActive: boolean;
+  /** Synchronous accessor used by imperative OpenLayers pointer listeners. */
   isPointerInteractionActive: () => boolean;
 }
 
@@ -151,6 +151,7 @@ export function useRouteInteractions(
     useRef<RouteInteractionRelease | null>(null);
   const [routeContextHint, setRouteContextHint] =
     useState<RouteContextHint | null>(null);
+  const [isInteractionActive, setIsInteractionActive] = useState(false);
 
   const restoreCommittedRouteDisplay = useCallback(() => {
     const display = options.mapRuntimeRef.current?.routeDisplay;
@@ -184,8 +185,6 @@ export function useRouteInteractions(
         options.getCurrentRouteState().steps.length > 0,
       getRouteState: options.getCurrentRouteState,
       onStart: (target: RouteDragTarget) => {
-        options.onPointerInteractionStarted();
-
         const expectedState = options.getCurrentRouteState();
         const { steps, closure } = expectedState;
 
@@ -202,6 +201,7 @@ export function useRouteInteractions(
             startCoordinate: [...step.waypoint],
             expectedState,
           };
+          setIsInteractionActive(true);
           updateRouteWaypointDragPreview(
             display,
             steps,
@@ -232,6 +232,7 @@ export function useRouteInteractions(
           startCoordinate: [...target.coordinate],
           expectedState,
         };
+        setIsInteractionActive(true);
         updateRouteInsertionDragPreview(
           display,
           steps,
@@ -315,6 +316,7 @@ export function useRouteInteractions(
       onEnd: (target: RouteDragTarget, coordinate, didDrag, pixel) => {
         const dragState = routeDragStateRef.current;
         routeDragStateRef.current = null;
+        setIsInteractionActive(false);
         setRouteContextHint(null);
 
         // Waypoint clicks are deletions, while every genuine drag owns its
@@ -397,6 +399,7 @@ export function useRouteInteractions(
       clearRouteDragCursor(map);
       routeDragStateRef.current = null;
       routeInteractionReleaseRef.current = null;
+      setIsInteractionActive(false);
       setRouteContextHint(null);
       restoreCommittedRouteDisplay();
     };
@@ -410,7 +413,6 @@ export function useRouteInteractions(
     options.onDeleteWaypoint,
     options.onInsertWaypoint,
     options.onMoveWaypoint,
-    options.onPointerInteractionStarted,
     restoreCommittedRouteDisplay,
   ]);
 
@@ -481,6 +483,7 @@ export function useRouteInteractions(
 
   return {
     routeContextHint,
+    isInteractionActive,
     isPointerInteractionActive,
   };
 }

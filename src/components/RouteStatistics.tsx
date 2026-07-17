@@ -5,11 +5,11 @@
  */
 import { useId, useMemo, useState } from 'react';
 import { useI18n } from '../i18n/I18nContext';
-import type { RouteElevationPoint } from '../metrics/routeMetrics';
+import type {
+  RouteElevationPoint,
+  RouteElevationStatus,
+} from '../metrics/routeMetrics';
 import RouteElevationProfile from './RouteElevationProfile';
-
-/** Availability state for altitude-dependent route figures. */
-export type RouteElevationStatus = 'loading' | 'ready' | 'error';
 
 /** Values displayed by the route statistics bar. */
 interface RouteStatisticsProps {
