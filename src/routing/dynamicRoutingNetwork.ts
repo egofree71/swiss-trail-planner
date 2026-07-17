@@ -181,6 +181,8 @@ function cellsAlongSegment(
  * box around a first waypoint. Since the snap distance is much smaller than a
  * routing cell, this normally loads one cell, two near an edge, or four near a
  * corner instead of a fixed 3 x 3 neighbourhood.
+ * @param coordinate - First-waypoint position in EPSG:2056 metres.
+ * @returns Unique routing-cell keys that may contain a valid snap candidate.
  */
 export function createLocalCellKeys(coordinate: Coordinate): Set<CellKey> {
   const minX = coordinate[0] - MAX_SNAP_DISTANCE;
