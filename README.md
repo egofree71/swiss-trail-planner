@@ -13,6 +13,7 @@ time.
 - [Data sources and limitations](#data-sources-and-limitations)
 - [Documentation](#documentation)
 - [Regression tests](#regression-tests)
+- [Routing performance benchmark](#routing-performance-benchmark)
 - [Production build and deployment](#production-build-and-deployment)
 - [License](#license)
 
@@ -137,6 +138,24 @@ npm test
 During development, use `npm run test:watch` to rerun affected tests after each
 change. GitHub Actions runs the complete suite before building and deploying the
 site.
+
+## Routing performance benchmark
+
+A separate local browser benchmark can derive deterministic synthetic clicks
+from a GPX trace, warm the swissTLM3D raw-cell cache, and then measure graph
+cache lookup, raw-cell access, feature merging, graph construction, endpoint
+snapping, A*, route reconstruction, and route-step creation without loading new
+cells:
+
+```bash
+npm run benchmark:routing
+```
+
+The benchmark lives outside `src/` and `public/`, so it is not part of the
+published application bundle. Fixed intervals start at 50 metres for short-route
+tests, while adaptive and seeded-irregular strategies support longer and more
+realistic scenarios. See `benchmarks/routing/README.md` for the measurement and
+cache modes.
 
 ## Production build and deployment
 

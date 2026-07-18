@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "benchmark:routing": "vite --config benchmarks/routing/vite.config.ts",
+    "benchmark:routing:build": "tsc -p benchmarks/routing/tsconfig.json --noEmit && vite build --config benchmarks/routing/vite.config.ts"
   },
   "dependencies": {
     "ol": "^10.9.0",

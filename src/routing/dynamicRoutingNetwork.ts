@@ -11,6 +11,7 @@ import {
   NoWalkableNetworkError,
   RoutingNetwork,
   type RoutedNetworkPath,
+  type RoutingNetworkPhaseTimings,
 } from './networkRouter';
 import {
   fetchSwissTlmNetworkData,
@@ -71,6 +72,63 @@ interface PendingCell {
   promise: Promise<LoadedCell>;
   /** Signal that owns the request, used to reject reuse after cancellation. */
   signal: AbortSignal;
+}
+
+/** Session cache sizes exposed for diagnostics and the local routing benchmark. */
+export interface DynamicRoutingCacheStats {
+  /** Raw swissTLM3D cells retained for the current page session. */
+  loadedCells: number;
+  /** Cell requests currently in flight. */
+  pendingCells: number;
+  /** Exact corridor graphs retained by the small LRU cache. */
+  cachedNetworks: number;
+}
+
+
+/** Detailed local timings collected only by the routing benchmark. */
+export interface DynamicRoutingPhaseTimings extends RoutingNetworkPhaseTimings {
+  /** Time spent calculating the exact graph-cache key and searching the LRU. */
+  graphCacheLookupDurationMs: number;
+  /** Time spent resolving already-cached raw cells into the requested corridor. */
+  rawCellAccessDurationMs: number;
+  /** Time spent deduplicating and merging road and hiking features from cells. */
+  featureMergeDurationMs: number;
+  /** Time spent constructing RoutingNetwork nodes, edges, and spatial indexes. */
+  graphBuildDurationMs: number;
+  /** Number of exact corridor graphs reused from the session LRU. */
+  graphCacheHits: number;
+  /** Number of exact corridor graphs that had to be constructed. */
+  graphCacheMisses: number;
+  /** Number of narrow or retry corridor route attempts. */
+  routeAttempts: number;
+  /** Whether the wider fallback corridor was required. */
+  retryUsed: boolean;
+}
+
+/** Routed result together with phase timings for one benchmarked section. */
+export interface DiagnosedDynamicRoutingResult {
+  /** Routed geometry, or `null` when both corridors fail. */
+  path: RoutedNetworkPath | null;
+  /** Aggregated timings across the initial and optional retry corridor. */
+  timings: DynamicRoutingPhaseTimings;
+}
+
+/** Creates an empty accumulator so retry phases can be added consistently. */
+function createRoutingPhaseTimings(): DynamicRoutingPhaseTimings {
+  return {
+    graphCacheLookupDurationMs: 0,
+    rawCellAccessDurationMs: 0,
+    featureMergeDurationMs: 0,
+    graphBuildDurationMs: 0,
+    startSnapDurationMs: 0,
+    endSnapDurationMs: 0,
+    aStarDurationMs: 0,
+    routeReconstructionDurationMs: 0,
+    graphCacheHits: 0,
+    graphCacheMisses: 0,
+    routeAttempts: 0,
+    retryUsed: false,
+  };
 }
 
 /**
@@ -302,6 +360,24 @@ export class DynamicRoutingNetworkLoader {
   private readonly networkCache: CachedNetwork[] = [];
 
   /**
+   * Clears only derived corridor graphs while preserving downloaded raw cells.
+   * This is useful for deterministic diagnostics that must measure graph
+   * reconstruction without repeating GeoAdmin traffic.
+   */
+  clearNetworkCache(): void {
+    this.networkCache.length = 0;
+  }
+
+  /** Returns current session cache sizes without exposing mutable cache entries. */
+  getCacheStats(): DynamicRoutingCacheStats {
+    return {
+      loadedCells: this.loadedCells.size,
+      pendingCells: this.pendingCells.size,
+      cachedNetworks: this.networkCache.length,
+    };
+  }
+
+  /**
    * Loads a neighbourhood around a point and snaps it to the local network.
    * @param coordinate - User-selected coordinate in EPSG:2056.
    * @param signal - Abort signal owned by the route-creation session.
@@ -344,6 +420,36 @@ export class DynamicRoutingNetworkLoader {
     endCoordinate: Coordinate,
     signal: AbortSignal,
   ): Promise<RoutedNetworkPath | null> {
+    return this.routeInternal(startCoordinate, endCoordinate, signal);
+  }
+
+  /**
+   * Routes one section while exposing CPU phase timings to the local benchmark.
+   * The normal application deliberately calls `route()` and pays no diagnostic
+   * clock-reading overhead.
+   */
+  async routeWithDiagnostics(
+    startCoordinate: Coordinate,
+    endCoordinate: Coordinate,
+    signal: AbortSignal,
+  ): Promise<DiagnosedDynamicRoutingResult> {
+    const timings = createRoutingPhaseTimings();
+    const path = await this.routeInternal(
+      startCoordinate,
+      endCoordinate,
+      signal,
+      timings,
+    );
+    return { path, timings };
+  }
+
+  /** Executes the shared narrow-corridor and optional wider-retry workflow. */
+  private async routeInternal(
+    startCoordinate: Coordinate,
+    endCoordinate: Coordinate,
+    signal: AbortSignal,
+    timings?: DynamicRoutingPhaseTimings,
+  ): Promise<RoutedNetworkPath | null> {
     const initialCellKeys = createCorridorCellKeys(
       startCoordinate,
       endCoordinate,
@@ -351,9 +457,22 @@ export class DynamicRoutingNetworkLoader {
     );
     let initialPath: RoutedNetworkPath | null = null;
 
+    if (timings) {
+      timings.routeAttempts += 1;
+    }
+
     try {
-      const initialNetwork = await this.getNetwork(initialCellKeys, signal);
-      initialPath = initialNetwork.route(startCoordinate, endCoordinate);
+      const initialNetwork = await this.getNetwork(
+        initialCellKeys,
+        signal,
+        timings,
+      );
+
+      initialPath = initialNetwork.route(
+        startCoordinate,
+        endCoordinate,
+        timings,
+      );
     } catch (error) {
       // A narrow corridor can be entirely outside swissTLM3D coverage. The
       // wider retry may still reach a usable network near a national border.
@@ -368,15 +487,28 @@ export class DynamicRoutingNetworkLoader {
 
     // A wider retry allows realistic detours around barriers without paying
     // that loading cost for every segment.
+    if (timings) {
+      timings.retryUsed = true;
+    }
+
     const retryCellKeys = createCorridorCellKeys(
       startCoordinate,
       endCoordinate,
       ROUTE_RETRY_CELL_RADIUS,
     );
 
+    if (timings) {
+      timings.routeAttempts += 1;
+    }
+
     try {
-      const retryNetwork = await this.getNetwork(retryCellKeys, signal);
-      return retryNetwork.route(startCoordinate, endCoordinate);
+      const retryNetwork = await this.getNetwork(
+        retryCellKeys,
+        signal,
+        timings,
+      );
+
+      return retryNetwork.route(startCoordinate, endCoordinate, timings);
     } catch (error) {
       // No walkable data after both attempts is a normal coverage miss. The
       // route editor can preserve continuity with a straight fallback segment.
@@ -395,26 +527,49 @@ export class DynamicRoutingNetworkLoader {
   private async getNetwork(
     cellKeys: Set<CellKey>,
     signal: AbortSignal,
+    timings?: DynamicRoutingPhaseTimings,
   ): Promise<RoutingNetwork> {
     if (cellKeys.size > MAX_CELLS_PER_OPERATION) {
       throw new RoutingAreaTooLargeError();
     }
 
     // Sorting makes the cache key independent of insertion order.
+    const cacheLookupStartedAt = timings ? performance.now() : 0;
     const cacheKey = [...cellKeys].sort().join('|');
     const cachedNetwork = this.networkCache.find(
       (entry) => entry.key === cacheKey,
     );
 
+    if (timings) {
+      timings.graphCacheLookupDurationMs +=
+        performance.now() - cacheLookupStartedAt;
+    }
+
     if (cachedNetwork) {
+      if (timings) {
+        timings.graphCacheHits += 1;
+      }
+
       return cachedNetwork.network;
     }
 
+    if (timings) {
+      timings.graphCacheMisses += 1;
+    }
+
+    const rawCellAccessStartedAt = timings ? performance.now() : 0;
     const cells = await mapWithConcurrency(
       [...cellKeys],
       CELL_LOAD_CONCURRENCY,
       (key) => this.loadCell(key, signal),
     );
+
+    if (timings) {
+      timings.rawCellAccessDurationMs +=
+        performance.now() - rawCellAccessStartedAt;
+    }
+
+    const featureMergeStartedAt = timings ? performance.now() : 0;
     const data: SwissTlmNetworkData = {
       roads: mergeFeatures(cells, (cellData) => cellData.roads),
       hikingTrails: mergeFeatures(
@@ -422,10 +577,24 @@ export class DynamicRoutingNetworkLoader {
         (cellData) => cellData.hikingTrails,
       ),
     };
-    const network = RoutingNetwork.fromSwissTlm(
-      combinedExtent(cellKeys),
-      data,
-    );
+
+    if (timings) {
+      timings.featureMergeDurationMs +=
+        performance.now() - featureMergeStartedAt;
+    }
+
+    const graphBuildStartedAt = timings ? performance.now() : 0;
+    let network: RoutingNetwork;
+
+    try {
+      network = RoutingNetwork.fromSwissTlm(combinedExtent(cellKeys), data);
+    } finally {
+      // Empty coverage throws from graph construction but still represents CPU
+      // work that matters for border and disconnected benchmark scenarios.
+      if (timings) {
+        timings.graphBuildDurationMs += performance.now() - graphBuildStartedAt;
+      }
+    }
 
     // Most-recently-built graphs stay at the front. This small cache avoids
     // rebuilding common local corridors.

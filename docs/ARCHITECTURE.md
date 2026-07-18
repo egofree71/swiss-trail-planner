@@ -186,6 +186,36 @@ which behaviour needs deliberate review. OpenLayers canvas rendering and full
 pointer workflows remain validated manually until a browser-level test offers
 clear value over its maintenance cost.
 
+### 3.6 Measured browser-routing benchmark
+
+`benchmarks/routing/` is a separate local Vite entry used to validate the
+experimental browser-routing limits without adding controls or assets to the
+published map. It accepts a GPX trace, selects its longest continuous segment,
+and derives deterministic synthetic user clicks. Adaptive regular spacing gives
+a bounded general scenario, fixed spacing accepts values from 50 metres for
+small-section tests, and seeded irregular spacing approximates uneven live route
+planning while remaining exactly reproducible.
+
+Each benchmark first replays the scenario through the real dynamic loader so all
+required swissTLM3D cells and snapped endpoints are known. It then clears only
+the small derived `RoutingNetwork` LRU while preserving raw downloaded cells.
+The measured pass therefore isolates exact graph-cache lookup, cached-cell
+resolution, feature merging, `RoutingNetwork` construction, start and destination
+snapping, A*, coordinate reconstruction, residual routing overhead, and immutable
+route-step creation. Optional timing accumulators are passed only by the local
+benchmark, so ordinary application routing does not perform diagnostic clock
+reads. The report also checks that the raw-cell count does not increase during
+measurement and reports animation-frame delay and browser long tasks when the
+platform exposes them. Normal session-cache and forced
+per-section graph-rebuild modes distinguish realistic reuse from the worst case
+relevant to a future Web Worker decision.
+
+The benchmark is diagnostic rather than a pass/fail regression test: timings
+depend on the browser, CPU, thermal state, and region. Stable generated scenario
+JSON can be retained for cross-version and cross-device comparisons. A Web
+Worker should be considered only if these measurements reveal material
+main-thread blocking after network time has been excluded.
+
 ## 4. Technical overview
 
 ```text
@@ -265,7 +295,14 @@ Regression tests
    │
    ├── Vitest
    ├── JSDOM for browser XML APIs
-   └── colocated route, GPX import/export, metric, and transport-domain suites
+   └── colocated route, GPX import/export, metric, transport-domain, and benchmark-sampling suites
+
+Local routing benchmark
+   │
+   ├── separate Vite page outside the production entry graph
+   ├── GPX-to-synthetic-click scenario generation
+   ├── raw-cell warm-up with derived-graph cache reset
+   └── CPU, frame-delay, long-task, and cache-contamination reporting
 
 Deployment
    │
@@ -896,6 +933,18 @@ via-helvetica/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml
+├── benchmarks/
+│   └── routing/
+│       ├── src/
+│       │   ├── benchmarkRunner.ts
+│       │   ├── gpxScenario.test.ts
+│       │   ├── gpxScenario.ts
+│       │   ├── main.ts
+│       │   └── styles.css
+│       ├── index.html
+│       ├── README.md
+│       ├── tsconfig.json
+│       └── vite.config.ts
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── public/
@@ -1390,7 +1439,9 @@ handling.
 
 Builds the walkable regional graph, indexes line segments, matches official
 hiking geometry, snaps waypoints, applies routing costs, and calculates A*
-paths. It contains no React or OpenLayers map lifecycle state.
+paths. An optional benchmark-only accumulator separates start snapping,
+destination snapping, A*, and coordinate reconstruction without changing normal
+route results. It contains no React or OpenLayers map lifecycle state.
 
 ### `src/routing/routeEditing.ts`
 
@@ -1406,7 +1457,11 @@ straight geometry.
 Owns the dynamic routing-cell strategy. It derives local or corridor cell sets
 from selected positions, limits cell request concurrency, caches completed cell
 data and recent graphs, retries disconnected sections with a wider corridor,
-and protects the API from excessively large single operations.
+and protects the API from excessively large single operations. Read-only cache
+statistics, explicit derived-graph cache clearing, and a benchmark-only diagnosed
+route entry point expose cache lookup, cached-cell access, feature merge, graph
+build, retry, and route-phase timings without exposing or mutating raw cell
+contents.
 
 ### `src/search/locationSearch.ts`
 
@@ -1462,18 +1517,35 @@ tracks, segment gaps, duplicate points, elevations, and validation;
 preservation, XML metadata and bounds, profile normalization, elevation
 interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
 distance, segment-local elevation totals, the Swiss hiking-time model, and a
-mocked GeoAdmin profile response; and `publicTransportStopModel.test.ts` covers
-multilingual passenger-mode normalization and technical-record rejection.
+mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
+multilingual passenger-mode normalization and technical-record rejection;
+`networkRouter.test.ts` protects the optional phase-timing contract without
+changing route geometry; and `benchmarks/routing/src/gpxScenario.test.ts`
+protects short fixed intervals,
+adaptive bounds, and seeded irregular reproducibility.
+
+### `benchmarks/routing/`
+
+Contains the local-only routing performance harness. `src/gpxScenario.ts`
+converts the longest continuous GPX segment into deterministic synthetic clicks
+and can export their WGS 84 coordinates as stable JSON. `src/benchmarkRunner.ts`
+warms the real dynamic loader, preserves raw cells, clears derived graphs, and
+measures detailed routing phases for each replayed section. The browser report
+and schema-version-2 JSON export retain phase totals, per-section timings, cache
+hits and misses, retry use, frame delay, and long-task observations. Its
+independent `index.html`, Vite config,
+and TypeScript config keep the harness outside the normal GitHub Pages build.
 
 ### Remaining root files
 
 - `src/main.tsx` mounts React, the language provider, and styles.
 - `index.html` is the browser entry point.
-- `package.json` declares dependencies and npm scripts, including one-shot and
-  watch-mode regression commands.
+- `package.json` declares dependencies and npm scripts, including regression,
+  production-build, and local routing-benchmark commands.
 - `package-lock.json` locks dependency versions.
 - `vite.config.ts` configures React and the GitHub Pages base path.
-- `vitest.config.ts` selects JSDOM and colocated `src/**/*.test.ts` suites.
+- `vitest.config.ts` selects JSDOM and the application plus benchmark-sampling
+  test suites.
 - `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
   thumbnails used by the Layers menu without another map request.

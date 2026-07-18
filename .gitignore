@@ -3,6 +3,7 @@ node_modules/
 
 # Production build
 dist/
+dist-benchmark/
 
 # Local environment files
 .env
