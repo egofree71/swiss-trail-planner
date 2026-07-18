@@ -180,11 +180,16 @@ and stale-result guards explain why the safeguard or heuristic exists.
 ### 3.5 Focused regression tests
 
 Automated tests target stable domain contracts before browser presentation. The
-initial suite covers immutable route transformations, affected-section rebuilds,
-local GPX parsing and export, route metrics, and passenger-stop filtering. JSDOM
-provides the browser XML primitives needed by GPX import and export tests;
-provider calls are mocked so the suite remains deterministic and does not
-depend on external services.
+suite covers immutable route transformations, affected-section rebuilds, local
+GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
+footprints, the main-thread Worker facade, and the worker-owned routing engine.
+Engine tests mock provider loading and graph construction to protect narrow-to-
+wider corridor retry, straight-fallback signalling, completed and in-flight cell
+reuse, graph-cache clearing, true least-recently-used eviction, size limits, and
+provider-error propagation without live GeoAdmin requests. JSDOM provides the
+browser XML primitives needed by GPX import and export tests; provider calls are
+mocked so the suite remains deterministic and does not depend on external
+services.
 
 Tests live beside the modules they protect. This keeps fixtures close to the
 relevant business rules and makes a future extraction or contract change reveal
@@ -308,7 +313,7 @@ Regression tests
    │
    ├── Vitest
    ├── JSDOM for browser XML APIs
-   └── colocated route, GPX import/export, metric, transport-domain, and benchmark-sampling suites
+   └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, routing-engine, and benchmark-sampling suites
 
 Local routing benchmark
    │
@@ -1501,9 +1506,12 @@ but it no longer blocks map rendering and its obsolete response is ignored.
 
 Owns network loading, completed and in-flight raw-cell caches, exact-corridor
 `RoutingNetwork` LRU entries, narrow and widened corridor attempts, feature
-merging, graph construction, snapping, and A*. Read-only cache statistics,
-explicit derived-graph clearing, and diagnosed routing expose worker-side phase
-timings to the benchmark without exposing mutable cache contents.
+merging, graph construction, snapping, and A*. Cache hits are promoted before
+bounded eviction so repeated local corridors remain available. Read-only cache
+statistics, explicit derived-graph clearing, and diagnosed routing expose worker-
+side phase timings to the benchmark without exposing mutable cache contents.
+Direct engine regression tests use mocked providers and graph doubles so this
+workflow is protected independently from Worker message transport.
 
 ### `src/routing/dynamicRoutingProtocol.ts`
 

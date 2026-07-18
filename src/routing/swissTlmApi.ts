@@ -360,8 +360,9 @@ async function fetchTile(
 }
 
 /**
- * Maps values with a fixed worker count so one route operation cannot flood the
- * public GeoAdmin endpoint.
+ * Maps values with a fixed runner count so one route operation cannot flood the
+ * public GeoAdmin endpoint. These runners are asynchronous lanes inside the
+ * routing Worker, not additional Web Workers.
  */
 async function mapWithConcurrency<T, R>(
   values: T[],
@@ -371,7 +372,7 @@ async function mapWithConcurrency<T, R>(
   const results = new Array<R>(values.length);
   let nextIndex = 0;
 
-  const workers = Array.from(
+  const runners = Array.from(
     { length: Math.min(concurrency, values.length) },
     async () => {
       while (nextIndex < values.length) {
@@ -382,7 +383,7 @@ async function mapWithConcurrency<T, R>(
     },
   );
 
-  await Promise.all(workers);
+  await Promise.all(runners);
   return results;
 }
 

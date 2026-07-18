@@ -43,6 +43,14 @@ function createTimings(): RoutingNetworkPhaseTimings {
 }
 
 describe('RoutingNetwork benchmark diagnostics', () => {
+
+  it('returns a structured-clone-safe plain-data route result', () => {
+    const route = createTestNetwork().route([10, 2], [190, -2]);
+
+    expect(route).not.toBeNull();
+    expect(structuredClone(route)).toEqual(route);
+  });
+
   it('returns the same route while filling non-negative phase timings', () => {
     const network = createTestNetwork();
     const normalRoute = network.route([10, 2], [190, -2]);

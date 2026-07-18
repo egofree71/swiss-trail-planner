@@ -91,7 +91,7 @@ async function mapWithConcurrency<T, R>(
   const results = new Array<R>(values.length);
   let nextIndex = 0;
 
-  const workers = Array.from(
+  const runners = Array.from(
     { length: Math.min(concurrency, values.length) },
     async () => {
       while (nextIndex < values.length) {
@@ -102,7 +102,7 @@ async function mapWithConcurrency<T, R>(
     },
   );
 
-  await Promise.all(workers);
+  await Promise.all(runners);
   return results;
 }
 
@@ -317,9 +317,10 @@ export class DynamicRoutingNetworkEngine {
     // Sorting makes the cache key independent of insertion order.
     const cacheLookupStartedAt = timings ? performance.now() : 0;
     const cacheKey = [...cellKeys].sort().join('|');
-    const cachedNetwork = this.networkCache.find(
+    const cachedNetworkIndex = this.networkCache.findIndex(
       (entry) => entry.key === cacheKey,
     );
+    const cachedNetwork = this.networkCache[cachedNetworkIndex];
 
     if (timings) {
       timings.graphCacheLookupDurationMs +=
@@ -329,6 +330,13 @@ export class DynamicRoutingNetworkEngine {
     if (cachedNetwork) {
       if (timings) {
         timings.graphCacheHits += 1;
+      }
+
+      // Promote a reused graph so the bounded cache evicts the least-recently
+      // used corridor rather than the oldest corridor regardless of access.
+      if (cachedNetworkIndex > 0) {
+        this.networkCache.splice(cachedNetworkIndex, 1);
+        this.networkCache.unshift(cachedNetwork);
       }
 
       return cachedNetwork.network;

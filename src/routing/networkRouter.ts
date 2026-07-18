@@ -125,7 +125,12 @@ interface QueueEntry {
 /** Pair of coordinates representing one indexed line segment. */
 type LineSegment = readonly [Coordinate, Coordinate];
 
-/** Routed geometry returned to the route editor. */
+/**
+ * Routed geometry returned to the route editor.
+ *
+ * Keep this contract structured-clone-safe and independent from OpenLayers
+ * classes because it crosses the dedicated Worker boundary.
+ */
 export interface RoutedNetworkPath {
   /** Ordered coordinates from the snapped start to the snapped destination. */
   coordinates: Coordinate[];
