@@ -741,6 +741,8 @@ export function useEditableRoute(
     () => () => {
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
+      routingLoaderRef.current?.dispose();
+      routingLoaderRef.current = null;
     },
     [clearRouteMessageTimer],
   );

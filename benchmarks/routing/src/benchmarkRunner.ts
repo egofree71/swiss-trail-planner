@@ -1,8 +1,8 @@
 /**
  * Business context: replays synthetic route clicks against the real dynamic
- * swissTLM3D loader. A warm-up pass downloads every cell the scenario needs;
- * the measured pass then keeps raw cells in memory and times only local graph
- * reconstruction, snapping, A*, and immutable step creation.
+ * swissTLM3D worker. A warm-up pass downloads every cell the scenario needs;
+ * the measured pass then keeps raw cells in worker memory, records worker-side
+ * graph phases, and measures end-to-end latency plus main-thread responsiveness.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import {
@@ -13,7 +13,7 @@ import { connectRoutedSegmentEndpoint, createStraightRouteStep } from '../../../
 import type { RouteStep } from '../../../src/map/routeState';
 import type { RoutingBenchmarkScenario } from './gpxScenario';
 
-/** Graph-cache policy used during the measured CPU-only pass. */
+/** Graph-cache policy used during the measured worker pass. */
 export type GraphCacheMode =
   | 'session-cache'
   | 'rebuild-each-segment';
@@ -81,6 +81,8 @@ export interface RoutingBenchmarkPhaseTotals {
 
 /** Complete benchmark report for one GPX-derived scenario. */
 export interface RoutingBenchmarkReport {
+  /** Execution boundary used for network loading and routing CPU work. */
+  executionMode: 'dedicated-worker';
   scenario: RoutingBenchmarkScenario;
   graphCacheMode: GraphCacheMode;
   warmupDurationMs: number;
@@ -91,6 +93,8 @@ export interface RoutingBenchmarkReport {
   totalRouteDurationMs: number;
   maximumRouteDurationMs: number;
   maximumFrameDelayMs: number;
+  /** Whether this browser exposes the main-thread Long Tasks API. */
+  longTaskApiSupported: boolean;
   maximumLongTaskDurationMs: number | null;
   unexpectedNetworkCellLoads: number;
 }
@@ -168,6 +172,7 @@ function nextAnimationFrame(): Promise<number> {
 
 /** Starts a long-task observer when the browser exposes that diagnostics API. */
 function observeLongTasks(): {
+  supported: boolean;
   entries: PerformanceEntry[];
   disconnect: () => void;
 } {
@@ -177,7 +182,7 @@ function observeLongTasks(): {
     typeof PerformanceObserver === 'undefined' ||
     !PerformanceObserver.supportedEntryTypes.includes('longtask')
   ) {
-    return { entries, disconnect: () => undefined };
+    return { supported: false, entries, disconnect: () => undefined };
   }
 
   const observer = new PerformanceObserver((list) => {
@@ -186,6 +191,7 @@ function observeLongTasks(): {
   observer.observe({ entryTypes: ['longtask'] });
 
   return {
+    supported: true,
     entries,
     disconnect: () => observer.disconnect(),
   };
@@ -234,13 +240,13 @@ async function warmScenario(
       total: remainingClicks.length,
     });
     const clickedCoordinate = remainingClicks[index];
-    const before = loader.getCacheStats();
+    const before = await loader.getCacheStats();
     const routedPath = await loader.route(
       currentCoordinate,
       clickedCoordinate,
       signal,
     );
-    const after = loader.getCacheStats();
+    const after = await loader.getCacheStats();
 
     segments.push({
       startCoordinate: [...currentCoordinate],
@@ -292,7 +298,7 @@ function commitMeasuredStep(
 }
 
 /**
- * Runs a CPU-focused benchmark with network data already present in memory.
+ * Runs a worker-focused benchmark with network data already present in memory.
  * @throws {Error} Propagates GPX routing, loading, parsing, and cancellation failures.
  */
 export async function runRoutingBenchmark(
@@ -306,135 +312,142 @@ export async function runRoutingBenchmark(
   }
 
   const loader = new DynamicRoutingNetworkLoader();
-  const warmupStart = performance.now();
-  const warmed = await warmScenario(loader, scenario, signal, onProgress);
-  const warmupDurationMs = performance.now() - warmupStart;
-  const warmupLoadedCells = loader.getCacheStats().loadedCells;
-
-  // The measured pass intentionally keeps raw cells but discards derived graphs.
-  loader.clearNetworkCache();
-  let routeSteps: RouteStep[] = [
-    {
-      waypoint: [...warmed.firstWaypoint],
-      segment: null,
-      mode: warmed.firstWaypointSnapped ? 'network' : 'straight',
-    },
-  ];
-  const longTasks = observeLongTasks();
-  const results: RoutingSegmentBenchmarkResult[] = [];
-  const measurementWindows: Array<{ startTime: number; endTime: number }> = [];
 
   try {
-    for (let index = 0; index < warmed.segments.length; index += 1) {
-      onProgress?.({
-        phase: 'measure',
-        current: index + 1,
-        total: warmed.segments.length,
-      });
+    const warmupStart = performance.now();
+    const warmed = await warmScenario(loader, scenario, signal, onProgress);
+    const warmupDurationMs = performance.now() - warmupStart;
+    const warmupLoadedCells = (await loader.getCacheStats()).loadedCells;
 
-      if (graphCacheMode === 'rebuild-each-segment') {
-        loader.clearNetworkCache();
+    // The measured pass intentionally keeps raw cells but discards derived graphs.
+    await loader.clearNetworkCache();
+    let routeSteps: RouteStep[] = [
+      {
+        waypoint: [...warmed.firstWaypoint],
+        segment: null,
+        mode: warmed.firstWaypointSnapped ? 'network' : 'straight',
+      },
+    ];
+    const longTasks = observeLongTasks();
+    const results: RoutingSegmentBenchmarkResult[] = [];
+    const measurementWindows: Array<{ startTime: number; endTime: number }> = [];
+
+    try {
+      for (let index = 0; index < warmed.segments.length; index += 1) {
+        onProgress?.({
+          phase: 'measure',
+          current: index + 1,
+          total: warmed.segments.length,
+        });
+
+        if (graphCacheMode === 'rebuild-each-segment') {
+          await loader.clearNetworkCache();
+        }
+
+        const segment = warmed.segments[index];
+        const before = await loader.getCacheStats();
+        await nextAnimationFrame();
+        const frameRequestTime = performance.now();
+        const framePromise = nextAnimationFrame();
+        const routeStart = performance.now();
+        const diagnosedRoute = await loader.routeWithDiagnostics(
+          segment.startCoordinate,
+          segment.clickedCoordinate,
+          signal,
+        );
+        const routeEnd = performance.now();
+        const routedPath = diagnosedRoute.path;
+        const routingOverheadDurationMs = Math.max(
+          0,
+          routeEnd - routeStart - measuredPhaseDuration(diagnosedRoute.timings),
+        );
+        const nextFrameTime = await framePromise;
+        const commitStart = performance.now();
+        routeSteps = commitMeasuredStep(
+          routeSteps,
+          routedPath?.coordinates ?? null,
+          segment.clickedCoordinate,
+        );
+        const stateCommitDurationMs = performance.now() - commitStart;
+        const after = await loader.getCacheStats();
+
+        results.push({
+          segmentIndex: index + 1,
+          directDistanceMeters: segment.directDistanceMeters,
+          graphCacheLookupDurationMs:
+            diagnosedRoute.timings.graphCacheLookupDurationMs,
+          rawCellAccessDurationMs: diagnosedRoute.timings.rawCellAccessDurationMs,
+          featureMergeDurationMs: diagnosedRoute.timings.featureMergeDurationMs,
+          graphBuildDurationMs: diagnosedRoute.timings.graphBuildDurationMs,
+          startSnapDurationMs: diagnosedRoute.timings.startSnapDurationMs,
+          endSnapDurationMs: diagnosedRoute.timings.endSnapDurationMs,
+          aStarDurationMs: diagnosedRoute.timings.aStarDurationMs,
+          routeReconstructionDurationMs:
+            diagnosedRoute.timings.routeReconstructionDurationMs,
+          routingOverheadDurationMs,
+          routeDurationMs: routeEnd - routeStart,
+          frameDelayMs: Math.max(0, nextFrameTime - frameRequestTime),
+          stateCommitDurationMs,
+          graphCacheHits: diagnosedRoute.timings.graphCacheHits,
+          graphCacheMisses: diagnosedRoute.timings.graphCacheMisses,
+          routeAttempts: diagnosedRoute.timings.routeAttempts,
+          retryUsed: diagnosedRoute.timings.retryUsed,
+          foundPath: Boolean(routedPath),
+          outputCoordinateCount: routedPath?.coordinates.length ?? 2,
+          networkCacheEntriesAfter: after.cachedNetworks,
+          unexpectedNewCells: Math.max(0, after.loadedCells - before.loadedCells),
+          warmupNewCells: segment.newCellsLoaded,
+          longTaskDurationMs: null,
+        });
+        measurementWindows.push({ startTime: routeStart, endTime: routeEnd });
       }
 
-      const segment = warmed.segments[index];
-      const before = loader.getCacheStats();
-      await nextAnimationFrame();
-      const frameRequestTime = performance.now();
-      const framePromise = nextAnimationFrame();
-      const routeStart = performance.now();
-      const diagnosedRoute = await loader.routeWithDiagnostics(
-        segment.startCoordinate,
-        segment.clickedCoordinate,
-        signal,
-      );
-      const routeEnd = performance.now();
-      const routedPath = diagnosedRoute.path;
-      const routingOverheadDurationMs = Math.max(
+      // PerformanceObserver delivery is asynchronous; one task boundary makes
+      // completed long-task entries available before they are assigned to rows.
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+      for (let index = 0; index < results.length; index += 1) {
+        const window = measurementWindows[index];
+        results[index].longTaskDurationMs = maximumOverlappingLongTask(
+          longTasks.entries,
+          window.startTime,
+          window.endTime,
+        );
+      }
+    } finally {
+      longTasks.disconnect();
+    }
+
+    const routeDurations = results.map((result) => result.routeDurationMs);
+    const frameDelays = results.map((result) => result.frameDelayMs);
+    const observedLongTasks = results
+      .map((result) => result.longTaskDurationMs)
+      .filter((duration): duration is number => duration !== null);
+
+    return {
+      scenario,
+      executionMode: 'dedicated-worker',
+      graphCacheMode,
+      warmupDurationMs,
+      warmupLoadedCells,
+      firstWaypointSnapped: warmed.firstWaypointSnapped,
+      segments: results,
+      phaseTotals: aggregatePhaseTotals(results),
+      totalRouteDurationMs: routeDurations.reduce(
+        (sum, duration) => sum + duration,
         0,
-        routeEnd - routeStart - measuredPhaseDuration(diagnosedRoute.timings),
-      );
-      const nextFrameTime = await framePromise;
-      const commitStart = performance.now();
-      routeSteps = commitMeasuredStep(
-        routeSteps,
-        routedPath?.coordinates ?? null,
-        segment.clickedCoordinate,
-      );
-      const stateCommitDurationMs = performance.now() - commitStart;
-      const after = loader.getCacheStats();
-
-      results.push({
-        segmentIndex: index + 1,
-        directDistanceMeters: segment.directDistanceMeters,
-        graphCacheLookupDurationMs:
-          diagnosedRoute.timings.graphCacheLookupDurationMs,
-        rawCellAccessDurationMs: diagnosedRoute.timings.rawCellAccessDurationMs,
-        featureMergeDurationMs: diagnosedRoute.timings.featureMergeDurationMs,
-        graphBuildDurationMs: diagnosedRoute.timings.graphBuildDurationMs,
-        startSnapDurationMs: diagnosedRoute.timings.startSnapDurationMs,
-        endSnapDurationMs: diagnosedRoute.timings.endSnapDurationMs,
-        aStarDurationMs: diagnosedRoute.timings.aStarDurationMs,
-        routeReconstructionDurationMs:
-          diagnosedRoute.timings.routeReconstructionDurationMs,
-        routingOverheadDurationMs,
-        routeDurationMs: routeEnd - routeStart,
-        frameDelayMs: Math.max(0, nextFrameTime - frameRequestTime),
-        stateCommitDurationMs,
-        graphCacheHits: diagnosedRoute.timings.graphCacheHits,
-        graphCacheMisses: diagnosedRoute.timings.graphCacheMisses,
-        routeAttempts: diagnosedRoute.timings.routeAttempts,
-        retryUsed: diagnosedRoute.timings.retryUsed,
-        foundPath: Boolean(routedPath),
-        outputCoordinateCount: routedPath?.coordinates.length ?? 2,
-        networkCacheEntriesAfter: after.cachedNetworks,
-        unexpectedNewCells: Math.max(0, after.loadedCells - before.loadedCells),
-        warmupNewCells: segment.newCellsLoaded,
-        longTaskDurationMs: null,
-      });
-      measurementWindows.push({ startTime: routeStart, endTime: routeEnd });
-    }
-
-    // PerformanceObserver delivery is asynchronous; one task boundary makes
-    // completed long-task entries available before they are assigned to rows.
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-
-    for (let index = 0; index < results.length; index += 1) {
-      const window = measurementWindows[index];
-      results[index].longTaskDurationMs = maximumOverlappingLongTask(
-        longTasks.entries,
-        window.startTime,
-        window.endTime,
-      );
-    }
+      ),
+      maximumRouteDurationMs: Math.max(0, ...routeDurations),
+      maximumFrameDelayMs: Math.max(0, ...frameDelays),
+      longTaskApiSupported: longTasks.supported,
+      maximumLongTaskDurationMs:
+        observedLongTasks.length > 0 ? Math.max(...observedLongTasks) : null,
+      unexpectedNetworkCellLoads: results.reduce(
+        (sum, result) => sum + result.unexpectedNewCells,
+        0,
+      ),
+    };
   } finally {
-    longTasks.disconnect();
+    loader.dispose();
   }
-
-  const routeDurations = results.map((result) => result.routeDurationMs);
-  const frameDelays = results.map((result) => result.frameDelayMs);
-  const observedLongTasks = results
-    .map((result) => result.longTaskDurationMs)
-    .filter((duration): duration is number => duration !== null);
-
-  return {
-    scenario,
-    graphCacheMode,
-    warmupDurationMs,
-    warmupLoadedCells,
-    firstWaypointSnapped: warmed.firstWaypointSnapped,
-    segments: results,
-    phaseTotals: aggregatePhaseTotals(results),
-    totalRouteDurationMs: routeDurations.reduce(
-      (sum, duration) => sum + duration,
-      0,
-    ),
-    maximumRouteDurationMs: Math.max(0, ...routeDurations),
-    maximumFrameDelayMs: Math.max(0, ...frameDelays),
-    maximumLongTaskDurationMs:
-      observedLongTasks.length > 0 ? Math.max(...observedLongTasks) : null,
-    unexpectedNetworkCellLoads: results.reduce(
-      (sum, result) => sum + result.unexpectedNewCells,
-      0,
-    ),
-  };
 }

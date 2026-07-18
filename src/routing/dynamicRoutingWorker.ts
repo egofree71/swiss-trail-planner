@@ -1,0 +1,112 @@
+/// <reference lib="webworker" />
+/**
+ * Business context: hosts the complete dynamic swissTLM3D routing pipeline in a
+ * dedicated browser worker. Network requests, cell caches, graph construction,
+ * snapping, and A* stay off the map's main thread; only plain route results and
+ * diagnostics cross back to React.
+ */
+import { DynamicRoutingNetworkEngine } from './dynamicRoutingEngine';
+import type {
+  RoutingWorkerRequest,
+  RoutingWorkerResponse,
+  SerializedRoutingWorkerError,
+} from './dynamicRoutingProtocol';
+
+const workerScope = self as unknown as DedicatedWorkerGlobalScope;
+const engine = new DynamicRoutingNetworkEngine();
+const requestControllers = new Map<number, AbortController>();
+
+/** Converts unknown failures into structured-clone-safe error data. */
+function serializeError(error: unknown): SerializedRoutingWorkerError {
+  if (error instanceof Error || error instanceof DOMException) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    name: 'Error',
+    message: String(error),
+  };
+}
+
+/** Posts one successful response without exposing worker-owned objects. */
+function postSuccess(requestId: number, result: unknown): void {
+  const response: RoutingWorkerResponse = {
+    type: 'success',
+    requestId,
+    result,
+  };
+  workerScope.postMessage(response);
+}
+
+/** Posts one serialized failure to the main-thread facade. */
+function postFailure(requestId: number, error: unknown): void {
+  const response: RoutingWorkerResponse = {
+    type: 'error',
+    requestId,
+    error: serializeError(error),
+  };
+  workerScope.postMessage(response);
+}
+
+workerScope.addEventListener(
+  'message',
+  (event: MessageEvent<RoutingWorkerRequest>) => {
+    const request = event.data;
+
+    if (request.type === 'cancel') {
+      requestControllers.get(request.requestId)?.abort();
+      return;
+    }
+
+    const controller = new AbortController();
+    requestControllers.set(request.requestId, controller);
+
+    void (async () => {
+      try {
+        switch (request.operation) {
+          case 'snap':
+            postSuccess(
+              request.requestId,
+              await engine.snap(request.coordinate, controller.signal),
+            );
+            break;
+          case 'route':
+            postSuccess(
+              request.requestId,
+              await engine.route(
+                request.startCoordinate,
+                request.endCoordinate,
+                controller.signal,
+              ),
+            );
+            break;
+          case 'routeWithDiagnostics':
+            postSuccess(
+              request.requestId,
+              await engine.routeWithDiagnostics(
+                request.startCoordinate,
+                request.endCoordinate,
+                controller.signal,
+              ),
+            );
+            break;
+          case 'clearNetworkCache':
+            engine.clearNetworkCache();
+            postSuccess(request.requestId, undefined);
+            break;
+          case 'getCacheStats':
+            postSuccess(request.requestId, engine.getCacheStats());
+            break;
+        }
+      } catch (error) {
+        postFailure(request.requestId, error);
+      } finally {
+        requestControllers.delete(request.requestId);
+      }
+    })();
+  },
+);

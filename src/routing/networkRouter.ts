@@ -8,11 +8,14 @@
 import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
 import { containsCoordinate } from 'ol/extent.js';
+import { MAX_SNAP_DISTANCE } from './routingConstants';
 import type {
   SwissTlmLineFeature,
   SwissTlmNetworkData,
   SwissTlmRoadAttributes,
 } from './swissTlmApi';
+
+export { MAX_SNAP_DISTANCE } from './routingConstants';
 
 /**
  * Horizontal precision in metres used to merge near-identical vertices.
@@ -29,11 +32,6 @@ const NODE_VERTICAL_PRECISION = 2;
  * them to be considered the same trail.
  */
 const HIKING_MATCH_DISTANCE = 8;
-/**
- * Maximum user-to-network snapping distance in metres. Larger values may
- * attach a waypoint to an unrelated road.
- */
-export const MAX_SNAP_DISTANCE = 260;
 /** Dimensionless lower bound for all routing cost factors, keeping the A* heuristic admissible. */
 const MIN_COST_FACTOR = 0.45;
 /**

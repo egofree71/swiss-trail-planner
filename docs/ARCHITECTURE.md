@@ -56,7 +56,7 @@ It can:
 - show contextual hover guidance for waypoint and route-section editing;
 - create or rebuild straight segments when snapping is disabled or a snapped section cannot be resolved;
 - load swissTLM3D road and hiking geometries dynamically around selected waypoints;
-- build a regional walkable graph and calculate snapped sections with A*;
+- build a regional walkable graph and calculate snapped sections with A* in a dedicated Web Worker;
 - prefer official hiking-trail sections through routing costs;
 - undo and redo complete route edits with their exact stored geometry;
 - reverse the complete route without recalculating sections;
@@ -155,6 +155,12 @@ normalization, and OpenLayers rendering live in focused sibling modules.
 unfinished file reads when another itinerary takes priority.
 `src/metrics/useItineraryMetrics.ts` owns current-itinerary distance, elevation
 request identity, hiking time, and bidirectional map/profile exploration.
+`src/routing/dynamicRoutingNetwork.ts` is the main-thread routing facade;
+`dynamicRoutingWorker.ts` owns a long-lived `DynamicRoutingNetworkEngine` whose
+raw-cell cache, graph LRU, graph construction, snapping, and A* never enter the
+OpenLayers/React thread. Structured-clone messages carry only coordinates,
+route results, cache statistics, diagnostics, cancellation, and serialized
+errors across that boundary.
 `App.tsx` remains the application composition point and accesses the runtime
 through one stable ref. It connects the focused hooks instead of owning their
 imperative map sessions, route history, or provider-request lifecycles.
@@ -186,7 +192,7 @@ which behaviour needs deliberate review. OpenLayers canvas rendering and full
 pointer workflows remain validated manually until a browser-level test offers
 clear value over its maintenance cost.
 
-### 3.6 Measured browser-routing benchmark
+### 3.6 Measured worker-routing benchmark
 
 `benchmarks/routing/` is a separate local Vite entry used to validate the
 experimental browser-routing limits without adding controls or assets to the
@@ -196,25 +202,27 @@ a bounded general scenario, fixed spacing accepts values from 50 metres for
 small-section tests, and seeded irregular spacing approximates uneven live route
 planning while remaining exactly reproducible.
 
-Each benchmark first replays the scenario through the real dynamic loader so all
-required swissTLM3D cells and snapped endpoints are known. It then clears only
-the small derived `RoutingNetwork` LRU while preserving raw downloaded cells.
-The measured pass therefore isolates exact graph-cache lookup, cached-cell
+Each benchmark first replays the scenario through the real dedicated routing
+worker so all required swissTLM3D cells and snapped endpoints are known. It then
+clears only the worker-owned `RoutingNetwork` LRU while preserving downloaded
+raw cells. The measured pass records worker-side graph-cache lookup, cached-cell
 resolution, feature merging, `RoutingNetwork` construction, start and destination
-snapping, A*, coordinate reconstruction, residual routing overhead, and immutable
-route-step creation. Optional timing accumulators are passed only by the local
-benchmark, so ordinary application routing does not perform diagnostic clock
-reads. The report also checks that the raw-cell count does not increase during
-measurement and reports animation-frame delay and browser long tasks when the
-platform exposes them. Normal session-cache and forced
-per-section graph-rebuild modes distinguish realistic reuse from the worst case
-relevant to a future Web Worker decision.
+snapping, A*, and coordinate reconstruction. End-to-end elapsed time additionally
+includes worker scheduling and structured-clone transfer, while animation-frame
+delay and browser long tasks are observed on the map/UI thread. Immutable route-
+step commit time remains measured on the main thread after each result returns.
+
+Normal session-cache and forced per-section graph-rebuild modes distinguish
+realistic reuse from the worst graph-construction case. After the Worker
+migration, the key validation is no longer only how long construction takes,
+but whether those worker-side builds leave frame delay near the normal refresh
+interval and remove main-thread long tasks. The report still rejects comparisons
+when the raw-cell count increases during the measured pass.
 
 The benchmark is diagnostic rather than a pass/fail regression test: timings
-depend on the browser, CPU, thermal state, and region. Stable generated scenario
-JSON can be retained for cross-version and cross-device comparisons. A Web
-Worker should be considered only if these measurements reveal material
-main-thread blocking after network time has been excluded.
+depend on the browser, CPU, thermal state, region, worker scheduling, and network
+warm-up. Stable generated scenario JSON and schema-version-3 benchmark reports
+can be retained for cross-version and cross-device comparisons.
 
 ## 4. Technical overview
 
@@ -278,10 +286,15 @@ Browser
    │      ├── VectorLayer: selected search result
    │      └── VectorLayer: user location
    │
-   ├── Dynamic routing prototype
+   ├── Main-thread dynamic-routing facade
+   │      ├── typed request/response correlation
+   │      ├── AbortSignal-to-worker cancellation bridge
+   │      └── route results and serialized error reconstruction
+   │
+   ├── Dedicated routing Web Worker
    │      ├── GeoAdmin identify requests for regular swissTLM3D cells
-   │      ├── in-memory cell and graph caches
-   │      ├── corridor-based in-browser graph construction
+   │      ├── worker-owned raw-cell and graph caches
+   │      ├── corridor-based graph construction
    │      ├── spatial indexes for trail matching and waypoint snapping
    │      └── A* route calculation
    │
@@ -302,7 +315,7 @@ Local routing benchmark
    ├── separate Vite page outside the production entry graph
    ├── GPX-to-synthetic-click scenario generation
    ├── raw-cell warm-up with derived-graph cache reset
-   └── CPU, frame-delay, long-task, and cache-contamination reporting
+   └── worker-phase, end-to-end latency, main-thread frame-delay, long-task, and cache-contamination reporting
 
 Deployment
    │
@@ -316,8 +329,9 @@ Deployment
 
 No project-owned service runs on the server. Vite only compiles and serves
 frontend assets during development. The routing prototype also runs entirely
-in the browser and bounds each operation to a finite set of cells around the
-selected route section.
+in the browser: a dedicated module Worker owns network loading and CPU-heavy
+routing state, while each operation remains bounded to a finite set of cells
+around the selected route section.
 
 ## 5. Technologies
 
@@ -337,7 +351,8 @@ selected route section.
 | OpenLayers vector styling | Filtered public-transport stops with locally bundled SVG symbols by normalized mode |
 | transport.opendata.ch | Documented JSON stationboard for on-demand next departures |
 | GeoAdmin elevation profile API | Smoothed terrain elevations along the current route |
-| Custom graph builder and A* | Experimental browser routing for dynamically loaded regions |
+| Browser Web Worker | Dedicated execution boundary for swissTLM3D loading, graph construction, snapping, and A* |
+| Custom graph builder and A* | Experimental worker-side routing for dynamically loaded regions |
 | Browser Geolocation API | On-demand user position lookup |
 | Browser File API and DOMParser | Local GPX selection and validation |
 | Browser Fullscreen API | Distraction-free map display |
@@ -640,6 +655,11 @@ route toolbar. `src/map/useRouteInteractions.ts` attaches the OpenLayers click
 and drag listeners only while editing is active, keeps transient previews out of
 React state, and translates pointer gestures into semantic edit requests. The
 root application receives only render state and actions from these hooks.
+`useEditableRoute` retains one `DynamicRoutingNetworkLoader` facade for its
+lifetime and disposes it on unmount. The facade creates one dedicated module
+Worker lazily, correlates typed requests, forwards cancellation, and reconstructs
+errors used by the UI. The Worker keeps its caches across additions and edits;
+only plain coordinate arrays and diagnostics return to the main thread.
 
 The current route is an immutable `RouteState`. Its ordered `RouteStep` array
 stores:
@@ -663,9 +683,9 @@ or another network request. A new edit clears the redo states. Complete deletion
 intentionally clears all route history.
 
 When snapping is disabled, the new section is the direct line between the two
-waypoints. When snapping is enabled, the first click loads only the regular
-cells whose extent intersects the maximum 260-metre snapping box around the
-selected position. This normally means one cell, two near an edge, or four near
+waypoints. When snapping is enabled, the first click asks the routing Worker to load only
+the regular cells whose extent intersects the maximum 260-metre snapping box
+around the selected position. This normally means one cell, two near an edge, or four near
 a corner. The point is then snapped to the resulting network. Later clicks load
 a narrow cell corridor between the previous waypoint and the new position.
 Completed cells remain cached in memory and are not requested again during the
@@ -685,7 +705,8 @@ routes continuous without hiding genuine request, parsing, or size-limit errors.
 
 `src/routing/swissTlmApi.ts` owns the GeoAdmin request contract, response
 validation, geometry normalization, recursive request subdivision, result
-deduplication, cancellation, and optional empty-cell handling.
+deduplication, cancellation, and optional empty-cell handling. It is imported by
+the routing Worker rather than the React/OpenLayers entry graph.
 
 `src/routing/networkRouter.ts` converts every pair of consecutive swissTLM3D
 vertices into graph edges. Endpoints are quantized to absorb tiny coordinate
@@ -1020,11 +1041,19 @@ via-helvetica/
 │   ├── network/
 │   │   └── abort.ts
 │   ├── routing/
+│   │   ├── dynamicRoutingEngine.ts
+│   │   ├── dynamicRoutingNetwork.test.ts
+│   │   ├── dynamicRoutingNetwork.ts
+│   │   ├── dynamicRoutingNetworkClient.test.ts
+│   │   ├── dynamicRoutingProtocol.ts
+│   │   ├── dynamicRoutingWorker.ts
+│   │   ├── networkRouter.test.ts
 │   │   ├── networkRouter.ts
 │   │   ├── routeEditing.test.ts
 │   │   ├── routeEditing.ts
-│   │   ├── swissTlmApi.ts
-│   │   └── dynamicRoutingNetwork.ts
+│   │   ├── routingConstants.ts
+│   │   ├── routingGrid.ts
+│   │   └── swissTlmApi.ts
 │   ├── search/
 │   │   └── locationSearch.ts
 │   ├── App.tsx
@@ -1454,14 +1483,41 @@ straight geometry.
 
 ### `src/routing/dynamicRoutingNetwork.ts`
 
-Owns the dynamic routing-cell strategy. It derives local or corridor cell sets
-from selected positions, limits cell request concurrency, caches completed cell
-data and recent graphs, retries disconnected sections with a wider corridor,
-and protects the API from excessively large single operations. Read-only cache
-statistics, explicit derived-graph cache clearing, and a benchmark-only diagnosed
-route entry point expose cache lookup, cached-cell access, feature merge, graph
-build, retry, and route-phase timings without exposing or mutating raw cell
-contents.
+Provides the main-thread `DynamicRoutingNetworkLoader` facade. It creates the
+module Worker lazily, correlates request identifiers, forwards `AbortSignal`
+cancellation, returns structured-clone-safe route results, recreates typed area-
+limit and abort errors, restarts after an unexpected Worker failure, and disposes
+pending work with the editable-route lifecycle. It owns no cells or graphs.
+
+### `src/routing/dynamicRoutingWorker.ts`
+
+Is the dedicated module-Worker entry. It owns one session-scoped
+`DynamicRoutingNetworkEngine`, maps typed protocol operations to engine methods,
+creates per-request abort controllers, and serializes failures before posting
+responses. Synchronous graph construction can finish after a late cancellation,
+but it no longer blocks map rendering and its obsolete response is ignored.
+
+### `src/routing/dynamicRoutingEngine.ts`
+
+Owns network loading, completed and in-flight raw-cell caches, exact-corridor
+`RoutingNetwork` LRU entries, narrow and widened corridor attempts, feature
+merging, graph construction, snapping, and A*. Read-only cache statistics,
+explicit derived-graph clearing, and diagnosed routing expose worker-side phase
+timings to the benchmark without exposing mutable cache contents.
+
+### `src/routing/dynamicRoutingProtocol.ts`
+
+Defines the structured-clone request, cancellation, response, error, cache-stat,
+and diagnostic contracts shared by the Worker and main-thread facade. It also
+owns `RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
+boundary through explicit reconstruction.
+
+### `src/routing/routingGrid.ts` and `routingConstants.ts`
+
+Contain the pure LV95 cell-footprint and corridor calculations plus the shared
+snapping radius. Keeping these helpers outside the graph engine lets unit tests
+validate one/two/four-cell first-click behavior without importing Worker-owned
+routing code into the application bundle.
 
 ### `src/search/locationSearch.ts`
 
@@ -1520,7 +1576,9 @@ distance, segment-local elevation totals, the Swiss hiking-time model, and a
 mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
 `networkRouter.test.ts` protects the optional phase-timing contract without
-changing route geometry; and `benchmarks/routing/src/gpxScenario.test.ts`
+changing route geometry; `dynamicRoutingNetworkClient.test.ts` protects Worker
+request correlation, typed errors, cancellation, and disposal; and
+`benchmarks/routing/src/gpxScenario.test.ts`
 protects short fixed intervals,
 adaptive bounds, and seeded irregular reproducibility.
 
@@ -1531,8 +1589,9 @@ converts the longest continuous GPX segment into deterministic synthetic clicks
 and can export their WGS 84 coordinates as stable JSON. `src/benchmarkRunner.ts`
 warms the real dynamic loader, preserves raw cells, clears derived graphs, and
 measures detailed routing phases for each replayed section. The browser report
-and schema-version-2 JSON export retain phase totals, per-section timings, cache
-hits and misses, retry use, frame delay, and long-task observations. Its
+and schema-version-3 JSON export identify dedicated-Worker execution and retain
+worker phase totals, end-to-end per-section timings, cache hits and misses, retry
+use, main-thread frame delay, and long-task observations. Its
 independent `index.html`, Vite config,
 and TypeScript config keep the harness outside the normal GitHub Pages build.
 

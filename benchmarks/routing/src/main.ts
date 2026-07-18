@@ -1,7 +1,7 @@
 /**
  * Business context: local-only browser interface for generating reproducible
- * GPX routing scenarios and measuring main-thread route construction without
- * adding benchmark controls or assets to the published Via Helvetica map.
+ * GPX routing scenarios, measuring worker-side routing phases, and checking
+ * main-thread responsiveness without adding controls to the published map.
  */
 import './styles.css';
 import {
@@ -161,7 +161,7 @@ function renderScenario(scenario: RoutingBenchmarkScenario): void {
   `;
 }
 
-/** Renders the CPU-only measured pass and its network-contamination guard. */
+/** Renders worker-side phase timings and the main-thread responsiveness guard. */
 function renderReport(report: RoutingBenchmarkReport): void {
   const rows = report.segments
     .map(
@@ -202,6 +202,7 @@ function renderReport(report: RoutingBenchmarkReport): void {
     <h2>Benchmark report</h2>
     <p>${networkGuard}</p>
     <dl class="summary-grid">
+      <div><dt>Execution</dt><dd>${escapeHtml(report.executionMode)}</dd></div>
       <div><dt>Graph cache mode</dt><dd>${escapeHtml(report.graphCacheMode)}</dd></div>
       <div><dt>Warm-up</dt><dd>${formatMilliseconds(report.warmupDurationMs)}</dd></div>
       <div><dt>Raw cells cached</dt><dd>${report.warmupLoadedCells}</dd></div>
@@ -215,13 +216,15 @@ function renderReport(report: RoutingBenchmarkReport): void {
       <div><dt>Slowest section</dt><dd>${formatMilliseconds(report.maximumRouteDurationMs)}</dd></div>
       <div><dt>Largest frame delay</dt><dd>${formatMilliseconds(report.maximumFrameDelayMs)}</dd></div>
       <div><dt>Largest long task</dt><dd>${
-        report.maximumLongTaskDurationMs === null
+        !report.longTaskApiSupported
           ? 'not exposed by this browser'
-          : formatMilliseconds(report.maximumLongTaskDurationMs)
+          : report.maximumLongTaskDurationMs === null
+            ? 'none observed'
+            : formatMilliseconds(report.maximumLongTaskDurationMs)
       }</dd></div>
       <div><dt>First click snapped</dt><dd>${report.firstWaypointSnapped ? 'yes' : 'no'}</dd></div>
     </dl>
-    <p class="table-hint">Phase columns are measured inside the router. “Other” is the remaining asynchronous and control-flow overhead needed to reconcile them with the total routing duration.</p>
+    <p class="table-hint">Phase columns are measured inside the routing worker. “Other” includes worker scheduling, structured-clone transfer, and remaining control-flow overhead needed to reconcile them with end-to-end routing duration. Frame delay and long tasks are measured on the map/UI thread.</p>
     <table class="benchmark-table">
       <thead><tr>
         <th>Section</th><th>Distance</th><th>Cache lookup</th><th>Cell access</th>
@@ -387,7 +390,7 @@ exportReportButton.addEventListener('click', () => {
 
   downloadJson(
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       exportedAt: new Date().toISOString(),
       environment: {
         userAgent: navigator.userAgent,

@@ -22,7 +22,7 @@ time.
 | Area | Available functionality |
 |---|---|
 | Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, sparse hollow direction arrows, optional swissTLM3D snapping, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
+| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, sparse hollow direction arrows, optional swissTLM3D snapping in a dedicated routing worker, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
 | Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; pointer position is mirrored in both directions between the map route and the open profile |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX track export with sub-metre geometry simplification, geographic metadata bounds, and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
@@ -104,7 +104,7 @@ Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
 Current limitations:
 
-- dynamic swissTLM3D routing is experimental and runs entirely in the browser;
+- dynamic swissTLM3D routing is experimental and runs entirely in the browser; network loading, graph construction, snapping, and A* run in a dedicated Web Worker;
 - closures and danger zones are informational and do not automatically change
   route calculation;
 - imported GPX routes are read-only and replace the current editable route;
@@ -142,10 +142,11 @@ site.
 ## Routing performance benchmark
 
 A separate local browser benchmark can derive deterministic synthetic clicks
-from a GPX trace, warm the swissTLM3D raw-cell cache, and then measure graph
-cache lookup, raw-cell access, feature merging, graph construction, endpoint
-snapping, A*, route reconstruction, and route-step creation without loading new
-cells:
+from a GPX trace, warm the swissTLM3D raw-cell cache inside the routing
+worker, and then measure graph cache lookup, raw-cell access, feature merging,
+graph construction, endpoint snapping, A*, route reconstruction, end-to-end
+worker latency, main-thread frame delay, and route-step creation without loading
+new cells:
 
 ```bash
 npm run benchmark:routing
