@@ -16,6 +16,12 @@ import {
   type RoutingBenchmarkReport,
 } from './benchmarkRunner';
 
+/**
+ * Resolves one required benchmark control during startup.
+ * @param selector - CSS selector for an element declared by the benchmark page.
+ * @returns Matching element with the requested DOM type.
+ * @throws {Error} When the benchmark HTML and its TypeScript bindings diverge.
+ */
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
 

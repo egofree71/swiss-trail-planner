@@ -20,62 +20,107 @@ export type GraphCacheMode =
 
 /** Progress notification displayed by the local benchmark page. */
 export interface BenchmarkProgress {
+  /** Current pass: data preparation or measured replay. */
   phase: 'warmup' | 'measure';
+  /** One-based section number currently being processed. */
   current: number;
+  /** Total number of sections in the selected scenario. */
   total: number;
 }
 
 /** One segment input resolved during warm-up. */
 interface WarmedSegment {
+  /** Actual snapped start used by the live routing sequence. */
   startCoordinate: Coordinate;
+  /** Synthetic GPX-derived click that ends this section. */
   clickedCoordinate: Coordinate;
+  /** Straight LV95 distance between the routed start and the synthetic click. */
   directDistanceMeters: number;
+  /** Whether the warm-up resolved a network path instead of a straight fallback. */
   warmupFoundPath: boolean;
+  /** Number of raw cells added while preparing this section. */
   newCellsLoaded: number;
 }
 
 /** Measured result for one synthetic click after the first waypoint. */
 export interface RoutingSegmentBenchmarkResult {
+  /** One-based section number in scenario order. */
   segmentIndex: number;
+  /** Straight LV95 distance between the section endpoints. */
   directDistanceMeters: number;
+  /** Worker time spent deriving and searching the exact graph-cache key. */
   graphCacheLookupDurationMs: number;
+  /** Worker time spent resolving raw cells already prepared by warm-up. */
   rawCellAccessDurationMs: number;
+  /** Worker time spent deduplicating features shared by neighbouring cells. */
   featureMergeDurationMs: number;
+  /** Worker time spent building graph nodes, edges, and spatial indexes. */
   graphBuildDurationMs: number;
+  /** Worker time spent snapping the section start to the graph. */
   startSnapDurationMs: number;
+  /** Worker time spent snapping the section destination to the graph. */
   endSnapDurationMs: number;
+  /** Worker time spent in A* after both endpoints are snapped. */
   aStarDurationMs: number;
+  /** Worker time spent rebuilding the ordered route coordinate array. */
   routeReconstructionDurationMs: number;
+  /** End-to-end routing time not covered by explicit worker phase clocks. */
   routingOverheadDurationMs: number;
+  /** Main-thread elapsed time from request dispatch to worker response. */
   routeDurationMs: number;
+  /** Delay of an animation frame requested immediately before routing. */
   frameDelayMs: number;
+  /** Main-thread time spent creating the immutable RouteStep snapshot. */
   stateCommitDurationMs: number;
+  /** Number of exact graph-cache hits used by this section. */
   graphCacheHits: number;
+  /** Number of exact graph-cache misses used by this section. */
   graphCacheMisses: number;
+  /** Number of narrow and optional wider corridor attempts. */
   routeAttempts: number;
+  /** Whether the wider fallback corridor was required. */
   retryUsed: boolean;
+  /** Whether the routing engine returned a network path. */
   foundPath: boolean;
+  /** Number of coordinates returned, or two for the simulated straight fallback. */
   outputCoordinateCount: number;
+  /** Number of derived graphs retained after this section. */
   networkCacheEntriesAfter: number;
+  /** Cells unexpectedly loaded during the measured pass. */
   unexpectedNewCells: number;
+  /** Cells loaded for this section during the preparation pass. */
   warmupNewCells: number;
+  /** Longest main-thread task overlapping this request, when supported. */
   longTaskDurationMs: number | null;
 }
 
 /** Aggregated measured CPU phases across every route section. */
 export interface RoutingBenchmarkPhaseTotals {
+  /** Sum of exact graph-cache lookup time in the worker. */
   graphCacheLookupDurationMs: number;
+  /** Sum of raw-cell access time in the worker. */
   rawCellAccessDurationMs: number;
+  /** Sum of feature merge and deduplication time in the worker. */
   featureMergeDurationMs: number;
+  /** Sum of graph construction time in the worker. */
   graphBuildDurationMs: number;
+  /** Sum of start-endpoint snapping time in the worker. */
   startSnapDurationMs: number;
+  /** Sum of destination-endpoint snapping time in the worker. */
   endSnapDurationMs: number;
+  /** Sum of A* search time in the worker. */
   aStarDurationMs: number;
+  /** Sum of route-coordinate reconstruction time in the worker. */
   routeReconstructionDurationMs: number;
+  /** Sum of unclassified end-to-end routing overhead. */
   routingOverheadDurationMs: number;
+  /** Total exact graph-cache hits. */
   graphCacheHits: number;
+  /** Total exact graph-cache misses. */
   graphCacheMisses: number;
+  /** Total narrow and wider corridor attempts. */
   routeAttempts: number;
+  /** Number of sections that required the wider corridor. */
   retryCount: number;
 }
 
@@ -83,19 +128,31 @@ export interface RoutingBenchmarkPhaseTotals {
 export interface RoutingBenchmarkReport {
   /** Execution boundary used for network loading and routing CPU work. */
   executionMode: 'dedicated-worker';
+  /** GPX-derived synthetic clicks replayed by this benchmark. */
   scenario: RoutingBenchmarkScenario;
+  /** Graph-cache policy applied during the measured pass. */
   graphCacheMode: GraphCacheMode;
+  /** Complete preparation-pass duration, including network and routing work. */
   warmupDurationMs: number;
+  /** Raw cells retained after the preparation pass. */
   warmupLoadedCells: number;
+  /** Whether the first synthetic click found a nearby swissTLM3D segment. */
   firstWaypointSnapped: boolean;
+  /** Detailed result for every route section. */
   segments: RoutingSegmentBenchmarkResult[];
+  /** Aggregated worker phases and cache counters. */
   phaseTotals: RoutingBenchmarkPhaseTotals;
+  /** Sum of end-to-end measured route durations. */
   totalRouteDurationMs: number;
+  /** Slowest end-to-end route request. */
   maximumRouteDurationMs: number;
+  /** Largest animation-frame delay observed on the UI thread. */
   maximumFrameDelayMs: number;
   /** Whether this browser exposes the main-thread Long Tasks API. */
   longTaskApiSupported: boolean;
+  /** Largest overlapping long task, or `null` when none was observed. */
   maximumLongTaskDurationMs: number | null;
+  /** Total cells loaded during measurement, which should remain zero. */
   unexpectedNetworkCellLoads: number;
 }
 
@@ -104,7 +161,11 @@ function coordinateDistance(first: Coordinate, second: Coordinate): number {
   return Math.hypot(second[0] - first[0], second[1] - first[1]);
 }
 
-/** Returns the phases explicitly timed inside the dynamic routing pipeline. */
+/**
+ * Returns the phases explicitly timed inside the dynamic routing pipeline.
+ * @param timings - Worker-side phase accumulator for one section.
+ * @returns Sum used to isolate scheduling and structured-clone overhead.
+ */
 function measuredPhaseDuration(timings: DynamicRoutingPhaseTimings): number {
   return (
     timings.graphCacheLookupDurationMs +
@@ -118,7 +179,11 @@ function measuredPhaseDuration(timings: DynamicRoutingPhaseTimings): number {
   );
 }
 
-/** Adds one segment's timings to the report-level comparison totals. */
+/**
+ * Adds every segment's timings to report-level comparison totals.
+ * @param segments - Measured route sections in scenario order.
+ * @returns Aggregate phase durations and cache counters.
+ */
 function aggregatePhaseTotals(
   segments: RoutingSegmentBenchmarkResult[],
 ): RoutingBenchmarkPhaseTotals {
@@ -170,7 +235,10 @@ function nextAnimationFrame(): Promise<number> {
   return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
-/** Starts a long-task observer when the browser exposes that diagnostics API. */
+/**
+ * Starts a long-task observer when the browser exposes that diagnostics API.
+ * @returns Observer state and a cleanup callback; unsupported browsers return an inert result.
+ */
 function observeLongTasks(): {
   supported: boolean;
   entries: PerformanceEntry[];
@@ -197,7 +265,13 @@ function observeLongTasks(): {
   };
 }
 
-/** Finds the longest observed task overlapping one measured route operation. */
+/**
+ * Finds the longest observed task overlapping one measured route operation.
+ * @param entries - Long-task entries collected on the main thread.
+ * @param startTime - Route request start in the Performance timeline.
+ * @param endTime - Route response time in the Performance timeline.
+ * @returns Longest overlapping duration, or `null` when none was observed.
+ */
 function maximumOverlappingLongTask(
   entries: PerformanceEntry[],
   startTime: number,
@@ -217,6 +291,12 @@ function maximumOverlappingLongTask(
  * Warms the raw-cell cache by replaying the same route sequence once.
  * Resolved network endpoints are retained because each later live click starts
  * from the previous snapped waypoint, not from the original GPX sample.
+ * @param loader - Session-scoped worker facade whose raw cells must be prepared.
+ * @param scenario - Deterministic synthetic clicks to replay.
+ * @param signal - Cancellation signal shared with the benchmark run.
+ * @param onProgress - Optional UI progress callback.
+ * @returns Snapped first point and section inputs resolved by the warm-up pass.
+ * @throws {Error} Propagates loading, routing, and cancellation failures.
  */
 async function warmScenario(
   loader: DynamicRoutingNetworkLoader,
@@ -271,7 +351,13 @@ async function warmScenario(
   };
 }
 
-/** Simulates the immutable route-step work performed after one routing result. */
+/**
+ * Simulates the immutable route-step work performed after one routing result.
+ * @param steps - Previously committed route steps.
+ * @param routedCoordinates - Worker result, or `null` for a straight fallback.
+ * @param clickedCoordinate - Synthetic destination selected by the scenario.
+ * @returns A new route-step array matching the editable-route update pattern.
+ */
 function commitMeasuredStep(
   steps: RouteStep[],
   routedCoordinates: Coordinate[] | null,
@@ -299,6 +385,11 @@ function commitMeasuredStep(
 
 /**
  * Runs a worker-focused benchmark with network data already present in memory.
+ * @param scenario - GPX-derived synthetic clicks to prepare and replay.
+ * @param graphCacheMode - Cache policy applied only during the measured pass.
+ * @param signal - Cancellation signal for worker and benchmark operations.
+ * @param onProgress - Optional UI progress callback.
+ * @returns Complete per-section and aggregate performance report.
  * @throws {Error} Propagates GPX routing, loading, parsing, and cancellation failures.
  */
 export async function runRoutingBenchmark(

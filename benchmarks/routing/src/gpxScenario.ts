@@ -22,12 +22,15 @@ export type WaypointGenerationStrategy =
   | {
       /** Places clicks at one fixed ground interval, including very short tests. */
       kind: 'regular';
+      /** Requested distance in metres between consecutive synthetic clicks. */
       spacingMeters: number;
     }
   | {
       /** Varies section lengths around a configured average with a stable seed. */
       kind: 'irregular';
+      /** Mean section length in metres before deterministic variation is applied. */
       averageSpacingMeters: number;
+      /** Seed that keeps the generated irregular pattern stable between runs. */
       seed: number;
     };
 
@@ -53,14 +56,21 @@ export interface RoutingBenchmarkScenario {
 
 /** Portable JSON representation suitable for committing as a future fixture. */
 export interface SerializedRoutingBenchmarkScenario {
+  /** Display name inherited from the GPX document. */
   name: string;
+  /** Original uploaded filename retained for traceability. */
   sourceFilename: string;
+  /** Strategy that produced the serialized click sequence. */
   strategy: WaypointGenerationStrategy;
+  /** Total selected GPX segment length in metres. */
   sourceLengthMeters: number;
+  /** Number of detailed vertices in the selected source segment. */
   sourcePointCount: number;
+  /** Number of disconnected GPX segments excluded from this scenario. */
   ignoredSegmentCount: number;
   /** Synthetic clicks stored as WGS 84 longitude/latitude pairs. */
   waypointsWgs84: Coordinate[];
+  /** Cumulative ground distance of each synthetic click. */
   waypointDistancesMeters: number[];
 }
 
@@ -98,7 +108,12 @@ function clampInteger(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
 
-/** Validates a user-configurable ground interval. */
+/**
+ * Validates a user-configurable ground interval.
+ * @param value - Requested spacing in metres.
+ * @returns The unchanged spacing when it is finite and supported.
+ * @throws {Error} When the interval is below 50 metres or not finite.
+ */
 function validatedSpacing(value: number): number {
   if (!Number.isFinite(value) || value < 50) {
     throw new Error('Waypoint spacing must be at least 50 metres.');
@@ -112,6 +127,7 @@ function validatedSpacing(value: number): number {
  * @param totalDistanceMeters - Complete continuous trace length.
  * @param strategy - Deterministic spacing strategy.
  * @returns Ordered distances beginning at zero and ending at the trace length.
+ * @throws {Error} When the trace length or selected spacing cannot produce a bounded scenario.
  */
 export function generateWaypointDistances(
   totalDistanceMeters: number,
@@ -184,7 +200,13 @@ export function generateWaypointDistances(
   return distances;
 }
 
-/** Interpolates one LV95 coordinate at a cumulative ground distance. */
+/**
+ * Interpolates one LV95 coordinate at a cumulative ground distance.
+ * @param coordinates - Continuous source polyline in EPSG:2056.
+ * @param distances - Cumulative metres matching the source coordinates.
+ * @param targetDistance - Requested cumulative distance in metres.
+ * @returns Interpolated coordinate, clamped to the source endpoints.
+ */
 function coordinateAtDistance(
   coordinates: Coordinate[],
   distances: number[],
@@ -221,7 +243,12 @@ function coordinateAtDistance(
   ];
 }
 
-/** Selects the longest continuous GPX segment so deliberate gaps stay disconnected. */
+/**
+ * Selects the longest continuous GPX segment so deliberate gaps stay disconnected.
+ * @param segments - Projected GPX segments that must not be joined together.
+ * @returns Selected coordinates and their cumulative distances.
+ * @throws {Error} When the GPX contains no continuous segment.
+ */
 function selectLongestSegment(segments: Coordinate[][]): {
   coordinates: Coordinate[];
   distances: number[];
@@ -253,6 +280,8 @@ function selectLongestSegment(segments: Coordinate[][]): {
  * @param xml - Complete GPX XML text.
  * @param filename - Uploaded source filename.
  * @param strategy - Click-spacing strategy selected for the benchmark.
+ * @returns Reproducible LV95 click scenario based on the longest GPX segment.
+ * @throws {Error} When GPX parsing or deterministic sampling fails.
  */
 export function createScenarioFromGpx(
   xml: string,
@@ -284,7 +313,11 @@ export function createScenarioFromGpx(
   };
 }
 
-/** Converts a generated scenario to stable, human-readable JSON data. */
+/**
+ * Converts a generated scenario to stable, human-readable JSON data.
+ * @param scenario - In-memory LV95 benchmark scenario.
+ * @returns Portable WGS 84 representation suitable for a committed fixture.
+ */
 export function serializeScenario(
   scenario: RoutingBenchmarkScenario,
 ): SerializedRoutingBenchmarkScenario {

@@ -39,7 +39,11 @@ function createAbortError(): DOMException {
   return new DOMException('The routing operation was aborted.', 'AbortError');
 }
 
-/** Reconstructs errors that callers inspect with `instanceof` or by name. */
+/**
+ * Reconstructs errors that callers inspect with `instanceof` or by name.
+ * @param error - Structured-clone-safe failure returned by the worker.
+ * @returns Main-thread Error or DOMException preserving the meaningful type.
+ */
 function deserializeError(error: SerializedRoutingWorkerError): Error {
   let result: Error;
 
@@ -89,7 +93,12 @@ export class DynamicRoutingNetworkLoader {
     });
   }
 
-  /** Loads local cells and snaps one first waypoint inside the worker. */
+  /**
+   * Loads local cells and snaps one first waypoint inside the worker.
+   * @param coordinate - User-selected coordinate in EPSG:2056.
+   * @param signal - Route-session cancellation signal.
+   * @returns Snapped coordinate, or `null` when no nearby network exists.
+   */
   snap(
     coordinate: Coordinate,
     signal: AbortSignal,
@@ -105,7 +114,13 @@ export class DynamicRoutingNetworkLoader {
     );
   }
 
-  /** Routes one section through the worker-owned corridor graph. */
+  /**
+   * Routes one section through the worker-owned corridor graph.
+   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+   * @param endCoordinate - Newly selected destination in EPSG:2056.
+   * @param signal - Route-session cancellation signal.
+   * @returns Routed plain-data path, or `null` for a straight fallback.
+   */
   route(
     startCoordinate: Coordinate,
     endCoordinate: Coordinate,
@@ -123,7 +138,13 @@ export class DynamicRoutingNetworkLoader {
     );
   }
 
-  /** Routes one section and returns worker-side CPU phase timings. */
+  /**
+   * Routes one section and returns worker-side CPU phase timings.
+   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+   * @param endCoordinate - Synthetic benchmark destination in EPSG:2056.
+   * @param signal - Benchmark cancellation signal.
+   * @returns Routed path and diagnostic timings collected inside the worker.
+   */
   routeWithDiagnostics(
     startCoordinate: Coordinate,
     endCoordinate: Coordinate,
@@ -182,7 +203,12 @@ export class DynamicRoutingNetworkLoader {
     return worker;
   }
 
-  /** Sends one typed operation and bridges optional main-thread cancellation. */
+  /**
+   * Sends one typed operation and bridges optional main-thread cancellation.
+   * @param request - Structured-clone-safe operation with a placeholder request ID.
+   * @param signal - Optional caller signal mirrored by a worker cancel message.
+   * @returns Promise resolved or rejected by the matching worker response.
+   */
   private sendRequest<T>(
     request: RoutingWorkerRequest,
     signal?: AbortSignal,

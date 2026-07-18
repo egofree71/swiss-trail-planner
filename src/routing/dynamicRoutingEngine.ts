@@ -82,7 +82,14 @@ function createRoutingPhaseTimings(): DynamicRoutingPhaseTimings {
   };
 }
 
-/** Maps cells with a bounded worker pool to protect the public API and browser. */
+/**
+ * Maps cells with a bounded worker pool to protect the public API and browser.
+ * @param values - Ordered inputs to process.
+ * @param concurrency - Maximum number of active mapper promises.
+ * @param mapper - Asynchronous operation applied once to each input.
+ * @returns Results in the same order as the input values.
+ * @throws {Error} Propagates the first mapper rejection.
+ */
 async function mapWithConcurrency<T, R>(
   values: T[],
   concurrency: number,
@@ -109,6 +116,9 @@ async function mapWithConcurrency<T, R>(
 /**
  * Merges cell features by stable ID because geometries crossing cell boundaries
  * may be returned by several identify requests.
+ * @param cells - Completed raw cells contributing features.
+ * @param selector - Chooses roads or hiking geometries from one cell.
+ * @returns Deduplicated features in stable insertion order.
  */
 function mergeFeatures(
   cells: LoadedCell[],
@@ -208,6 +218,12 @@ export class DynamicRoutingNetworkEngine {
    * Routes one section while exposing CPU phase timings to the local benchmark.
    * The normal application deliberately calls `route()` and pays no diagnostic
    * clock-reading overhead.
+   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+   * @param endCoordinate - Synthetic benchmark destination in EPSG:2056.
+   * @param signal - Abort signal owned by the benchmark session.
+   * @returns Routed path and aggregated worker-side phase timings.
+   * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
+   * @throws {Error} When GeoAdmin loading or graph construction fails.
    */
   async routeWithDiagnostics(
     startCoordinate: Coordinate,
@@ -224,7 +240,16 @@ export class DynamicRoutingNetworkEngine {
     return { path, timings };
   }
 
-  /** Executes the shared narrow-corridor and optional wider-retry workflow. */
+  /**
+   * Executes the shared narrow-corridor and optional wider-retry workflow.
+   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+   * @param endCoordinate - Newly selected destination in EPSG:2056.
+   * @param signal - Abort signal owned by the caller.
+   * @param timings - Optional benchmark accumulator updated across both attempts.
+   * @returns Routed path, or `null` after normal coverage/connectivity misses.
+   * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
+   * @throws {Error} When provider loading or graph construction fails.
+   */
   private async routeInternal(
     startCoordinate: Coordinate,
     endCoordinate: Coordinate,
@@ -303,7 +328,12 @@ export class DynamicRoutingNetworkEngine {
 
   /**
    * Returns a graph for one exact set of cells, loading and merging missing data.
+   * @param cellKeys - Exact corridor cells required by this routing attempt.
+   * @param signal - Abort signal shared by cell requests.
+   * @param timings - Optional benchmark accumulator for cache and build phases.
+   * @returns Cached or newly built immutable routing graph.
    * @throws {RoutingAreaTooLargeError} When the set exceeds the per-operation cell limit.
+   * @throws {Error} When cell loading or graph construction fails.
    */
   private async getNetwork(
     cellKeys: Set<CellKey>,
@@ -399,6 +429,10 @@ export class DynamicRoutingNetworkEngine {
   /**
    * Returns a completed cell or shares an active request for the same key.
    * Aborted requests are removed so a later route operation can retry cleanly.
+   * @param key - Stable routing-cell identifier.
+   * @param signal - Abort signal that owns a newly created provider request.
+   * @returns Completed cell or the shared in-flight promise.
+   * @throws {Error} Propagates GeoAdmin request and parsing failures.
    */
   private loadCell(
     key: CellKey,

@@ -74,6 +74,9 @@ function addExpandedCell(
  * Returns each grid cell crossed by a segment using an integer line walk.
  * Expanding those cells creates a corridor without downloading the complete
  * bounding rectangle between distant waypoints.
+ * @param startCoordinate - Segment start in EPSG:2056.
+ * @param endCoordinate - Segment end in EPSG:2056.
+ * @returns Ordered grid cells crossed from start to end, both included.
  */
 function cellsAlongSegment(
   startCoordinate: Coordinate,
@@ -117,6 +120,8 @@ function cellsAlongSegment(
  * Returns only cells whose closed extent intersects the maximum snapping box
  * around a first waypoint. This normally yields one cell, two near an edge, or
  * four near a corner.
+ * @param coordinate - First route click in EPSG:2056.
+ * @returns Cells intersecting the complete closed snapping box.
  */
 export function createLocalCellKeys(coordinate: Coordinate): Set<CellKey> {
   const minX = coordinate[0] - MAX_SNAP_DISTANCE;
@@ -141,7 +146,13 @@ export function createLocalCellKeys(coordinate: Coordinate): Set<CellKey> {
   return cells;
 }
 
-/** Creates an expanded routing corridor around cells crossed by a segment. */
+/**
+ * Creates an expanded routing corridor around cells crossed by a segment.
+ * @param startCoordinate - Corridor start in EPSG:2056.
+ * @param endCoordinate - Corridor end in EPSG:2056.
+ * @param radius - Number of neighbouring cells added on every side.
+ * @returns Stable set of required routing-cell keys.
+ */
 export function createCorridorCellKeys(
   startCoordinate: Coordinate,
   endCoordinate: Coordinate,
@@ -156,7 +167,11 @@ export function createCorridorCellKeys(
   return cells;
 }
 
-/** Calculates the outer extent of a non-empty cell set. */
+/**
+ * Calculates the outer extent of a non-empty cell set.
+ * @param cellKeys - Routing cells whose full bounds must be covered.
+ * @returns Combined EPSG:2056 extent.
+ */
 export function combinedExtent(cellKeys: Set<CellKey>): Extent {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
