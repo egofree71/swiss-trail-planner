@@ -34,6 +34,28 @@ const MAX_SUBDIVISION_DEPTH = 3;
 const REQUEST_CONCURRENCY = 4;
 /** Coordinate precision in metres used only for deterministic fallback IDs. */
 const FALLBACK_ID_PRECISION = 0.1;
+/** Maximum time allowed for one GeoAdmin identify attempt. */
+const REQUEST_TIMEOUT_MS = 15_000;
+/** Minimum pause before the single retry of a transient request failure. */
+const RETRY_BASE_DELAY_MS = 400;
+/** Random extra pause that prevents concurrent failed tiles retrying together. */
+const RETRY_JITTER_MS = 600;
+/**
+ * Long server-requested pauses are not retried inside an interactive route edit.
+ * Waiting longer would make the operation appear frozen and could still violate
+ * the provider's requested retry window.
+ */
+const MAX_RETRY_AFTER_MS = 15_000;
+/** HTTP statuses that are commonly transient and safe to retry once. */
+const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 502, 503, 504]);
+
+/** Distinguishes a bounded request timeout from an intentional route cancellation. */
+class GeoAdminRequestTimeoutError extends Error {
+  constructor() {
+    super(`GeoAdmin identify request timed out after ${REQUEST_TIMEOUT_MS} ms.`);
+    this.name = 'GeoAdminRequestTimeoutError';
+  }
+}
 
 /** Untrusted GeoJSON-like geometry returned by GeoAdmin. */
 interface IdentifyGeometry {
@@ -320,13 +342,145 @@ function parseTile(response: IdentifyResponse): ParsedTile {
   };
 }
 
+/** Creates the randomized pause used when no provider delay is supplied. */
+function createRetryDelay(): number {
+  return RETRY_BASE_DELAY_MS + Math.random() * RETRY_JITTER_MS;
+}
+
+/** Reads a Retry-After header expressed as seconds or as an HTTP date. */
+function readRetryAfterMs(response: Response): number | null {
+  const value = response.headers.get('Retry-After');
+
+  if (!value) {
+    return null;
+  }
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000;
+  }
+
+  const retryDate = Date.parse(value);
+  return Number.isFinite(retryDate) ? Math.max(0, retryDate - Date.now()) : null;
+}
+
+/**
+ * Returns the delay for the single retry, or `null` when the response should be
+ * surfaced immediately. A long Retry-After is deliberately not shortened.
+ */
+function getResponseRetryDelay(response: Response): number | null {
+  if (!RETRYABLE_HTTP_STATUSES.has(response.status)) {
+    return null;
+  }
+
+  if (response.status !== 429) {
+    return createRetryDelay();
+  }
+
+  const retryAfterMs = readRetryAfterMs(response);
+
+  if (retryAfterMs === null) {
+    return createRetryDelay();
+  }
+
+  return retryAfterMs <= MAX_RETRY_AFTER_MS ? retryAfterMs : null;
+}
+
+/** Waits before a retry while still reacting immediately to route cancellation. */
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve();
+    }, delayMs);
+
+    const handleAbort = () => {
+      clearTimeout(timeoutId);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    signal.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
+/** Response and optional successful payload produced by one bounded attempt. */
+interface IdentifyAttemptResult {
+  /** Raw response retained for status and Retry-After handling. */
+  response: Response;
+  /** Parsed JSON payload, present only for a successful response. */
+  payload?: IdentifyResponse;
+}
+
+/**
+ * Executes one complete identify attempt with its own timeout while preserving
+ * the caller-owned signal. The timeout covers response headers and JSON body
+ * consumption, while the explicit flag keeps it distinct from route cancellation.
+ */
+async function fetchIdentifyAttempt(
+  url: string,
+  signal: AbortSignal,
+): Promise<IdentifyAttemptResult> {
+  if (signal.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  const attemptController = new AbortController();
+  let timedOut = false;
+
+  const handleAbort = () => {
+    attemptController.abort();
+  };
+
+  signal.addEventListener('abort', handleAbort, { once: true });
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    attemptController.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, { signal: attemptController.signal });
+
+    if (!response.ok) {
+      return { response };
+    }
+
+    return {
+      response,
+      payload: (await response.json()) as IdentifyResponse,
+    };
+  } catch (error) {
+    if (signal.aborted) {
+      throw error;
+    }
+
+    if (timedOut) {
+      throw new GeoAdminRequestTimeoutError();
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener('abort', handleAbort);
+  }
+}
+
+/** Network failures exposed by fetch are TypeError; timeouts use a named error. */
+function isRetryableFetchFailure(error: unknown): boolean {
+  return error instanceof TypeError || error instanceof GeoAdminRequestTimeoutError;
+}
+
 /**
  * Fetches one identify tile from GeoAdmin.
  * @param tile - Tile extent and current subdivision depth.
  * @param signal - Abort signal owned by the current route operation.
  * @returns Normalized tile contents and cap-detection counts.
- * @throws {Error} When GeoAdmin returns a non-success HTTP status.
- * @throws {DOMException} When the request is aborted.
+ * @throws {Error} When both attempts fail or GeoAdmin returns a non-retryable status.
+ * @throws {DOMException} When the route operation is intentionally aborted.
  */
 async function fetchTile(
   tile: TileRequest,
@@ -346,17 +500,40 @@ async function fetchTile(
     lang: 'en',
     limit: String(RESULT_LIMIT),
   });
+  const requestUrl = `${IDENTIFY_ENDPOINT}?${parameters}`;
 
-  const response = await fetch(`${IDENTIFY_ENDPOINT}?${parameters}`, {
-    signal,
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let result: IdentifyAttemptResult;
 
-  if (!response.ok) {
-    throw new Error(`GeoAdmin identify request failed (${response.status}).`);
+    try {
+      result = await fetchIdentifyAttempt(requestUrl, signal);
+    } catch (error) {
+      if (attempt === 0 && isRetryableFetchFailure(error)) {
+        await waitForRetry(createRetryDelay(), signal);
+        continue;
+      }
+
+      throw error;
+    }
+
+    if (result.response.ok) {
+      return parseTile(result.payload ?? {});
+    }
+
+    const retryDelay =
+      attempt === 0 ? getResponseRetryDelay(result.response) : null;
+
+    if (retryDelay !== null) {
+      await waitForRetry(retryDelay, signal);
+      continue;
+    }
+
+    throw new Error(
+      `GeoAdmin identify request failed (${result.response.status}).`,
+    );
   }
 
-  const payload = (await response.json()) as IdentifyResponse;
-  return parseTile(payload);
+  throw new Error('GeoAdmin identify request failed after retry.');
 }
 
 /**

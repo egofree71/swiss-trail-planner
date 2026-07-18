@@ -187,7 +187,9 @@ Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
 reuse, cleanup and retry after an aborted cell request, graph-cache clearing, true
 least-recently-used eviction, size limits, and provider-error propagation without
-live GeoAdmin requests. JSDOM provides the
+live GeoAdmin requests. Focused swissTLM3D API tests additionally protect request
+timeouts, one-shot transient retries, Retry-After handling, and the distinction
+between timeout errors and intentional cancellation. JSDOM provides the
 browser XML primitives needed by GPX import and export tests; provider calls are
 mocked so the suite remains deterministic and does not depend on external
 services.
@@ -712,7 +714,15 @@ routes continuous without hiding genuine request, parsing, or size-limit errors.
 `src/routing/swissTlmApi.ts` owns the GeoAdmin request contract, response
 validation, geometry normalization, recursive request subdivision, result
 deduplication, cancellation, and optional empty-cell handling. It is imported by
-the routing Worker rather than the React/OpenLayers entry graph.
+the routing Worker rather than the React/OpenLayers entry graph. Each identify
+attempt has a 15-second timeout and one internal retry for a network failure,
+timeout, HTTP 408, 429, 502, 503, or 504. Retries without provider guidance wait
+400–1,000 milliseconds with jitter so concurrently failed tiles do not restart
+as one burst. A short `Retry-After` header is respected for HTTP 429; a value
+longer than 15 seconds is surfaced immediately instead of being shortened and
+risking another premature request. Progress counts logical tile requests rather
+than internal attempts, and caller cancellation interrupts both fetches and
+retry delays immediately.
 
 `src/routing/networkRouter.ts` converts every pair of consecutive swissTLM3D
 vertices into graph edges. Endpoints are quantized to absorb tiny coordinate
@@ -1466,9 +1476,9 @@ interaction implementation.
 
 Fetches bounded road and hiking geometries from the GeoAdmin identify endpoint
 directly in EPSG:2056. It owns request tiling, recursive subdivision at result
-limits, response
-normalization, attribute extraction, deduplication, cancellation, and empty-cell
-handling.
+limits, response normalization, attribute extraction, deduplication,
+cancellation, empty-cell handling, per-attempt timeouts, and the single bounded
+retry policy for transient provider failures.
 
 ### `src/routing/networkRouter.ts`
 
@@ -1783,12 +1793,14 @@ section. The same rule applies independently to sections recalculated around a
 moved waypoint or created on either side of an inserted waypoint. Snap mode
 remains enabled for the next click.
 
-Overly large single sections, GeoAdmin transport or parsing failures, and
-result-limit overflow remain errors; they do not modify the existing route. A
-failed waypoint move or insertion discards the temporary preview and restores
-the last committed route state. An active operation is aborted when route mode is
-left or the application unmounts. There is no persistent logging or general
-retry mechanism yet.
+Overly large single sections, persistent GeoAdmin transport or parsing
+failures, and result-limit overflow remain errors; they do not modify the
+existing route. One transient identify failure is retried within the bounded
+routing loader, but the second failure is surfaced normally. A failed waypoint
+move or insertion discards the temporary preview and restores the last committed
+route state. An active operation is aborted when route mode is left or the
+application unmounts. There is no persistent logging or application-wide retry
+mechanism.
 
 Information-layer loading, identify, and popup failures do not affect map
 navigation or route state. Closure and military danger-zone panels report a

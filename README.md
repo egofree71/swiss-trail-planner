@@ -104,7 +104,7 @@ Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
 Current limitations:
 
-- dynamic swissTLM3D routing is experimental and runs entirely in the browser; network loading, graph construction, snapping, and A* run in a dedicated Web Worker;
+- dynamic swissTLM3D routing is experimental and runs entirely in the browser; network loading, graph construction, snapping, and A* run in a dedicated Web Worker, while each GeoAdmin identify attempt has a 15-second timeout and one bounded retry for transient failures;
 - closures and danger zones are informational and do not automatically change
   route calculation;
 - imported GPX routes are read-only and replace the current editable route;
