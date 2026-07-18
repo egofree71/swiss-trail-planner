@@ -135,6 +135,54 @@ describe('DynamicRoutingNetworkLoader worker facade', () => {
     loader.dispose();
   });
 
+  it('ignores a late cancelled response and keeps request IDs isolated', async () => {
+    const loader = new DynamicRoutingNetworkLoader();
+    const controller = new AbortController();
+    const cancelled = loader.snap([2_500_000, 1_100_000], controller.signal);
+    const worker = currentWorker();
+    const firstRequest = worker.messages[0];
+
+    if (firstRequest.type !== 'request') {
+      throw new Error('Expected a routing operation request.');
+    }
+
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+
+    // A worker operation already executing may still answer after cancellation.
+    // The facade must ignore that orphaned response rather than resolving a
+    // later request that happens to use the same method.
+    worker.respond({
+      type: 'success',
+      requestId: firstRequest.requestId,
+      result: [2_500_010, 1_100_010],
+    });
+
+    const next = loader.snap(
+      [2_500_100, 1_100_100],
+      new AbortController().signal,
+    );
+    const secondRequest = worker.messages.find(
+      (message) =>
+        message.type === 'request' &&
+        message.requestId !== firstRequest.requestId,
+    );
+
+    if (!secondRequest || secondRequest.type !== 'request') {
+      throw new Error('Expected a second routing operation request.');
+    }
+
+    expect(secondRequest.requestId).not.toBe(firstRequest.requestId);
+    worker.respond({
+      type: 'success',
+      requestId: secondRequest.requestId,
+      result: [2_500_100, 1_100_100],
+    });
+
+    await expect(next).resolves.toEqual([2_500_100, 1_100_100]);
+    loader.dispose();
+  });
+
   it('terminates the worker and rejects pending work on disposal', async () => {
     const loader = new DynamicRoutingNetworkLoader();
     const pending = loader.getCacheStats();

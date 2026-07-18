@@ -150,6 +150,51 @@ describe('DynamicRoutingNetworkEngine', () => {
     });
   });
 
+  it('cleans an aborted pending cell so the same area can be retried', async () => {
+    moduleMocks.fetchSwissTlmNetworkData.mockImplementationOnce(
+      (_extent: unknown, signal: AbortSignal) =>
+        new Promise<SwissTlmNetworkData>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const engine = new DynamicRoutingNetworkEngine();
+    const coordinate: Coordinate = [1_200, 1_200];
+    const controller = new AbortController();
+    const abortedSnap = engine.snap(coordinate, controller.signal);
+
+    await vi.waitFor(() => {
+      expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(1);
+      expect(engine.getCacheStats().pendingCells).toBe(1);
+    });
+
+    controller.abort();
+
+    await expect(abortedSnap).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => {
+      expect(engine.getCacheStats()).toMatchObject({
+        loadedCells: 0,
+        pendingCells: 0,
+      });
+    });
+
+    moduleMocks.fetchSwissTlmNetworkData.mockResolvedValueOnce(
+      EMPTY_NETWORK_DATA,
+    );
+
+    await expect(
+      engine.snap(coordinate, new AbortController().signal),
+    ).resolves.toEqual(coordinate);
+    expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(2);
+    expect(engine.getCacheStats()).toMatchObject({
+      loadedCells: 1,
+      pendingCells: 0,
+    });
+  });
+
   it('rebuilds a cleared graph from cached raw cells without repeating requests', async () => {
     const engine = new DynamicRoutingNetworkEngine();
     const coordinate = coordinateInColumn(0);

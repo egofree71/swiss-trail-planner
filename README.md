@@ -130,7 +130,7 @@ architecture document rather than duplicated here.
 The focused Vitest suite protects immutable route transformations, route editing,
 GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
 footprints, worker-client messaging, and the dynamic routing engine's corridor,
-cache, retry, and fallback behaviour. Run it once with:
+cache, cancellation cleanup, retry, and fallback behaviour. Run it once with:
 
 ```bash
 npm test

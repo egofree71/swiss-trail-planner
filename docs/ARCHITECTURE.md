@@ -185,8 +185,9 @@ GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
 footprints, the main-thread Worker facade, and the worker-owned routing engine.
 Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
-reuse, graph-cache clearing, true least-recently-used eviction, size limits, and
-provider-error propagation without live GeoAdmin requests. JSDOM provides the
+reuse, cleanup and retry after an aborted cell request, graph-cache clearing, true
+least-recently-used eviction, size limits, and provider-error propagation without
+live GeoAdmin requests. JSDOM provides the
 browser XML primitives needed by GPX import and export tests; provider calls are
 mocked so the suite remains deterministic and does not depend on external
 services.
@@ -1585,7 +1586,8 @@ mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
 `networkRouter.test.ts` protects the optional phase-timing contract without
 changing route geometry; `dynamicRoutingNetworkClient.test.ts` protects Worker
-request correlation, typed errors, cancellation, and disposal; and
+request correlation, typed errors, cancellation, ignored late responses, and
+disposal; and
 `benchmarks/routing/src/gpxScenario.test.ts`
 protects short fixed intervals,
 adaptive bounds, and seeded irregular reproducibility.
