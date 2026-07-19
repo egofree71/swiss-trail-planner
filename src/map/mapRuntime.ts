@@ -71,6 +71,12 @@ const SHOOTING_DANGER_SELECTION_Z_INDEX = 16.5;
 const SHOOTING_DANGER_ZONES_OPACITY = 0.6;
 /** Minimum scale-bar width in screen pixels for legible metric labels. */
 const SCALE_LINE_MIN_WIDTH_PX = 120;
+/**
+ * Pointer drift in screen pixels still accepted as a map click. Raising the
+ * OpenLayers default avoids losing touch taps to small involuntary finger
+ * movement, while keeping the threshold low enough for responsive panning.
+ */
+const MAP_CLICK_MOVE_TOLERANCE_PX = 6;
 
 /** Initial base-map loading state reported to the React shell. */
 export type MapLoadStatus = 'loading' | 'ready' | 'error';
@@ -228,6 +234,7 @@ export function createMapRuntime(
 
   const map = new Map({
     target: options.target,
+    moveTolerance: MAP_CLICK_MOVE_TOLERANCE_PX,
     layers: [
       baseMapLayer,
       grayDetailLayer,

@@ -140,7 +140,9 @@ editable route.
 
 The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
-ordered layers, displays, and markers as one disposable unit; the hook binds
+ordered layers, displays, and markers as one disposable unit. It gives map
+clicks a small six-pixel movement tolerance so involuntary finger drift does not
+silently discard a public-transport selection or route-point tap. The hook binds
 that runtime to React mount, unmount, startup status, browser fullscreen events,
 and suppression of native page-level pinch zoom so touch gestures remain owned
 by the full-screen map. Background selection, hiking-overlay persistence, zoom,
