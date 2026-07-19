@@ -141,9 +141,10 @@ editable route.
 The imperative OpenLayers runtime lives behind `src/map/mapRuntime.ts` and
 `src/map/useMapRuntime.ts`. The factory creates the single native-LV95 map,
 ordered layers, displays, and markers as one disposable unit; the hook binds
-that runtime to React mount, unmount, startup status, and browser fullscreen
-events. Background selection, hiking-overlay persistence, zoom, fullscreen
-requests, and explicit geolocation are coordinated by
+that runtime to React mount, unmount, startup status, browser fullscreen events,
+and suppression of native page-level pinch zoom so touch gestures remain owned
+by the full-screen map. Background selection, hiking-overlay persistence, zoom,
+fullscreen requests, and explicit geolocation are coordinated by
 `src/map/useMapViewControls.ts`. Optional closure, military-danger, and
 public-transport workflows are coordinated by
 `src/map/useMapInformationLayers.ts`, which owns their persisted visibility,
@@ -236,7 +237,7 @@ Browser
    ├── mapRuntime factory + useMapRuntime hook
    │      ├── create and dispose the single OpenLayers map and ordered layers
    │      ├── expose shared displays, startup status, and fullscreen state
-   │      └── synchronize browser fullscreen changes with map sizing
+   │      └── keep fullscreen sizing and native page-pinch suppression in sync
    │
    ├── useMapViewControls hook
    │      ├── own base-map and rendered hiking-overlay choices
@@ -750,14 +751,17 @@ interaction factory and hit-detection primitives for existing waypoints, normal
 route sections, and the optional closing section.
 `src/map/useRouteInteractions.ts` owns that
 interaction's React lifecycle. A 12-pixel point tolerance keeps small waypoints
-usable on touch screens, while a narrower line tolerance selects the closest
-stored incoming section. When several stored sections overlap at the same
-screen distance, the section latest in the current route order wins so repeated
-out-and-back passages behave deterministically. Pressing either target stops map
-panning. Moving an existing point draws an immediate preview with only its
-adjacent sections replaced by straight lines. Pulling the route line inserts a
-temporary point and splits the selected section into two straight previews. No
-network request runs during either drag.
+usable with a pen, while a narrower line tolerance selects the closest stored
+incoming section. When several stored sections overlap at the same screen
+distance, the section latest in the current route order wins so repeated
+out-and-back passages behave deterministically. Mouse and pen presses on either
+target stop map panning and begin direct route editing. Finger input deliberately
+bypasses this interaction so OpenLayers DragPan and PinchZoom remain reliable on
+touch-only devices; touch taps still use the normal endpoint-addition flow. Moving
+an existing point draws an immediate preview with only its adjacent sections
+replaced by straight lines. Pulling the route line inserts a temporary point and
+splits the selected section into two straight previews. No network request runs
+during either drag.
 
 On release, `useRouteInteractions` sends one semantic move, insertion, or
 deletion request to `useEditableRoute`, which delegates affected-section
@@ -1707,11 +1711,13 @@ disposal.
 23. A disconnected or empty corridor is retried once with a wider cell radius.
 24. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-25. Pressing an existing waypoint starts a potential move or deletion sequence
-    and prevents map panning; a click deletes it, while a drag moves it.
-26. Pressing the route line outside a waypoint selects the closest stored normal
-    or closing section and starts a potential insertion sequence. Exact overlap
-    ties select the section latest in the current route order.
+25. Pressing an existing waypoint with a mouse or pen starts a potential move or
+    deletion sequence and prevents map panning; a click deletes it, while a drag
+    moves it. Finger input remains available to OpenLayers map navigation.
+26. Pressing the route line outside a waypoint with a mouse or pen selects the
+    closest stored normal or closing section and starts a potential insertion
+    sequence. Exact overlap ties select the section latest in the current route
+    order.
 27. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
     made during the drag. Releasing a route section without a genuine drag

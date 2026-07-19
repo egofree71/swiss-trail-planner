@@ -74,13 +74,33 @@ export function useMapRuntime(
       window.requestAnimationFrame(() => runtime.map.updateSize());
     };
 
+    const appRoot = initialOptions.fullscreenElementRef.current;
+    const preventNativePageZoom: EventListener = (event) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    };
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    // `touch-action: none` handles standards-based browsers. Safari also
+    // exposes native gesture events, so cancelling them keeps two-finger
+    // scaling inside OpenLayers instead of zooming the document around the
+    // floating controls. Pointer/touch events still reach the map interactions.
+    appRoot?.addEventListener('gesturestart', preventNativePageZoom, {
+      passive: false,
+    });
+    appRoot?.addEventListener('gesturechange', preventNativePageZoom, {
+      passive: false,
+    });
 
     return () => {
       document.removeEventListener(
         'fullscreenchange',
         handleFullscreenChange,
       );
+      appRoot?.removeEventListener('gesturestart', preventNativePageZoom);
+      appRoot?.removeEventListener('gesturechange', preventNativePageZoom);
       runtime.dispose();
 
       if (runtimeRef.current === runtime) {

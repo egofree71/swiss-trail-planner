@@ -22,6 +22,7 @@ body,
 
 body {
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -35,6 +36,9 @@ select {
   width: 100%;
   height: 100%;
   background: #eef2f4;
+  /* The document itself never scrolls. Native panning remains available to
+     temporary scrollable panels, while browser-level pinch zoom is excluded. */
+  touch-action: pan-x pan-y;
 }
 
 .app:fullscreen {
@@ -46,6 +50,9 @@ select {
   position: absolute;
   inset: 0;
   background: #e7ecef;
+  /* Via Helvetica is a full-screen map, so OpenLayers rather than the browser
+     owns one-finger panning and two-finger zooming over the map canvas. */
+  touch-action: none;
 }
 
 .app--route-creation .map,

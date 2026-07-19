@@ -77,7 +77,7 @@ export interface RouteDragCallbacks {
   ) => void;
 }
 
-/** Pointer tolerance in screen pixels, deliberately larger than the visible point on touch screens. */
+/** Pointer tolerance in screen pixels, deliberately larger than the visible point for pen input. */
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
 /** Route-line tolerance in screen pixels, matching the white casing around the red line. */
 const ROUTE_SEGMENT_HIT_TOLERANCE_PX = 7;
@@ -283,7 +283,13 @@ export function createRouteDragInteraction(
 
   return new PointerInteraction({
     handleDownEvent: (event: MapBrowserEvent) => {
-      if (!callbacks.canStart()) {
+      const pointerType = (event.originalEvent as PointerEvent).pointerType;
+
+      // A finger must remain available to OpenLayers DragPan and PinchZoom.
+      // Direct route reshaping is precise enough for a mouse or pen, but
+      // capturing touch immediately makes a route-dense mobile map difficult
+      // to navigate. Touch taps still reach the normal endpoint-click flow.
+      if (pointerType === 'touch' || !callbacks.canStart()) {
         return false;
       }
 
