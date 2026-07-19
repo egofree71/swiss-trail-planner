@@ -184,6 +184,26 @@ export function useRouteInteractions(
         !options.isOperationPending() &&
         options.getCurrentRouteState().steps.length > 0,
       getRouteState: options.getCurrentRouteState,
+      onTapWaypoint: (target, pixel) => {
+        const expectedState = options.getCurrentRouteState();
+        const step = expectedState.steps[target.waypointIndex];
+
+        // A route mutation during the press must not redirect the tap to a
+        // different waypoint that happens to reuse the same array index.
+        if (
+          !step ||
+          coordinateDistanceSquared(step.waypoint, target.coordinate) > 0
+        ) {
+          return;
+        }
+
+        routeInteractionReleaseRef.current = {
+          pixel: [...pixel],
+          expiresAt:
+            performance.now() + ROUTE_INTERACTION_CLICK_SUPPRESSION_MS,
+        };
+        options.onDeleteWaypoint(expectedState, target.waypointIndex);
+      },
       onStart: (target: RouteDragTarget) => {
         const expectedState = options.getCurrentRouteState();
         const { steps, closure } = expectedState;
@@ -325,9 +345,10 @@ export function useRouteInteractions(
         setIsInteractionActive(false);
         setRouteContextHint(null);
 
-        // Waypoint clicks are deletions, while every genuine drag owns its
-        // delayed `singleclick`. A click-only section press remains available to
-        // append a new endpoint from the current route end.
+        // Mouse and pen waypoint clicks are deletions, while every genuine
+        // drag owns its delayed `singleclick`. Touch waypoint taps are handled
+        // separately before a preview starts. A click-only section press remains
+        // available to append a new endpoint from the current route end.
         if (target.type === 'waypoint' || didDrag) {
           routeInteractionReleaseRef.current = {
             pixel: [...pixel],
@@ -461,8 +482,8 @@ export function useRouteInteractions(
         return;
       }
 
-      // A waypoint click belongs to deletion. A simple section click remains a
-      // valid endpoint addition, while a genuine drag is handled above.
+      // A waypoint click or tap belongs to deletion. A simple section click
+      // remains a valid endpoint addition, while a genuine drag is handled above.
       if (
         display &&
         getRouteWaypointIndexAtPixel(map, display, event.pixel) !== null

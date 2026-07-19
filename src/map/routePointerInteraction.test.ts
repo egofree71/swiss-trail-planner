@@ -79,6 +79,7 @@ function createHarness(hitTarget: HitTarget): InteractionHarness {
     canStart: vi.fn(() => true),
     getRouteState: vi.fn(() => ROUTE_STATE),
     onStart: vi.fn(),
+    onTapWaypoint: vi.fn(),
     onDrag: vi.fn(),
     onCancel: vi.fn(),
     onHover: vi.fn(),
@@ -136,7 +137,7 @@ describe('route pointer interaction on touch screens', () => {
     expect(callbacks.onStart).not.toHaveBeenCalled();
   });
 
-  it('does not turn a waypoint tap or normal finger tremor into an edit', () => {
+  it('reports a waypoint tap without starting a drag preview', () => {
     const { interaction, callbacks, createEvent } = createHarness('waypoint');
 
     expect(
@@ -145,6 +146,11 @@ describe('route pointer interaction on touch screens', () => {
     interaction.handleEvent(createEvent('pointerdrag', [105, 100]));
     interaction.handleEvent(createEvent('pointerup', [105, 100], 'touch', 0));
 
+    expect(callbacks.onTapWaypoint).toHaveBeenCalledTimes(1);
+    expect(callbacks.onTapWaypoint).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'waypoint', waypointIndex: 0 }),
+      [105, 100],
+    );
     expect(callbacks.onStart).not.toHaveBeenCalled();
     expect(callbacks.onDrag).not.toHaveBeenCalled();
     expect(callbacks.onEnd).not.toHaveBeenCalled();
@@ -171,6 +177,7 @@ describe('route pointer interaction on touch screens', () => {
       true,
       [112, 100],
     );
+    expect(callbacks.onTapWaypoint).not.toHaveBeenCalled();
   });
 
   it('does not turn a route-section tap or normal finger tremor into an edit', () => {
@@ -184,6 +191,7 @@ describe('route pointer interaction on touch screens', () => {
 
     expect(callbacks.onStart).not.toHaveBeenCalled();
     expect(callbacks.onDrag).not.toHaveBeenCalled();
+    expect(callbacks.onTapWaypoint).not.toHaveBeenCalled();
     expect(callbacks.onEnd).not.toHaveBeenCalled();
   });
 
@@ -225,6 +233,7 @@ describe('route pointer interaction on touch screens', () => {
 
     expect(callbacks.onStart).toHaveBeenCalledTimes(1);
     expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onTapWaypoint).not.toHaveBeenCalled();
     expect(callbacks.onEnd).not.toHaveBeenCalled();
   });
 
@@ -257,6 +266,7 @@ describe('route pointer interaction on touch screens', () => {
     interaction.handleEvent(createEvent('pointerup', [112, 100], 'touch', 1));
 
     expect(callbacks.onCancel).toHaveBeenCalledTimes(1);
+    expect(callbacks.onTapWaypoint).not.toHaveBeenCalled();
     expect(callbacks.onEnd).not.toHaveBeenCalled();
   });
 });

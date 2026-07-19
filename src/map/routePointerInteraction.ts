@@ -62,8 +62,13 @@ export interface RouteDragCallbacks {
   canStart: () => boolean;
   /** Returns the current immutable route state for line hit detection. */
   getRouteState: () => RouteState;
-  /** Called once when an existing waypoint or route section is pressed. */
+  /** Called once when an existing waypoint or route section starts a drag edit. */
   onStart: (target: RouteDragTarget) => void;
+  /** Reports a touch tap on an existing waypoint without starting a drag preview. */
+  onTapWaypoint: (
+    target: Extract<RouteDragTarget, { type: 'waypoint' }>,
+    pixel: Pixel,
+  ) => void;
   /** Called for visual previews while the pointer moves. */
   onDrag: (target: RouteDragTarget, coordinate: Coordinate) => void;
   /** Restores committed geometry when a multi-touch gesture cancels an edit. */
@@ -290,8 +295,10 @@ export function getRouteSegmentHitAtPixel(
  * network recalculation only after release. Mouse and pen presses may select
  * waypoints or sections. A finger may also select a section when the gesture
  * starts very close to the displayed itinerary; gestures starting elsewhere
- * remain available to OpenLayers map navigation. Returning `true` on pointer
- * down prevents DragPan from moving the map beneath an active edit.
+ * remain available to OpenLayers map navigation. A touch tap on a waypoint is
+ * reported separately so deletion does not require a temporary drag preview.
+ * Returning `true` on pointer down prevents DragPan from moving the map beneath
+ * an active edit.
  */
 export function createRouteDragInteraction(
   display: RouteDisplay,
@@ -503,13 +510,20 @@ export function createRouteDragInteraction(
         (isTouchInteraction
           ? ROUTE_TOUCH_EDIT_DRAG_DISTANCE_PX
           : ROUTE_EDIT_DRAG_DISTANCE_PX) ** 2;
+      const shouldReportTouchWaypointTap =
+        isTouchInteraction &&
+        releasedTarget.type === 'waypoint' &&
+        !didDrag &&
+        !hasStartedEdit;
       const shouldReportRelease = hasStartedEdit;
 
       resetDragState();
       callbacks.onHover(null, null);
       updateRouteEditCursor(event.map, null, false);
 
-      if (shouldReportRelease) {
+      if (shouldReportTouchWaypointTap) {
+        callbacks.onTapWaypoint(releasedTarget, [...event.pixel]);
+      } else if (shouldReportRelease) {
         callbacks.onEnd(
           releasedTarget,
           [...event.coordinate],

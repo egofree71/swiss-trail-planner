@@ -762,9 +762,10 @@ so repeated out-and-back passages behave deterministically. Mouse and pen
 presses on either target stop map panning and begin direct route editing. A
 finger may capture an existing waypoint or a section when the gesture starts
 very close to the visible itinerary, and must move eight screen pixels before
-the preview begins. This absorbs normal finger tremor and leaves a simple tap
-without destructive effect. Finger drags that start farther from the route
-remain available to OpenLayers DragPan and PinchZoom. A second finger cancels
+the preview begins. This absorbs normal finger tremor while keeping a waypoint
+tap separate from drag preview so it can trigger deletion. Finger drags that
+start farther from the route remain available to OpenLayers DragPan and
+PinchZoom. A second finger cancels
 any active preview before map pinch zoom continues. Moving an existing point
 draws a preview with only its adjacent sections replaced by straight lines.
 Pulling the route line inserts a temporary point and splits the selected section
@@ -1146,9 +1147,10 @@ routing algorithms or history. It turns clicks and drags into semantic endpoint,
 move, insertion, and deletion callbacks, keeps straight drag previews local to
 the vector display, suppresses the delayed `singleclick` after a handled gesture,
 clamps contextual hover guidance inside the map, and restores committed geometry
-when a gesture is cancelled or rejected. Touch input may move an existing
-waypoint after a deliberate drag, while route-section gestures stay reserved for
-map navigation and multi-touch cancellation restores the last committed route.
+when a gesture is cancelled or rejected. Touch input may delete a waypoint by
+tap, move one after a deliberate drag, or insert one by dragging very close to a
+route section; gestures starting farther from the itinerary remain available to
+map navigation, and multi-touch cancellation restores the last committed route.
 
 ### `src/map/mapRuntime.ts`
 
@@ -1502,9 +1504,10 @@ interaction factory, contextual hover targets, and route-edit cursor state. It
 reports semantic pointer events and depends on `routeDisplay.ts` only for the
 route layer and its private waypoint metadata accessor. `useRouteInteractions`
 owns the React lifecycle and coordinates display previews with route mutations.
-The interaction gives touch waypoints a larger target and delayed drag threshold,
-uses a deliberately narrow touch tolerance for route sections, and cancels a
-preview when a second finger turns the gesture into map pinch zoom.
+The interaction gives touch waypoints a larger target, reports tap deletion
+without opening a drag preview, applies a delayed drag threshold, uses a
+deliberately narrow touch tolerance for route sections, and cancels a preview
+when a second finger turns the gesture into map pinch zoom.
 
 ### `src/map/route.ts`
 
@@ -1639,8 +1642,8 @@ segment-local elevation totals, monotone imported-profile interpolation, the
 Swiss hiking-time model, and a mocked GeoAdmin profile response;
 `itineraryDirection.test.ts` protects sparse arrow counts, scale
 limits, waypoint clearance, bend rejection, reversal, and out-and-back collision
-shifts; `routePointerInteraction.test.ts` protects touch waypoint and section
-drag thresholds, off-route map-navigation pass-through, non-destructive taps,
+shifts; `routePointerInteraction.test.ts` protects touch waypoint deletion,
+waypoint and section drag thresholds, off-route map-navigation pass-through,
 and multi-touch cancellation;
 `locationSearch.test.ts` protects normalized language-specific cache
 keys, bounded LRU eviction, error retry, strict coordinate validation, safe label
@@ -1744,11 +1747,11 @@ disposal.
 23. A disconnected or empty corridor is retried once with a wider cell radius.
 24. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-25. Pressing an existing waypoint with a mouse or pen starts a potential move or
-    deletion sequence and prevents map panning; a click deletes it, while a drag
-    moves it. A finger may also move the waypoint after an eight-pixel deliberate
-    drag, but a simple touch does not delete it. A second finger cancels the
-    preview so pinch zoom can take over.
+25. Pressing an existing waypoint starts a potential move or deletion sequence
+    and prevents map panning. A mouse or pen click deletes it, while a drag moves
+    it. A finger tap also deletes it without first opening a preview; moving at
+    least eight pixels instead starts waypoint dragging. A second finger cancels
+    the preview so pinch zoom can take over.
 26. Pressing the route line outside a waypoint selects the closest stored normal
     or closing section and starts a potential insertion sequence. Touch selection
     uses a narrow ten-pixel screen tolerance, so a finger drag starting very close
@@ -1771,9 +1774,9 @@ disposal.
     the route. No duplicate start waypoint is created.
 31. While the loop is closed, empty-map clicks do not append another waypoint;
     the closing section remains draggable and the first and last waypoints remain editable.
-32. Clicking a waypoint with a mouse or pen deletes it; any replacement
-    connection or rebuilt loop uses the current snap mode, while unrelated
-    sections remain unchanged.
+32. Clicking or tapping a waypoint deletes it; any replacement connection or
+    rebuilt loop uses the current snap mode, while unrelated sections remain
+    unchanged.
 33. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
