@@ -22,7 +22,7 @@ time.
 |---|---|
 | Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, sparse hollow direction arrows, optional swissTLM3D snapping in a dedicated routing worker, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; pointer position is mirrored in both directions between the map route and the open profile |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; pointer position is mirrored in both directions between the map route and the open profile, including horizontal finger exploration on touch screens |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX track export with sub-metre geometry simplification, geographic metadata bounds, and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
@@ -80,8 +80,9 @@ http://localhost:5173/via-helvetica/
    ascent, descent, Swiss hiking-time estimate, and elevation profile use the same
    bottom summary as an editable route. Moving the pointer over either itinerary
    shows its position with a circle on the map; when the profile is open, the same
-   position is also mirrored in the chart. Moving over the chart continues to show
-   the matching position on the map. Complete embedded GPX elevations are
+   position is also mirrored in the chart. Moving over the chart, or dragging a
+   finger horizontally across it, shows the matching position on the map.
+   Complete embedded GPX elevations are
    reused; GeoAdmin supplies the profile only when they are unavailable.
    Starting a new route replaces the imported itinerary.
 6. Outside route-creation mode, click visible closures, danger zones, or public

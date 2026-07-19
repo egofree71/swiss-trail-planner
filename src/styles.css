@@ -1063,6 +1063,10 @@ select {
   width: 100%;
   height: auto;
   min-height: 8rem;
+  /* The chart owns one-finger exploration so horizontal touch movement keeps
+     delivering pointer events instead of becoming a native page gesture. */
+  touch-action: none;
+  user-select: none;
 }
 
 .route-elevation-profile-grid {

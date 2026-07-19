@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -372,6 +373,7 @@ export default function RouteElevationProfile({
   const formattedMaximum = formatAltitude(maximumElevation, integerFormat);
   const [hoveredPoint, setHoveredPoint] =
     useState<HoveredProfilePoint | null>(null);
+  const activeTouchPointerIdRef = useRef<number | null>(null);
   const plotWidth =
     CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   const chartElevationRange =
@@ -429,7 +431,7 @@ export default function RouteElevationProfile({
     onHoverDistanceChange?.(null);
   }, [onHoverDistanceChange]);
 
-  const handlePointerMove = useCallback(
+  const updateFromPointer = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>) => {
       const chartBounds = event.currentTarget.getBoundingClientRect();
 
@@ -455,6 +457,74 @@ export default function RouteElevationProfile({
       profilePointAtDistance,
       totalDistance,
     ],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (!event.isPrimary || event.pointerType !== 'touch') {
+        return;
+      }
+
+      // Capturing the finger keeps exploration continuous when it drifts
+      // outside the compact plot before release.
+      activeTouchPointerIdRef.current = event.pointerId;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
+
+      updateFromPointer(event);
+    },
+    [updateFromPointer],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (
+        event.pointerType === 'touch' &&
+        activeTouchPointerIdRef.current !== event.pointerId
+      ) {
+        return;
+      }
+
+      if (event.pointerType === 'touch') {
+        event.preventDefault();
+      }
+
+      updateFromPointer(event);
+    },
+    [updateFromPointer],
+  );
+
+  const finishTouchExploration = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (activeTouchPointerIdRef.current !== event.pointerId) {
+        return;
+      }
+
+      activeTouchPointerIdRef.current = null;
+
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+
+      clearHover();
+    },
+    [clearHover],
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    if (activeTouchPointerIdRef.current === null) {
+      clearHover();
+    }
+  }, [clearHover]);
+
+  const handleLostPointerCapture = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>) => {
+      if (activeTouchPointerIdRef.current === event.pointerId) {
+        activeTouchPointerIdRef.current = null;
+        clearHover();
+      }
+    },
+    [clearHover],
   );
 
   useEffect(() => {
@@ -494,9 +564,12 @@ export default function RouteElevationProfile({
           maximum: formattedMaximum,
         })}
         preserveAspectRatio="xMidYMid meet"
+        onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerLeave={clearHover}
-        onPointerCancel={clearHover}
+        onPointerUp={finishTouchExploration}
+        onPointerLeave={handlePointerLeave}
+        onPointerCancel={finishTouchExploration}
+        onLostPointerCapture={handleLostPointerCapture}
       >
         {Array.from({ length: GRID_LINE_COUNT }, (_, index) => {
           const fraction = index / (GRID_LINE_COUNT - 1);

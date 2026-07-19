@@ -831,11 +831,13 @@ the guide, marker, and header instead of rebuilding the complete SVG paths. The
 header keeps the real minimum and maximum elevations, while the chart enforces
 a minimum 40-metre vertical range with rounded axis bounds so small local
 variations are not visually exaggerated. Larger profiles retain automatic
-scaling with a small margin around their extrema. Pointer movement interpolates
-the profile distance and altitude, draws a vertical chart guide, and publishes
-only cumulative distance to `useItineraryMetrics`. A cumulative distance
-selected by the hook's map listener drives the same guide and header values
-while the profile is open.
+scaling with a small margin around their extrema. Mouse movement or a captured
+one-finger drag interpolates the profile distance and altitude, draws a vertical
+chart guide, and publishes only cumulative distance to `useItineraryMetrics`.
+The SVG reserves its touch gesture so the browser does not cancel horizontal
+exploration, while releasing the finger clears the transient selection. A
+cumulative distance selected by the hook's map listener drives the same guide
+and header values while the profile is open.
 
 Reversal uses `reverseRouteState()` to reverse stored geometry without issuing
 another routing request. Open routes reverse waypoint order normally. Closed
@@ -1377,8 +1379,10 @@ accumulated iteratively so dense imported profiles do not rely on large
 argument spreads.
 Pointer exploration adds a chart guide, replaces the header range temporarily
 with distance and altitude, and emits cumulative route distance without owning
-map state. When the map supplies a hovered route distance, the mounted chart
-uses the same guide and header presentation.
+map state. Touch exploration captures one primary finger for a continuous
+horizontal drag and releases the transient selection with the gesture. When the
+map supplies a hovered route distance, the mounted chart uses the same guide and
+header presentation.
 
 ### `src/map/routeProfileMarker.ts`
 
@@ -1768,8 +1772,9 @@ disposal.
 38. The metrics hook maps pointer movement across the displayed itinerary to a
     cumulative distance and transient circle. When the profile is open, the same
     distance updates its guide, altitude, and distance.
-39. Moving across the chart performs the inverse lookup through the same hook and
-    updates the transient marker above the corresponding map position.
+39. Moving a mouse or dragging one finger across the chart performs the inverse
+    lookup through the same hook and updates the transient marker above the
+    corresponding map position.
 40. Undo and redo exchange complete stored route states without routing again.
 41. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
