@@ -128,7 +128,8 @@ architecture document rather than duplicated here.
 
 The focused Vitest suite protects immutable route transformations, route editing,
 GPX parsing, batch projection, and export, route metrics, directional-arrow
-placement, passenger-stop filtering and buffered viewport loading, routing-grid
+placement, location-search caching and provider normalization, passenger-stop
+filtering and buffered viewport loading, routing-grid
 footprints, worker-client messaging, and the dynamic routing engine's corridor,
 cache, cancellation cleanup, retry, and fallback behaviour. Run it once with:
 

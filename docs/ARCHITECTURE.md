@@ -544,22 +544,34 @@ The request uses `type=locations` and limits `origins` to:
 - `zipcode` for localities and postal codes;
 - `gazetteer` for geographic names.
 
-The UI starts searching after two characters and 300 milliseconds of inactivity.
+The UI starts searching after two characters. Before scheduling the normal
+300-millisecond debounce, it checks a module-owned exact-result cache keyed by
+language and an NFC-normalized, case-folded query. Successful responses,
+including empty result lists, remain available for the browser session in a
+64-entry least-recently-used cache. Returning to a recent query therefore
+reopens its suggestions immediately without a loading flash or another provider
+request. Errors and in-flight promises are not cached, so every uncached search
+retains its own cancellation lifecycle.
+
 Whenever the search field receives focus, `LocationSearch` notifies `App.tsx` to
 close any public-transport, hiking-closure, or shooting-danger information
 panel, clear its visual selection, and abort pending popup work. This also covers
 a previously entered query whose cached suggestions reopen immediately on
 focus, preventing the temporary list from being hidden by an older map-
-information panel. Each search effect owns an `AbortController`, so changing the
-query also cancels the older search request.
+information panel. Each uncached search effect owns an `AbortController`, so
+changing the query also cancels the older request.
 
-SearchServer labels may contain simple HTML emphasis tags. The API client parses
-them as an HTML document, removes italic classification text, and returns only
-plain text to React. The UI never injects returned HTML.
+SearchServer labels may contain simple HTML emphasis tags. The API client reuses
+one `DOMParser` for all labels in a response, removes italic classification text,
+and returns only plain text to React. Empty strings, null values, booleans, and
+other invalid coordinate values are rejected rather than being coerced to zero.
+The UI never injects returned HTML.
 
 The component supports mouse, touch, and keyboard interaction:
 
 - arrow keys change the active result;
+- Home and End select the first or final result;
+- the active option is scrolled into the visible part of the temporary panel;
 - Enter selects it;
 - Escape closes the panel;
 - a pointer press outside closes the panel.
@@ -981,6 +993,7 @@ via-helvetica/
 │   │   ├── MapLayersSelector.tsx
 │   │   ├── PublicTransportStopPopup.tsx
 │   │   ├── LanguageSelector.tsx
+│   │   ├── LocationSearch.test.ts
 │   │   ├── LocationSearch.tsx
 │   │   ├── RouteControls.tsx
 │   │   ├── RouteElevationProfile.tsx
@@ -1043,6 +1056,7 @@ via-helvetica/
 │   │   ├── routingGrid.ts
 │   │   └── swissTlmApi.ts
 │   ├── search/
+│   │   ├── locationSearch.test.ts
 │   │   └── locationSearch.ts
 │   ├── App.tsx
 │   ├── main.tsx
@@ -1296,10 +1310,10 @@ or persistence logic.
 Owns the search-field interface:
 
 - query state;
-- debounce timing;
+- exact-cache lookup before debounce timing;
 - request cancellation lifecycle;
 - result-panel visibility;
-- keyboard navigation;
+- keyboard navigation and active-option visibility;
 - notification when the user starts editing a non-empty query;
 - result selection.
 
@@ -1530,10 +1544,13 @@ routing code into the application bundle.
 
 ### `src/search/locationSearch.ts`
 
-Owns the SearchServer HTTP contract, response validation, label normalization,
-language-aware requests, origin identifiers, duplicate removal, and result
-limits. It deliberately returns language-neutral origins so React translates
-category labels.
+Owns the SearchServer HTTP contract, strict response validation, label
+normalization, language-aware requests, origin identifiers, duplicate removal,
+result limits, and the bounded exact-result session cache. Cache keys include
+the language because provider labels are localized; successful empty responses
+are cached, while provider errors and in-flight requests are not. The module
+deliberately returns language-neutral origins so React translates category
+labels.
 
 ### `src/i18n/I18nContext.tsx`
 
@@ -1589,7 +1606,10 @@ monotone imported-profile
 interpolation, the Swiss hiking-time model, and a mocked GeoAdmin profile
 response; `itineraryDirection.test.ts` protects sparse arrow counts, scale
 limits, waypoint clearance, bend rejection, reversal, and out-and-back collision
-shifts; `publicTransportStopModel.test.ts` covers
+shifts; `locationSearch.test.ts` protects normalized language-specific cache
+keys, bounded LRU eviction, error retry, strict coordinate validation, safe label
+normalization, and duplicate removal; `LocationSearch.test.ts` protects Home/End
+navigation and visible active-option tracking; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
 `publicTransportStopsViewport.test.ts` protects request margins, buffered reuse,
 and zoom or canvas-size invalidation; `publicTransportStopsApi.test.ts` protects
@@ -1748,8 +1768,10 @@ disposal.
 48. `useMapRuntime` publishes `fullscreenchange` state and resizes OpenLayers.
 49. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
-    before existing or newly requested suggestions appear. Location search and
-    browser geolocation otherwise continue to operate independently.
+    before existing or newly requested suggestions appear. Exact successful
+    searches can reopen immediately from the bounded language-aware session
+    cache; uncached input keeps the normal debounce and abort lifecycle. Location
+    search and browser geolocation otherwise continue to operate independently.
 50. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
 51. A push to `main` triggers the Pages workflow, which installs locked

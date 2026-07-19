@@ -1,6 +1,8 @@
 /**
  * Business context: adapts the official GeoAdmin SearchServer response to the
- * small location-search contract used by the map interface.
+ * small location-search contract used by the map interface. Repeated searches
+ * are cached for the browser session so common typing and deletion cycles do
+ * not issue the same provider request again.
  */
 import type { Language } from '../i18n/translations';
 
@@ -9,6 +11,12 @@ const SEARCH_ENDPOINT =
 
 /** Maximum results displayed by the compact search panel. */
 const RESULT_LIMIT = 8;
+/**
+ * Maximum exact searches retained for the browser session. The small LRU bound
+ * prevents an unusually long session from growing memory without limit while
+ * preserving the recent queries most likely to be revisited.
+ */
+const SEARCH_CACHE_LIMIT = 64;
 const SEARCH_ORIGINS = ['zipcode', 'gg25', 'gazetteer'] as const;
 
 /** GeoAdmin origin used to translate the category in the interface layer. */
@@ -39,33 +47,56 @@ interface SearchServerItem {
 
 /** Normalized location result returned to the React component. */
 export interface LocationSearchResult {
+  /** Stable option identifier built from the provider origin and item ID. */
   id: string;
+  /** Plain-text place label safe to render directly through React. */
   label: string;
+  /** Language-neutral category translated by the interface layer. */
   origin: SearchOrigin;
+  /** Validated WGS84 latitude in decimal degrees. */
   latitude: number;
+  /** Validated WGS84 longitude in decimal degrees. */
   longitude: number;
 }
+
+const locationSearchCache = new Map<string, LocationSearchResult[]>();
 
 function isSearchOrigin(value: string): value is SearchOrigin {
   return SEARCH_ORIGINS.includes(value as SearchOrigin);
 }
 
+/**
+ * Reads an untrusted provider coordinate without accepting JavaScript's
+ * surprising empty-string, null, or boolean coercions as numeric zero.
+ * @param value - Runtime value returned by SearchServer.
+ * @returns A finite number, or null when the value is absent or invalid.
+ */
 function readFiniteNumber(value: unknown): number | null {
-  const number = typeof value === 'number' ? value : Number(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+
+  const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-/*
- * SearchServer labels contain simple emphasis tags. Removing the italic
- * classification keeps useful names and municipality information while
- * avoiding direct HTML injection into React.
+/**
+ * Removes provider-only italic classification while preserving visible text,
+ * emphasis content, and decoded HTML entities as safe plain text.
+ * @param value - SearchServer label with optional simple HTML markup.
+ * @param parser - Parser reused for every item in the same provider response.
+ * @returns Normalized plain text, or an empty string for an invalid label.
  */
-function normalizeLabel(value: unknown): string {
+function normalizeLabel(value: unknown, parser: DOMParser): string {
   if (typeof value !== 'string') {
     return '';
   }
 
-  const document = new DOMParser().parseFromString(value, 'text/html');
+  const document = parser.parseFromString(value, 'text/html');
 
   document.querySelectorAll('i').forEach((element) => {
     element.remove();
@@ -77,7 +108,87 @@ function normalizeLabel(value: unknown): string {
 }
 
 /**
+ * Builds the exact session-cache key. Unicode normalization makes visually
+ * identical composed and decomposed accents share an entry, while the language
+ * remains part of the key because SearchServer localizes returned labels.
+ */
+function createLocationSearchCacheKey(
+  searchText: string,
+  language: Language,
+): string {
+  const normalizedText = searchText
+    .trim()
+    .normalize('NFC')
+    .toLocaleLowerCase(language);
+
+  return `${language}:${normalizedText}`;
+}
+
+function cloneLocationSearchResults(
+  results: LocationSearchResult[],
+): LocationSearchResult[] {
+  return results.map((result) => ({ ...result }));
+}
+
+/**
+ * Returns an exact successful search cached for the current browser session.
+ * Reading an entry promotes it so the bounded cache keeps recently reused
+ * queries rather than merely the most recently created ones.
+ * @param searchText - User-entered place text.
+ * @param language - Language used for localized provider labels.
+ * @returns A defensive result copy, or null when no exact entry is cached.
+ */
+export function getCachedLocationSearch(
+  searchText: string,
+  language: Language,
+): LocationSearchResult[] | null {
+  const cacheKey = createLocationSearchCacheKey(searchText, language);
+  const cachedResults = locationSearchCache.get(cacheKey);
+
+  if (cachedResults === undefined) {
+    return null;
+  }
+
+  locationSearchCache.delete(cacheKey);
+  locationSearchCache.set(cacheKey, cachedResults);
+
+  return cloneLocationSearchResults(cachedResults);
+}
+
+function cacheLocationSearchResults(
+  searchText: string,
+  language: Language,
+  results: LocationSearchResult[],
+): void {
+  const cacheKey = createLocationSearchCacheKey(searchText, language);
+
+  locationSearchCache.delete(cacheKey);
+  locationSearchCache.set(
+    cacheKey,
+    cloneLocationSearchResults(results),
+  );
+
+  while (locationSearchCache.size > SEARCH_CACHE_LIMIT) {
+    const oldestKey = locationSearchCache.keys().next().value;
+
+    if (oldestKey === undefined) {
+      break;
+    }
+
+    locationSearchCache.delete(oldestKey);
+  }
+}
+
+/** Clears the session cache, primarily for deterministic regression tests. */
+export function clearLocationSearchCache(): void {
+  locationSearchCache.clear();
+}
+
+/**
  * Searches official Swiss place indexes in the selected interface language.
+ * Exact successful responses, including empty result lists, are retained in a
+ * bounded session cache. Errors and in-flight promises are deliberately not
+ * cached so each request keeps its own cancellation lifecycle.
  * @param searchText - User-entered place text.
  * @param language - Language passed to GeoAdmin for returned labels.
  * @param signal - Abort signal owned by the debounced React effect.
@@ -89,6 +200,12 @@ export async function searchLocations(
   language: Language,
   signal: AbortSignal,
 ): Promise<LocationSearchResult[]> {
+  const cachedResults = getCachedLocationSearch(searchText, language);
+
+  if (cachedResults !== null) {
+    return cachedResults;
+  }
+
   const parameters = new URLSearchParams({
     searchText,
     type: 'locations',
@@ -112,12 +229,13 @@ export async function searchLocations(
 
   const payload = (await response.json()) as SearchServerResponse;
   const uniqueResults = new Map<string, LocationSearchResult>();
+  const labelParser = new DOMParser();
 
   for (const item of payload.results ?? []) {
     const attrs = item.attrs;
     const latitude = readFiniteNumber(attrs?.lat);
     const longitude = readFiniteNumber(attrs?.lon);
-    const label = normalizeLabel(attrs?.label);
+    const label = normalizeLabel(attrs?.label, labelParser);
     const origin =
       typeof attrs?.origin === 'string' ? attrs.origin : '';
 
@@ -146,5 +264,12 @@ export async function searchLocations(
     });
   }
 
-  return Array.from(uniqueResults.values()).slice(0, RESULT_LIMIT);
+  const results = Array.from(uniqueResults.values()).slice(
+    0,
+    RESULT_LIMIT,
+  );
+
+  cacheLocationSearchResults(searchText, language, results);
+
+  return cloneLocationSearchResults(results);
 }

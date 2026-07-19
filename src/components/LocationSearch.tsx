@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useI18n } from '../i18n/I18nContext';
 import {
+  getCachedLocationSearch,
   searchLocations,
   type LocationSearchResult,
 } from '../search/locationSearch';
@@ -70,6 +71,20 @@ export default function LocationSearch({
   }, []);
 
   useEffect(() => {
+    if (!isOpen || activeIndex < 0) {
+      return;
+    }
+
+    const activeOption = document.getElementById(
+      `${listboxId}-${activeIndex}`,
+    );
+
+    // aria-activedescendant updates assistive technology, but the browser does
+    // not automatically keep the visually active option inside a short panel.
+    activeOption?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, isOpen, listboxId]);
+
+  useEffect(() => {
     if (skipNextSearchRef.current) {
       skipNextSearchRef.current = false;
       return;
@@ -83,6 +98,20 @@ export default function LocationSearch({
       setResults([]);
       setStatus('idle');
       setIsOpen(false);
+      return;
+    }
+
+    const cachedResults = getCachedLocationSearch(
+      searchText,
+      language,
+    );
+
+    if (cachedResults !== null) {
+      // Exact cache hits bypass both the debounce and the loading state so
+      // backspacing or retyping a recent place feels immediate.
+      setResults(cachedResults);
+      setStatus('ready');
+      setIsOpen(true);
       return;
     }
 
@@ -154,6 +183,18 @@ export default function LocationSearch({
       setActiveIndex((current) =>
         current <= 0 ? results.length - 1 : current - 1,
       );
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveIndex(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      setActiveIndex(results.length - 1);
       return;
     }
 
