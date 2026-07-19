@@ -13,6 +13,9 @@ import {
   type RefObject,
 } from 'react';
 import type { Coordinate } from 'ol/coordinate.js';
+import { isEmpty, type Extent } from 'ol/extent.js';
+import type Map from 'ol/Map.js';
+import type { Size } from 'ol/size.js';
 import {
   MAX_GPX_FILE_SIZE_BYTES,
   parseGpxRoute,
@@ -64,6 +67,119 @@ const IMPORTED_ROUTE_FIT_PADDING_PX: [number, number, number, number] = [
   180,
   80,
 ];
+
+/** Minimum map width and height in pixels left available to display the GPX. */
+const IMPORTED_ROUTE_MIN_FIT_AREA_PX = 160;
+
+/**
+ * Maximum animation frames spent waiting for the map size to settle after the
+ * native file picker closes. This bounds the delay while covering mobile
+ * viewport and browser-toolbar transitions.
+ */
+const IMPORTED_ROUTE_FIT_STABILIZATION_FRAME_LIMIT = 12;
+
+/**
+ * Two equal size readings are enough to avoid fitting against a transient
+ * viewport.
+ */
+const IMPORTED_ROUTE_REQUIRED_STABLE_SIZE_READINGS = 2;
+
+/** Returns start/end padding scaled to preserve a usable fitting area. */
+function scalePaddingPair(
+  startPadding: number,
+  endPadding: number,
+  viewportLength: number,
+): [number, number] {
+  const desiredTotal = startPadding + endPadding;
+  const availableTotal = Math.max(
+    0,
+    viewportLength - IMPORTED_ROUTE_MIN_FIT_AREA_PX,
+  );
+  const scale = Math.min(1, availableTotal / desiredTotal);
+
+  return [Math.round(startPadding * scale), Math.round(endPadding * scale)];
+}
+
+/**
+ * Adapts desktop-oriented GPX framing margins to the current map size.
+ * OpenLayers subtracts padding before calculating the fit resolution; leaving
+ * too little effective height can otherwise select the country-wide zoom.
+ *
+ * @param size - Current OpenLayers viewport size in CSS pixels.
+ * @returns Top, right, bottom, and left padding safe for that viewport.
+ */
+export function calculateImportedRouteFitPadding(
+  size: Size,
+): [number, number, number, number] {
+  const [top, bottom] = scalePaddingPair(
+    IMPORTED_ROUTE_FIT_PADDING_PX[0],
+    IMPORTED_ROUTE_FIT_PADDING_PX[2],
+    size[1],
+  );
+  const [right, left] = scalePaddingPair(
+    IMPORTED_ROUTE_FIT_PADDING_PX[1],
+    IMPORTED_ROUTE_FIT_PADDING_PX[3],
+    size[0],
+  );
+
+  return [top, right, bottom, left];
+}
+
+/** Returns whether two OpenLayers size readings describe the same viewport. */
+function sizesMatch(first: Size | null, second: Size): boolean {
+  return first !== null && first[0] === second[0] && first[1] === second[1];
+}
+
+/**
+ * Frames a GPX only after the map has recovered from the native file picker.
+ * Mobile browsers can briefly expose a stale or very small viewport while the
+ * picker closes, so fitting immediately can animate to the national overview.
+ */
+function fitImportedRouteWhenViewportSettles(
+  map: Map,
+  extent: Extent,
+  isCurrentImport: () => boolean,
+): void {
+  let previousSize: Size | null = null;
+  let stableSizeReadings = 0;
+  let inspectedFrames = 0;
+
+  const inspectViewport = () => {
+    if (!isCurrentImport()) {
+      return;
+    }
+
+    map.updateSize();
+    const size = map.getSize();
+    inspectedFrames += 1;
+
+    if (size && size[0] > 0 && size[1] > 0) {
+      stableSizeReadings = sizesMatch(previousSize, size)
+        ? stableSizeReadings + 1
+        : 1;
+      previousSize = [size[0], size[1]];
+
+      if (
+        stableSizeReadings >= IMPORTED_ROUTE_REQUIRED_STABLE_SIZE_READINGS ||
+        inspectedFrames >= IMPORTED_ROUTE_FIT_STABILIZATION_FRAME_LIMIT
+      ) {
+        map.getView().fit(extent, {
+          size,
+          duration: IMPORTED_ROUTE_FIT_DURATION_MS,
+          maxZoom: IMPORTED_ROUTE_MAX_ZOOM,
+          padding: calculateImportedRouteFitPadding(size),
+        });
+        return;
+      }
+    }
+
+    if (inspectedFrames < IMPORTED_ROUTE_FIT_STABILIZATION_FRAME_LIMIT) {
+      window.requestAnimationFrame(inspectViewport);
+    }
+  };
+
+  window.requestAnimationFrame(inspectViewport);
+}
 
 /**
  * Coordinates local GPX file handling and the read-only map display.
@@ -151,14 +267,16 @@ export function useImportedRoute(
         setSegments(projectedSegments);
         setElevationSummary(embeddedElevationSummary);
 
-        const importedExtent = display.source.getExtent();
+        const sourceExtent = display.source.getExtent();
 
-        if (importedExtent) {
-          map.getView().fit(importedExtent, {
-            duration: IMPORTED_ROUTE_FIT_DURATION_MS,
-            maxZoom: IMPORTED_ROUTE_MAX_ZOOM,
-            padding: IMPORTED_ROUTE_FIT_PADDING_PX,
-          });
+        if (sourceExtent && !isEmpty(sourceExtent)) {
+          const importedExtent: Extent = [...sourceExtent];
+
+          fitImportedRouteWhenViewportSettles(
+            map,
+            importedExtent,
+            () => importSession === importSessionRef.current,
+          );
         }
       } catch (error) {
         if (importSession !== importSessionRef.current) {

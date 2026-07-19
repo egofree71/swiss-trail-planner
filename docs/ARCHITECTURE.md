@@ -881,10 +881,14 @@ A size limit protects the browser from accidental oversized files.
 
 `src/map/useImportedRoute.ts` owns the asynchronous file-read session, size
 validation, parsing, batched WGS 84 to LV95 conversion, optional embedded-elevation
-summary, purple display replacement, and view framing. A slower file read is
+summary, purple display replacement, and view framing. Framing waits for two
+stable OpenLayers viewport-size readings after the native file picker closes,
+passes that measured size explicitly to `View.fit()`, and scales desktop-oriented
+padding when necessary so a small mobile viewport retains 160 pixels of usable
+fitting width and height whenever its dimensions allow. A slower file read is
 ignored after a newer selection, route creation, or unmount invalidates its
-session. A successful import becomes the single current itinerary: active
-routing is aborted, route-creation mode is left, editable route history is
+session. A successful import becomes the single current itinerary: active routing
+is aborted, route-creation mode is left, editable route history is
 cleared, and the new purple read-only geometry replaces any prior GPX. Invalid
 imports leave the current itinerary untouched. Starting route creation later
 clears the imported layer immediately, without confirmation.
@@ -894,7 +898,9 @@ purple direction arrowheads independently to each retained GPX segment, and adds
 shared endpoint markers to the first and last retained GPX coordinates. Endpoints
 within five LV95 metres use one combined A/B marker so small recording differences
 do not hide one symbol beneath the other. `useImportedRoute` fits the view to its
-extent and feeds its projected segments into the shared metrics pipeline.
+extent only after the map viewport has stabilized, using responsive padding that
+cannot consume nearly the complete mobile viewport, and feeds its projected
+segments into the shared metrics pipeline.
 Distance is summed per segment. When every retained GPX point has a
 valid `<ele>` value, the embedded altitude function is resampled at the same
 roughly 20 metre spacing used for editable routes. A monotone interpolation
@@ -1039,6 +1045,7 @@ via-helvetica/
 │   │   ├── routeProfileMarker.ts
 │   │   ├── searchResult.ts
 │   │   ├── useEditableRoute.ts
+│   │   ├── useImportedRoute.test.ts
 │   │   ├── useImportedRoute.ts
 │   │   ├── useMapInformationLayers.ts
 │   │   ├── useMapRuntime.ts
@@ -1116,7 +1123,11 @@ size, protects asynchronous `File.text()` reads with a monotonically increasing
 session, parses the GPX locally, batch-projects independent segments into LV95,
 reuses complete embedded elevations when possible, updates or clears the purple
 OpenLayers display, and frames the accepted itinerary above the bottom summary.
-The hook exposes projected segments and the optional elevation summary to
+It refreshes and observes the viewport size for a bounded number of animation
+frames after the native file picker closes, then supplies the stable size and
+responsive padding explicitly to OpenLayers so transient or short mobile
+viewports cannot trigger a country-wide fit. The hook exposes projected segments
+and the optional elevation summary to
 `useItineraryMetrics`. Cross-workflow callbacks remain in `App.tsx`, so the hook
 does not know how editable history or location search are implemented.
 
@@ -1607,10 +1618,11 @@ elevations, and validation; `projection.test.ts` protects batch and single-point
 WGS 84/LV95 equivalence; `export/gpx.test.ts` covers section-local
 simplification, waypoint and loop preservation, XML metadata and bounds,
 profile normalization, elevation interpolation, and geometry-only fallback;
-`routeMetrics.test.ts` covers LV95 distance, segment-local elevation totals,
-monotone imported-profile
-interpolation, the Swiss hiking-time model, and a mocked GeoAdmin profile
-response; `itineraryDirection.test.ts` protects sparse arrow counts, scale
+`useImportedRoute.test.ts` protects responsive GPX fit padding on desktop and
+small mobile viewports; `routeMetrics.test.ts` covers LV95 distance,
+segment-local elevation totals, monotone imported-profile interpolation, the
+Swiss hiking-time model, and a mocked GeoAdmin profile response;
+`itineraryDirection.test.ts` protects sparse arrow counts, scale
 limits, waypoint clearance, bend rejection, reversal, and out-and-back collision
 shifts; `locationSearch.test.ts` protects normalized language-specific cache
 keys, bounded LRU eviction, error retry, strict coordinate validation, safe label
@@ -1682,8 +1694,9 @@ disposal.
     preparation succeeds, `App.tsx` clears the temporary location-search context and asks
     `useEditableRoute` to leave route creation and clear editable history; the
     import hook then replaces the previous purple itinerary, adds direction
-    arrowheads independently to each retained segment, and fits the map to its
-    geometry.
+    arrowheads independently to each retained segment, waits for a stable map
+    size after the native picker closes, and fits the geometry with padding
+    scaled to preserve a usable viewport.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
     embedded elevations are regularly resampled through a monotone per-segment
