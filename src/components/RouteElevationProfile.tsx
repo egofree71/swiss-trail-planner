@@ -189,22 +189,49 @@ function calculateElevationBounds(
   };
 }
 
-/**
- * Converts elevation samples to SVG coordinates while preserving relative
- * distance along the route and using realistic vertical display bounds.
- */
-function buildChartPoints(points: RouteElevationPoint[]): {
+/** Geometry and real-world bounds reused by every render of one profile. */
+export interface ElevationChartGeometry {
+  /** Polyline coordinates encoded for the SVG `points` attribute. */
   linePoints: string;
+  /** Closed SVG path used to fill the terrain area below the profile. */
   areaPath: string;
+  /** Lowest real elevation sample in metres. */
   minimumElevation: number;
+  /** Highest real elevation sample in metres. */
   maximumElevation: number;
+  /** Rounded lower SVG boundary in metres. */
   chartMinimumElevation: number;
+  /** Rounded upper SVG boundary in metres. */
   chartMaximumElevation: number;
+  /** Final cumulative sample distance in metres, clamped above zero. */
   totalDistance: number;
-} {
-  const elevations = points.map((point) => point.elevationMeters);
-  const minimumElevation = Math.min(...elevations);
-  const maximumElevation = Math.max(...elevations);
+}
+
+/**
+ * Converts ordered elevation samples into the immutable SVG geometry used by
+ * the profile. Min/max accumulation stays iterative so dense multi-segment GPX
+ * profiles cannot exceed the JavaScript function-argument limit.
+ *
+ * @param points - Ordered cumulative-distance and elevation samples.
+ * @returns Encoded line/fill paths plus real and rounded elevation bounds.
+ */
+export function buildChartPoints(
+  points: RouteElevationPoint[],
+): ElevationChartGeometry {
+  let minimumElevation = Number.POSITIVE_INFINITY;
+  let maximumElevation = Number.NEGATIVE_INFINITY;
+
+  for (const point of points) {
+    minimumElevation = Math.min(
+      minimumElevation,
+      point.elevationMeters,
+    );
+    maximumElevation = Math.max(
+      maximumElevation,
+      point.elevationMeters,
+    );
+  }
+
   const { chartMinimumElevation, chartMaximumElevation } =
     calculateElevationBounds(minimumElevation, maximumElevation);
   const elevationRange = chartMaximumElevation - chartMinimumElevation;
@@ -338,7 +365,7 @@ export default function RouteElevationProfile({
     chartMinimumElevation,
     chartMaximumElevation,
     totalDistance,
-  } = buildChartPoints(points);
+  } = useMemo(() => buildChartPoints(points), [points]);
   const plotHeight =
     CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
   const formattedMinimum = formatAltitude(minimumElevation, integerFormat);
@@ -349,7 +376,10 @@ export default function RouteElevationProfile({
     CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
   const chartElevationRange =
     chartMaximumElevation - chartMinimumElevation;
-  const distanceTicks = buildDistanceTicks(totalDistance, plotWidth);
+  const distanceTicks = useMemo(
+    () => buildDistanceTicks(totalDistance, plotWidth),
+    [plotWidth, totalDistance],
+  );
 
   const profilePointAtDistance = useCallback(
     (distanceMeters: number): HoveredProfilePoint => {

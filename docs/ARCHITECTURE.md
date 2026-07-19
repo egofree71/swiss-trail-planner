@@ -806,14 +806,18 @@ rounded to five minutes because it remains an estimate excluding breaks.
 `src/components/RouteElevationProfile.tsx` draws the ordered elevation samples
 as a lightweight responsive SVG above the summary bar. It scales cumulative
 distance horizontally and elevation vertically, uses the route red for the
-profile line, and performs no extra network request. The header keeps the real
-minimum and maximum elevations, while the chart enforces a minimum 40-metre
-vertical range with rounded axis bounds so small local variations are not
-visually exaggerated. Larger profiles retain automatic scaling with a small
-margin around their extrema. Pointer movement interpolates the profile distance
-and altitude, draws a vertical chart guide, and publishes only cumulative
-distance to `useItineraryMetrics`. A cumulative distance selected by the hook's
-map listener drives the same guide and header values while the profile is open.
+profile line, and performs no extra network request. Encoded line/fill geometry,
+real elevation extrema, rounded chart bounds, and distance graduations are
+memoized from the immutable sample array, so pointer exploration updates only
+the guide, marker, and header instead of rebuilding the complete SVG paths. The
+header keeps the real minimum and maximum elevations, while the chart enforces
+a minimum 40-metre vertical range with rounded axis bounds so small local
+variations are not visually exaggerated. Larger profiles retain automatic
+scaling with a small margin around their extrema. Pointer movement interpolates
+the profile distance and altitude, draws a vertical chart guide, and publishes
+only cumulative distance to `useItineraryMetrics`. A cumulative distance
+selected by the hook's map listener drives the same guide and header values
+while the profile is open.
 
 Reversal uses `reverseRouteState()` to reverse stored geometry without issuing
 another routing request. Open routes reverse waypoint order normally. Closed
@@ -1336,7 +1340,10 @@ no network requests or geographic calculations.
 Projects ordered distance/elevation samples into a compact responsive SVG with
 altitude guides, adaptive intermediate distance graduations, real minimum and
 maximum altitude in the header, rounded display bounds, a minimum 40-metre
-vertical range, and a route-coloured profile line.
+vertical range, and a route-coloured profile line. The immutable sample array
+memoizes encoded SVG geometry and distance graduations, while extrema are
+accumulated iteratively so dense imported profiles do not rely on large
+argument spreads.
 Pointer exploration adds a chart guide, replaces the header range temporarily
 with distance and altitude, and emits cumulative route distance without owning
 map state. When the map supplies a hovered route distance, the mounted chart
