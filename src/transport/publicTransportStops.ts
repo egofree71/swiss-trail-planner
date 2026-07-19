@@ -1,7 +1,8 @@
 /**
  * Business context: exposes the stable public-transport stop API used by the
  * rest of the application while implementation details remain split between
- * provider loading, passenger-stop normalization, and OpenLayers rendering.
+ * provider loading, buffered viewport coverage, passenger-stop normalization,
+ * and OpenLayers rendering.
  */
 export {
   ACCEPTED_PUBLIC_TRANSPORT_MODES,
@@ -21,3 +22,9 @@ export {
   updatePublicTransportStopsDisplay,
   type PublicTransportStopsDisplay,
 } from './publicTransportStopsDisplay';
+export {
+  createBufferedPublicTransportStopsExtent,
+  createPublicTransportStopsViewportCoverage,
+  publicTransportStopsCoverageContainsViewport,
+  type PublicTransportStopsViewportCoverage,
+} from './publicTransportStopsViewport';

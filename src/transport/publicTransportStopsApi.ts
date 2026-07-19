@@ -1,6 +1,6 @@
 /**
- * Business context: loads official BAV public-transport stop features for the
- * current map viewport. Dense Swiss city centres can reach the GeoAdmin result
+ * Business context: loads official BAV public-transport stop features around
+ * the current map viewport. Dense Swiss city centres can reach the GeoAdmin result
  * cap, so requests are recursively subdivided while keeping the operation
  * bounded and abortable for responsive map navigation.
  */
@@ -33,8 +33,8 @@ const IDENTIFY_DPI = 96;
 /**
  * Highest native zoom used to describe portrayal scale to GeoAdmin.
  * Closer levels expose platform and operating sub-points instead of stable
- * passenger stops, so only the scale context is capped while the real viewport
- * still controls which geometries are requested.
+ * passenger stops, so only the scale context is capped while the buffered
+ * request envelope still controls which geometries are returned.
  */
 const PUBLIC_TRANSPORT_IDENTIFY_MAX_ZOOM = 25;
 
@@ -48,10 +48,12 @@ interface IdentifyResponse {
   results?: unknown[];
 }
 
-/** Viewport context required to load and filter visible passenger stops. */
+/** Viewport context required to load and filter nearby passenger stops. */
 export interface PublicTransportStopsLoadContext {
-  /** Current map extent in EPSG:2056. */
-  extent: Extent;
+  /** Buffered EPSG:2056 envelope whose stop geometries must be returned. */
+  requestExtent: Extent;
+  /** Real visible EPSG:2056 extent used only for identify portrayal scale. */
+  viewportExtent: Extent;
   /** Current map canvas size in CSS pixels. */
   imageSize: [number, number];
   /** Language requested for official names and attribute values. */
@@ -130,7 +132,7 @@ async function fetchStopsForExtent(
     layers: `all:${PUBLIC_TRANSPORT_STOPS_LAYER_ID}`,
     tolerance: '0',
     mapExtent: createIdentifyScaleExtent(
-      context.extent,
+      context.viewportExtent,
       context.imageSize,
     ).join(','),
     imageDisplay: `${Math.round(context.imageSize[0])},${Math.round(context.imageSize[1])},${IDENTIFY_DPI}`,
@@ -172,9 +174,9 @@ async function fetchStopsForExtent(
 }
 
 /**
- * Loads current passenger stops for the visible map extent.
+ * Loads passenger stops for one buffered envelope around the visible map.
  *
- * @param context - Current viewport, image size, and interface language.
+ * @param context - Request envelope, real viewport scale, and interface language.
  * @param signal - Abort signal for superseded pans, zooms, or layer hiding.
  * @returns Passenger stops deduplicated strictly by official feature identifier.
  * @throws {Error} When the official GeoAdmin service fails.
@@ -184,7 +186,7 @@ export async function loadPublicTransportStops(
   signal: AbortSignal,
 ): Promise<PublicTransportStop[]> {
   const rawResults = await fetchStopsForExtent(
-    context.extent,
+    context.requestExtent,
     context,
     signal,
     0,

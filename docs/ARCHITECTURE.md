@@ -181,8 +181,8 @@ and stale-result guards explain why the safeguard or heuristic exists.
 Automated tests target stable domain contracts before browser presentation. The
 suite covers immutable route transformations, affected-section rebuilds, local
 GPX parsing and export, route metrics, directional-arrow placement, passenger-stop
-filtering, routing-grid footprints, the main-thread Worker facade, and the
-worker-owned routing engine.
+filtering, buffered viewport reuse, provider request separation, routing-grid
+footprints, the main-thread Worker facade, and the worker-owned routing engine.
 Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
 reuse, cleanup and retry after an aborted cell request, true least-recently-used
@@ -249,7 +249,7 @@ Browser
    │
    ├── useMapInformationLayers hook
    │      ├── persist closure, danger-zone, and stop visibility choices
-   │      ├── load filtered passenger stops for the visible viewport
+   │      ├── reuse buffered passenger-stop coverage across nearby pans
    │      └── prioritize stop, closure, and danger-zone inspection and popup state
    │
    ├── OpenLayers Map / View (`EPSG:2056`)
@@ -416,11 +416,18 @@ The source dataset also contains operational and retired points that are not
 useful when planning passenger access. At detailed zoom levels, an abortable
 viewport loader calls the GeoAdmin identify endpoint, recursively subdivides
 dense requests that reach the 200-result limit, and converts point geometry and
-selected attributes into client-side OpenLayers features. The identify scale
-is capped at native level 25 (1 metre per pixel): closer
-portrayals expose technical sub-points such as platform numbers instead of
-stable passenger stops.
-The real viewport still determines which geometry is requested.
+selected attributes into client-side OpenLayers features. Each completed load
+requests an envelope whose width and height are 1.5 times the visible viewport,
+leaving a 25-percent navigation margin on every side. Nearby pans reuse either
+the completed buffer or an in-flight request while the zoom and canvas size stay
+unchanged. Leaving both coverages aborts obsolete work immediately and starts a
+new request after a 180-millisecond move-end debounce. Zoom, canvas-size, layer,
+and language changes invalidate reuse.
+
+The buffered envelope controls only which geometries are requested. The real
+viewport and canvas size continue to describe identify portrayal scale, which
+is capped at native level 25 (1 metre per pixel): closer portrayals would expose
+technical sub-points such as platform numbers instead of stable passenger stops.
 
 Entries without a stop name, numeric-only operating labels, and entries whose
 type explicitly indicates an out-of-service stop are omitted. The accepted
@@ -954,8 +961,11 @@ via-helvetica/
 │   │   ├── publicTransportStopModel.test.ts
 │   │   ├── publicTransportStopModel.ts
 │   │   ├── publicTransportStops.ts
+│   │   ├── publicTransportStopsApi.test.ts
 │   │   ├── publicTransportStopsApi.ts
 │   │   ├── publicTransportStopsDisplay.ts
+│   │   ├── publicTransportStopsViewport.test.ts
+│   │   ├── publicTransportStopsViewport.ts
 │   │   └── stationBoard.ts
 │   ├── components/
 │   │   ├── MapInformationPopup.tsx
@@ -1117,9 +1127,11 @@ LV95 validation, marker updates, and temporary localized feedback.
 
 Owns the React-facing lifecycle of the three inspectable information overlays.
 It resolves and persists their independent visibility choices, applies changes
-through the shared `MapRuntime`, reloads filtered public-transport stops after
-viewport or language changes, and clears stale vectors when the stop layer is
-hidden or too far out. Outside route creation it registers one deterministic
+through the shared `MapRuntime`, reuses buffered public-transport coverage
+across nearby pans, debounces uncached completed movements, and clears stale
+vectors when the stop layer is hidden or too far out. Zoom, canvas-size, and
+language changes invalidate the reusable coverage. Outside route creation it
+registers one deterministic
 click pipeline: already loaded passenger stops first, hiking closures second,
 and military danger zones last. The hook owns popup state, selected stop and
 polygon highlights, language and zoom invalidation, abortable identify/popup
@@ -1202,8 +1214,9 @@ dates.
 ### `src/transport/publicTransportStops.ts`
 
 Provides the stable public facade consumed by map, popup, and timetable modules.
-It re-exports the stop model, abortable viewport loader, and OpenLayers display
-operations without exposing how those responsibilities are implemented.
+It re-exports the stop model, buffered viewport coverage, abortable provider
+loader, and OpenLayers display operations without exposing how those
+responsibilities are implemented.
 
 ### `src/transport/publicTransportStopModel.ts`
 
@@ -1215,10 +1228,20 @@ objects.
 
 ### `src/transport/publicTransportStopsApi.ts`
 
-Owns the abortable GeoAdmin viewport identify contract, the passenger-scale
-identify clamp, bounded recursive subdivision when a response reaches the
-200-feature limit, strict deduplication by official identifier, and delegation
-to the passenger-stop parser. It contains no OpenLayers layer or style state.
+Owns the abortable GeoAdmin viewport identify contract, keeps the buffered
+geometry envelope separate from the real portrayal-scale viewport, applies the
+passenger-scale identify clamp, performs bounded recursive subdivision when a
+response reaches the 200-feature limit, deduplicates strictly by official
+identifier, and delegates to the passenger-stop parser. It contains no
+OpenLayers layer or style state.
+
+### `src/transport/publicTransportStopsViewport.ts`
+
+Owns the pure 1.5-times request-envelope calculation and coverage-reuse
+contract. A pending or completed load remains reusable only while its buffered
+extent contains the current viewport at the same zoom and canvas size. Focused
+tests protect the navigation margins and each invalidation condition without
+mounting React or contacting GeoAdmin.
 
 ### `src/transport/publicTransportStopsDisplay.ts`
 
@@ -1547,6 +1570,9 @@ mocked GeoAdmin profile response; `itineraryDirection.test.ts` protects sparse
 arrow counts, scale limits, waypoint clearance, bend rejection, reversal, and
 out-and-back collision shifts; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
+`publicTransportStopsViewport.test.ts` protects request margins, buffered reuse,
+and zoom or canvas-size invalidation; `publicTransportStopsApi.test.ts` protects
+the separation between the requested geometry and real identify scale;
 `networkRouter.test.ts` protects the structured-clone-safe route result;
 `dynamicRoutingNetworkClient.test.ts` protects Worker request correlation, typed errors, cancellation, ignored late responses, and
 disposal.
@@ -1589,8 +1615,10 @@ disposal.
 8. The official military shooting-danger WMS is enabled by default unless a stored preference hides it, uses the same detailed-zoom threshold, and has a separate vector layer for the selected polygon.
 9. The public-transport stop vector layer remains disabled by default unless a
    stored preference enables it. At detailed zoom levels,
-   `useMapInformationLayers` reloads and filters the visible passenger stops on
-   map move or language change.
+   `useMapInformationLayers` requests a 1.5-times buffered viewport and reuses
+   completed or in-flight coverage across nearby pans at the same zoom and
+   canvas size. Uncovered completed movements are debounced for 180 milliseconds;
+   language, zoom, size, and visibility changes invalidate reuse.
 10. Outside route creation, the information-layer hook registers one map-click
     pipeline that inspects loaded stop vectors first, then a visible hiking
     closure, and finally a visible military danger zone.

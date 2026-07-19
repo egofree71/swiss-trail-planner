@@ -29,10 +29,13 @@ import {
 import type { Language } from '../i18n/translations';
 import { isAbortedRequest } from '../network/abort';
 import {
+  createPublicTransportStopsViewportCoverage,
   getPublicTransportStopFromFeature,
   loadPublicTransportStops,
+  publicTransportStopsCoverageContainsViewport,
   PUBLIC_TRANSPORT_STOPS_MIN_ZOOM,
   type PublicTransportStop,
+  type PublicTransportStopsViewportCoverage,
   updatePublicTransportStopsDisplay,
   updatePublicTransportStopSelection,
 } from '../transport/publicTransportStops';
@@ -50,6 +53,11 @@ const PUBLIC_TRANSPORT_STOPS_VISIBILITY_STORAGE_KEY =
   'via-helvetica.public-transport-stops-visible';
 /** Hit tolerance in screen pixels for selecting compact stop symbols. */
 const PUBLIC_TRANSPORT_STOP_HIT_TOLERANCE_PX = 8;
+/**
+ * Brief delay for successive completed map movements. Buffer coverage handles
+ * ordinary pans immediately; the debounce only coalesces rapid uncached moves.
+ */
+const PUBLIC_TRANSPORT_STOPS_MOVEEND_DEBOUNCE_MS = 180;
 
 /** Persisted visibility of the three inspectable information layers. */
 export interface MapInformationLayerVisibility {
@@ -289,8 +297,24 @@ export function useMapInformationLayers(
     }
 
     let abortController: AbortController | null = null;
+    let debounceTimer: number | null = null;
+    let pendingCoverage: PublicTransportStopsViewportCoverage | null = null;
+    let loadedCoverage: PublicTransportStopsViewportCoverage | null = null;
 
-    const loadVisibleStops = () => {
+    const clearDebounce = () => {
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    };
+
+    const cancelPendingRequest = () => {
+      abortController?.abort();
+      abortController = null;
+      pendingCoverage = null;
+    };
+
+    const readViewport = () => {
       const imageSize = map.getSize();
       const zoom = map.getView().getZoom();
 
@@ -299,27 +323,96 @@ export function useMapInformationLayers(
         zoom === undefined ||
         zoom <= PUBLIC_TRANSPORT_STOPS_MIN_ZOOM
       ) {
-        abortController?.abort();
-        display.source.clear();
+        return null;
+      }
+
+      const normalizedImageSize: [number, number] = [
+        imageSize[0],
+        imageSize[1],
+      ];
+
+      return {
+        viewportExtent: map.getView().calculateExtent(imageSize),
+        imageSize: normalizedImageSize,
+        zoom,
+      };
+    };
+
+    const clearUnavailableStops = () => {
+      clearDebounce();
+      cancelPendingRequest();
+      loadedCoverage = null;
+      display.source.clear();
+    };
+
+    const loadVisibleStops = () => {
+      clearDebounce();
+      const viewport = readViewport();
+
+      if (!viewport) {
+        clearUnavailableStops();
         return;
       }
 
-      abortController?.abort();
-      abortController = new AbortController();
-      const request = abortController;
+      const loadedCoverageMatches =
+        publicTransportStopsCoverageContainsViewport(
+          loadedCoverage,
+          viewport.viewportExtent,
+          viewport.zoom,
+          viewport.imageSize,
+        );
+      const pendingCoverageMatches =
+        publicTransportStopsCoverageContainsViewport(
+          pendingCoverage,
+          viewport.viewportExtent,
+          viewport.zoom,
+          viewport.imageSize,
+        );
+
+      if (loadedCoverageMatches || pendingCoverageMatches) {
+        if (loadedCoverageMatches && !pendingCoverageMatches) {
+          cancelPendingRequest();
+        }
+        return;
+      }
+
+      cancelPendingRequest();
+      const coverage = createPublicTransportStopsViewportCoverage(
+        viewport.viewportExtent,
+        viewport.zoom,
+        viewport.imageSize,
+      );
+      const request = new AbortController();
+      pendingCoverage = coverage;
+      abortController = request;
 
       void loadPublicTransportStops(
         {
-          extent: map.getView().calculateExtent(imageSize),
-          imageSize: [imageSize[0], imageSize[1]],
+          requestExtent: coverage.requestExtent,
+          viewportExtent: viewport.viewportExtent,
+          imageSize: viewport.imageSize,
           language,
         },
         request.signal,
       )
         .then((stops) => {
-          if (!request.signal.aborted) {
-            updatePublicTransportStopsDisplay(display, stops);
+          const currentViewport = readViewport();
+
+          if (
+            request.signal.aborted ||
+            !currentViewport ||
+            !publicTransportStopsCoverageContainsViewport(
+              coverage,
+              currentViewport.viewportExtent,
+              currentViewport.zoom,
+              currentViewport.imageSize,
+            )
+          ) {
+            return;
           }
+
+          loadedCoverage = coverage;
+          updatePublicTransportStopsDisplay(display, stops);
         })
         .catch((error: unknown) => {
           if (isAbortedRequest(error, request.signal)) {
@@ -328,15 +421,65 @@ export function useMapInformationLayers(
 
           // Optional stop information must never block route planning.
           console.error('Unable to load public-transport stops.', error);
+        })
+        .finally(() => {
+          if (abortController === request) {
+            abortController = null;
+            pendingCoverage = null;
+          }
         });
     };
 
-    map.on('moveend', loadVisibleStops);
+    const scheduleVisibleStopsLoad = () => {
+      const viewport = readViewport();
+
+      if (!viewport) {
+        clearUnavailableStops();
+        return;
+      }
+
+      const loadedCoverageMatches =
+        publicTransportStopsCoverageContainsViewport(
+          loadedCoverage,
+          viewport.viewportExtent,
+          viewport.zoom,
+          viewport.imageSize,
+        );
+      const pendingCoverageMatches =
+        publicTransportStopsCoverageContainsViewport(
+          pendingCoverage,
+          viewport.viewportExtent,
+          viewport.zoom,
+          viewport.imageSize,
+        );
+
+      if (loadedCoverageMatches || pendingCoverageMatches) {
+        clearDebounce();
+        if (loadedCoverageMatches && !pendingCoverageMatches) {
+          cancelPendingRequest();
+        }
+        return;
+      }
+
+      // Once the map leaves a pending buffer, its response can no longer serve
+      // the new viewport. Abort immediately, then coalesce rapid uncached moves.
+      cancelPendingRequest();
+      clearDebounce();
+      debounceTimer = window.setTimeout(
+        loadVisibleStops,
+        PUBLIC_TRANSPORT_STOPS_MOVEEND_DEBOUNCE_MS,
+      );
+    };
+
+    map.on('moveend', scheduleVisibleStopsLoad);
+    map.on('change:size', scheduleVisibleStopsLoad);
     loadVisibleStops();
 
     return () => {
-      map.un('moveend', loadVisibleStops);
-      abortController?.abort();
+      map.un('moveend', scheduleVisibleStopsLoad);
+      map.un('change:size', scheduleVisibleStopsLoad);
+      clearDebounce();
+      cancelPendingRequest();
     };
   }, [
     arePublicTransportStopsVisible,
