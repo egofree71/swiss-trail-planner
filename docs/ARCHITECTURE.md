@@ -204,7 +204,8 @@ which behaviour needs deliberate review. Directional-arrow tests exercise the
 pure screen-space placement contract through OpenLayers style objects without
 opening a map. OpenLayers canvas rendering and full pointer workflows remain
 validated manually until a browser-level test offers clear value over their
-maintenance cost.
+maintenance cost, while the low-level touch interaction contract is exercised
+directly with synthetic OpenLayers pointer events.
 
 ## 4. Technical overview
 
@@ -753,17 +754,21 @@ interaction factory and hit-detection primitives for existing waypoints, normal
 route sections, and the optional closing section.
 `src/map/useRouteInteractions.ts` owns that
 interaction's React lifecycle. A 12-pixel point tolerance keeps small waypoints
-usable with a pen, while a narrower line tolerance selects the closest stored
-incoming section. When several stored sections overlap at the same screen
-distance, the section latest in the current route order wins so repeated
-out-and-back passages behave deterministically. Mouse and pen presses on either
-target stop map panning and begin direct route editing. Finger input deliberately
-bypasses this interaction so OpenLayers DragPan and PinchZoom remain reliable on
-touch-only devices; touch taps still use the normal endpoint-addition flow. Moving
-an existing point draws an immediate preview with only its adjacent sections
-replaced by straight lines. Pulling the route line inserts a temporary point and
-splits the selected section into two straight previews. No network request runs
-during either drag.
+usable with a mouse or pen. Touch waypoint selection uses a larger effective
+44-pixel target, while route sections use a narrow seven-pixel tolerance for
+mouse and pen and a ten-pixel tolerance for touch. When several stored sections overlap
+at the same screen distance, the section latest in the current route order wins
+so repeated out-and-back passages behave deterministically. Mouse and pen
+presses on either target stop map panning and begin direct route editing. A
+finger may capture an existing waypoint or a section when the gesture starts
+very close to the visible itinerary, and must move eight screen pixels before
+the preview begins. This absorbs normal finger tremor and leaves a simple tap
+without destructive effect. Finger drags that start farther from the route
+remain available to OpenLayers DragPan and PinchZoom. A second finger cancels
+any active preview before map pinch zoom continues. Moving an existing point
+draws a preview with only its adjacent sections replaced by straight lines.
+Pulling the route line inserts a temporary point and splits the selected section
+into two straight previews. No network request runs during either drag.
 
 On release, `useRouteInteractions` sends one semantic move, insertion, or
 deletion request to `useEditableRoute`, which delegates affected-section
@@ -1041,6 +1046,7 @@ via-helvetica/
 │   │   ├── projection.ts
 │   │   ├── route.ts
 │   │   ├── routeDisplay.ts
+│   │   ├── routePointerInteraction.test.ts
 │   │   ├── routePointerInteraction.ts
 │   │   ├── routeState.test.ts
 │   │   ├── routeState.ts
@@ -1140,7 +1146,9 @@ routing algorithms or history. It turns clicks and drags into semantic endpoint,
 move, insertion, and deletion callbacks, keeps straight drag previews local to
 the vector display, suppresses the delayed `singleclick` after a handled gesture,
 clamps contextual hover guidance inside the map, and restores committed geometry
-when a gesture is cancelled or rejected.
+when a gesture is cancelled or rejected. Touch input may move an existing
+waypoint after a deliberate drag, while route-section gestures stay reserved for
+map navigation and multi-touch cancellation restores the last committed route.
 
 ### `src/map/mapRuntime.ts`
 
@@ -1494,6 +1502,9 @@ interaction factory, contextual hover targets, and route-edit cursor state. It
 reports semantic pointer events and depends on `routeDisplay.ts` only for the
 route layer and its private waypoint metadata accessor. `useRouteInteractions`
 owns the React lifecycle and coordinates display previews with route mutations.
+The interaction gives touch waypoints a larger target and delayed drag threshold,
+uses a deliberately narrow touch tolerance for route sections, and cancels a
+preview when a second finger turns the gesture into map pinch zoom.
 
 ### `src/map/route.ts`
 
@@ -1628,7 +1639,10 @@ segment-local elevation totals, monotone imported-profile interpolation, the
 Swiss hiking-time model, and a mocked GeoAdmin profile response;
 `itineraryDirection.test.ts` protects sparse arrow counts, scale
 limits, waypoint clearance, bend rejection, reversal, and out-and-back collision
-shifts; `locationSearch.test.ts` protects normalized language-specific cache
+shifts; `routePointerInteraction.test.ts` protects touch waypoint and section
+drag thresholds, off-route map-navigation pass-through, non-destructive taps,
+and multi-touch cancellation;
+`locationSearch.test.ts` protects normalized language-specific cache
 keys, bounded LRU eviction, error retry, strict coordinate validation, safe label
 normalization, and duplicate removal; `LocationSearch.test.ts` protects Home/End
 navigation and visible active-option tracking; `publicTransportStopModel.test.ts` covers
@@ -1732,11 +1746,14 @@ disposal.
     straight fallback section while snap mode stays enabled.
 25. Pressing an existing waypoint with a mouse or pen starts a potential move or
     deletion sequence and prevents map panning; a click deletes it, while a drag
-    moves it. Finger input remains available to OpenLayers map navigation.
-26. Pressing the route line outside a waypoint with a mouse or pen selects the
-    closest stored normal or closing section and starts a potential insertion
-    sequence. Exact overlap ties select the section latest in the current route
-    order.
+    moves it. A finger may also move the waypoint after an eight-pixel deliberate
+    drag, but a simple touch does not delete it. A second finger cancels the
+    preview so pinch zoom can take over.
+26. Pressing the route line outside a waypoint selects the closest stored normal
+    or closing section and starts a potential insertion sequence. Touch selection
+    uses a narrow ten-pixel screen tolerance, so a finger drag starting very close
+    to the route reshapes it while a drag starting elsewhere continues to pan the
+    map. Exact overlap ties select the section latest in the current route order.
 27. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
     made during the drag. Releasing a route section without a genuine drag
@@ -1754,8 +1771,9 @@ disposal.
     the route. No duplicate start waypoint is created.
 31. While the loop is closed, empty-map clicks do not append another waypoint;
     the closing section remains draggable and the first and last waypoints remain editable.
-32. Clicking a waypoint deletes it; any replacement connection or rebuilt loop
-    uses the current snap mode, while unrelated sections remain unchanged.
+32. Clicking a waypoint with a mouse or pen deletes it; any replacement
+    connection or rebuilt loop uses the current snap mode, while unrelated
+    sections remain unchanged.
 33. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.

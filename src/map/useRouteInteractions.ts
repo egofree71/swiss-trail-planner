@@ -313,6 +313,12 @@ export function useRouteInteractions(
           );
         }
       },
+      onCancel: () => {
+        routeDragStateRef.current = null;
+        setIsInteractionActive(false);
+        setRouteContextHint(null);
+        restoreCommittedRouteDisplay();
+      },
       onEnd: (target: RouteDragTarget, coordinate, didDrag, pixel) => {
         const dragState = routeDragStateRef.current;
         routeDragStateRef.current = null;

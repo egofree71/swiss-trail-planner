@@ -66,6 +66,8 @@ export interface RouteDragCallbacks {
   onStart: (target: RouteDragTarget) => void;
   /** Called for visual previews while the pointer moves. */
   onDrag: (target: RouteDragTarget, coordinate: Coordinate) => void;
+  /** Restores committed geometry when a multi-touch gesture cancels an edit. */
+  onCancel: (target: RouteDragTarget) => void;
   /** Reports the route element under a hover-capable pointer. */
   onHover: (target: RouteHoverTarget | null, pixel: Pixel | null) => void;
   /** Called once on release so the application can recalculate affected sections. */
@@ -77,14 +79,30 @@ export interface RouteDragCallbacks {
   ) => void;
 }
 
-/** Pointer tolerance in screen pixels, deliberately larger than the visible point for pen input. */
+/** Pointer tolerance in screen pixels, deliberately larger than the visible point for mouse and pen input. */
 const ROUTE_WAYPOINT_HIT_TOLERANCE_PX = 12;
-/** Route-line tolerance in screen pixels, matching the white casing around the red line. */
+/**
+ * Additional touch tolerance in screen pixels. Combined with the visible
+ * six-pixel waypoint radius, this provides an effective 44-pixel target.
+ */
+const ROUTE_TOUCH_WAYPOINT_HIT_TOLERANCE_PX = 16;
+/** Route-line tolerance in screen pixels for mouse and pen input, matching the white casing around the red line. */
 const ROUTE_SEGMENT_HIT_TOLERANCE_PX = 7;
+/**
+ * Touch tolerance in screen pixels for selecting a route section. It remains
+ * deliberately narrow so map panning still wins unless the gesture starts very
+ * close to the visible itinerary.
+ */
+const ROUTE_TOUCH_SEGMENT_HIT_TOLERANCE_PX = 10;
 /** Visually indistinguishable section distances use route order as a stable tie-breaker. */
 const ROUTE_SEGMENT_OVERLAP_TIE_TOLERANCE_PX = 0.1;
 /** Minimum screen movement that distinguishes a drag edit from a click. */
 const ROUTE_EDIT_DRAG_DISTANCE_PX = 3;
+/**
+ * Touch movement in screen pixels required before a waypoint edit starts.
+ * A larger threshold absorbs normal finger tremor without making the drag feel delayed.
+ */
+const ROUTE_TOUCH_EDIT_DRAG_DISTANCE_PX = 8;
 
 /** Returns squared horizontal distance in map units to avoid a square root during deduplication. */
 function coordinateDistanceSquared(
@@ -265,12 +283,15 @@ export function getRouteSegmentHitAtPixel(
 
 /**
  * Creates one interaction for moving waypoints or pulling a new point from a
-
+ * stored route section.
  *
  * The interaction owns no route data. During dragging it reports coordinates
  * to the application, which draws a temporary straight preview and performs
- * network recalculation only after release. Returning `true` on pointer down
- * also prevents OpenLayers DragPan from moving the map beneath the route.
+ * network recalculation only after release. Mouse and pen presses may select
+ * waypoints or sections. A finger may also select a section when the gesture
+ * starts very close to the displayed itinerary; gestures starting elsewhere
+ * remain available to OpenLayers map navigation. Returning `true` on pointer
+ * down prevents DragPan from moving the map beneath an active edit.
  */
 export function createRouteDragInteraction(
   display: RouteDisplay,
@@ -280,29 +301,43 @@ export function createRouteDragInteraction(
   let startPixel: Pixel | null = null;
   let maximumPixelDistanceSquared = 0;
   let isDragging = false;
+  let isTouchInteraction = false;
+  let hasStartedEdit = false;
 
-  return new PointerInteraction({
+  const resetDragState = () => {
+    dragTarget = null;
+    startPixel = null;
+    maximumPixelDistanceSquared = 0;
+    isDragging = false;
+    isTouchInteraction = false;
+    hasStartedEdit = false;
+  };
+
+  let interaction: PointerInteraction;
+
+  interaction = new PointerInteraction({
     handleDownEvent: (event: MapBrowserEvent) => {
       const pointerType = (event.originalEvent as PointerEvent).pointerType;
 
-      // A finger must remain available to OpenLayers DragPan and PinchZoom.
-      // Direct route reshaping is precise enough for a mouse or pen, but
-      // capturing touch immediately makes a route-dense mobile map difficult
-      // to navigate. Touch taps still reach the normal endpoint-click flow.
-      if (pointerType === 'touch' || !callbacks.canStart()) {
+      if (!callbacks.canStart()) {
         return false;
       }
 
+      isTouchInteraction = pointerType === 'touch';
       const waypointIndex = getRouteWaypointIndexAtPixel(
         event.map,
         display,
         event.pixel,
+        isTouchInteraction
+          ? ROUTE_TOUCH_WAYPOINT_HIT_TOLERANCE_PX
+          : ROUTE_WAYPOINT_HIT_TOLERANCE_PX,
       );
 
       if (waypointIndex !== null) {
         const step = callbacks.getRouteState().steps[waypointIndex];
 
         if (!step) {
+          resetDragState();
           return false;
         }
 
@@ -318,9 +353,13 @@ export function createRouteDragInteraction(
           routeState.steps,
           routeState.closure,
           event.pixel,
+          isTouchInteraction
+            ? ROUTE_TOUCH_SEGMENT_HIT_TOLERANCE_PX
+            : ROUTE_SEGMENT_HIT_TOLERANCE_PX,
         );
 
         if (!segmentHit) {
+          resetDragState();
           return false;
         }
 
@@ -334,13 +373,35 @@ export function createRouteDragInteraction(
       startPixel = [...event.pixel];
       maximumPixelDistanceSquared = 0;
       isDragging = false;
+      hasStartedEdit = !isTouchInteraction;
       callbacks.onHover(null, null);
       updateRouteEditCursor(event.map, dragTarget.type, false);
-      callbacks.onStart(dragTarget);
+
+      // Touch waits for a deliberate movement before showing a preview. This
+      // prevents a simple tap or normal finger tremor from looking like an edit.
+      if (hasStartedEdit) {
+        callbacks.onStart(dragTarget);
+      }
+
       return true;
     },
     handleDragEvent: (event: MapBrowserEvent) => {
       if (!dragTarget) {
+        return;
+      }
+
+      if (isTouchInteraction && interaction.getPointerCount() > 1) {
+        const cancelledTarget = dragTarget;
+
+        // A second finger changes the gesture into map navigation. Restore any
+        // preview already shown and let OpenLayers PinchZoom continue normally.
+        if (hasStartedEdit) {
+          callbacks.onCancel(cancelledTarget);
+        }
+
+        resetDragState();
+        callbacks.onHover(null, null);
+        updateRouteEditCursor(event.map, null, false);
         return;
       }
 
@@ -354,14 +415,24 @@ export function createRouteDragInteraction(
 
         if (
           !isDragging &&
-          maximumPixelDistanceSquared >= ROUTE_EDIT_DRAG_DISTANCE_PX ** 2
+          maximumPixelDistanceSquared >=
+            (isTouchInteraction
+              ? ROUTE_TOUCH_EDIT_DRAG_DISTANCE_PX
+              : ROUTE_EDIT_DRAG_DISTANCE_PX) ** 2
         ) {
           isDragging = true;
           updateRouteEditCursor(event.map, null, true);
+
+          if (!hasStartedEdit) {
+            hasStartedEdit = true;
+            callbacks.onStart(dragTarget);
+          }
         }
       }
 
-      callbacks.onDrag(dragTarget, [...event.coordinate]);
+      if (hasStartedEdit) {
+        callbacks.onDrag(dragTarget, [...event.coordinate]);
+      }
     },
     handleMoveEvent: (event: MapBrowserEvent) => {
       const pointerType = (event.originalEvent as PointerEvent).pointerType;
@@ -411,26 +482,48 @@ export function createRouteDragInteraction(
         return false;
       }
 
+      if (isTouchInteraction && interaction.getPointerCount() > 0) {
+        const cancelledTarget = dragTarget;
+
+        // A remaining pointer means this release belongs to a multi-touch
+        // gesture, even when no pinch movement occurred before the first lift.
+        if (hasStartedEdit) {
+          callbacks.onCancel(cancelledTarget);
+        }
+
+        resetDragState();
+        callbacks.onHover(null, null);
+        updateRouteEditCursor(event.map, null, false);
+        return false;
+      }
+
       const releasedTarget = dragTarget;
       const didDrag =
-        maximumPixelDistanceSquared >= ROUTE_EDIT_DRAG_DISTANCE_PX ** 2;
+        maximumPixelDistanceSquared >=
+        (isTouchInteraction
+          ? ROUTE_TOUCH_EDIT_DRAG_DISTANCE_PX
+          : ROUTE_EDIT_DRAG_DISTANCE_PX) ** 2;
+      const shouldReportRelease = hasStartedEdit;
 
-      dragTarget = null;
-      startPixel = null;
-      maximumPixelDistanceSquared = 0;
-      isDragging = false;
+      resetDragState();
       callbacks.onHover(null, null);
       updateRouteEditCursor(event.map, null, false);
-      callbacks.onEnd(
-        releasedTarget,
-        [...event.coordinate],
-        didDrag,
-        [...event.pixel],
-      );
+
+      if (shouldReportRelease) {
+        callbacks.onEnd(
+          releasedTarget,
+          [...event.coordinate],
+          didDrag,
+          [...event.pixel],
+        );
+      }
+
       return false;
     },
     stopDown: (handled) => handled,
   });
+
+  return interaction;
 }
 
 /** Removes cursor state if route editing is left during an active drag. */

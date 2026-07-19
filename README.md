@@ -58,8 +58,11 @@ http://localhost:5173/via-helvetica/
    Drag an existing red waypoint to move it, click it to delete it, or drag a
    red route section to insert a waypoint into that stored section. Contextual
    labels describe these actions when a mouse or hover-capable pointer is used.
-   On touch-only devices, finger gestures remain reserved for map panning and
-   pinch zoom; precise waypoint and section reshaping requires a mouse or pen.
+   On touch-only devices, a deliberate one-finger drag can move an existing
+   waypoint or pull a new waypoint from a route section when the gesture starts
+   very close to the displayed itinerary. Finger drags that start elsewhere
+   continue to pan the map, while individual waypoint deletion still requires a
+   mouse or pen.
    Only the affected sections are recalculated after an edit, using the current
    snapping choice.
 3. Keep snapping enabled to create or reshape sections along available
