@@ -4,7 +4,7 @@
  * remain consistent. The dialog is temporary and keeps the map-focused layout
  * free of permanent form controls.
  */
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useI18n } from '../i18n/I18nContext';
 
 /** Controlled visibility and callbacks for the route-export dialog. */
@@ -32,28 +32,63 @@ export default function RouteExportDialog({
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const wasOpenRef = useRef(false);
+  const openingNameRef = useRef(defaultName);
+  const selectionPendingRef = useRef(false);
   const [routeName, setRouteName] = useState(defaultName);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+
+    if (isOpen && !wasOpen) {
+      openingNameRef.current = defaultName;
+      selectionPendingRef.current = true;
+      setRouteName(defaultName);
+    }
+  }, [defaultName, isOpen]);
+
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
 
     if (!dialog) {
       return;
     }
 
-    if (isOpen) {
-      setRouteName(defaultName);
+    if (!isOpen) {
+      selectionPendingRef.current = false;
 
-      if (!dialog.open) {
-        dialog.showModal();
+      if (dialog.open) {
+        dialog.close();
       }
 
-      // Selecting the proposal lets the user replace it immediately by typing.
-      window.requestAnimationFrame(() => inputRef.current?.select());
-    } else if (dialog.open) {
-      dialog.close();
+      return;
     }
-  }, [defaultName, isOpen]);
+
+    // Wait for the controlled input to contain the new proposal. Selecting it
+    // before React commits that value would move the caret back to the end.
+    if (routeName !== openingNameRef.current) {
+      return;
+    }
+
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+
+    if (!selectionPendingRef.current) {
+      return;
+    }
+
+    const input = inputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(0, input.value.length);
+    selectionPendingRef.current = false;
+  }, [isOpen, routeName]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
