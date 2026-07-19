@@ -66,6 +66,27 @@ describe('parseGpxRoute', () => {
     });
   });
 
+  it('ignores points with missing, empty, or out-of-range coordinates', () => {
+    const route = parseGpxRoute(
+      `<gpx><rte>
+        <rtept lon="7"><ele>100</ele></rtept>
+        <rtept lat="" lon="7"><ele>200</ele></rtept>
+        <rtept lat="91" lon="7"><ele>300</ele></rtept>
+        <rtept lat="46" lon="7"><ele>500</ele></rtept>
+        <rtept lat="46.1" lon="7.1"><ele>550</ele></rtept>
+      </rte></gpx>`,
+      'route.gpx',
+    );
+
+    expect(route.segments[0]).toEqual({
+      coordinates: [
+        [7, 46],
+        [7.1, 46.1],
+      ],
+      elevationsMeters: [500, 550],
+    });
+  });
+
   it('marks the complete segment elevation series unavailable when one value is missing', () => {
     const route = parseGpxRoute(
       `<gpx><rte>

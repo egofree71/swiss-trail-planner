@@ -8,7 +8,10 @@
 import type { Coordinate } from 'ol/coordinate.js';
 import LineString from 'ol/geom/LineString.js';
 import { getDistance, getLength } from 'ol/sphere.js';
-import { MAP_PROJECTION_CODE, toWgs84 } from '../map/projection';
+import {
+  MAP_PROJECTION_CODE,
+  toWgs84Coordinates,
+} from '../map/projection';
 
 /** Official GeoAdmin endpoint returning elevations along an LV95 polyline. */
 const ELEVATION_PROFILE_ENDPOINT =
@@ -96,6 +99,12 @@ export interface ImportedRouteElevationSegment {
   coordinates: Coordinate[];
   /** Embedded GPX elevations matching the coordinate array one-for-one. */
   elevationsMeters: number[];
+}
+
+/** Monotone lookup state reused while sampling one imported elevation series. */
+interface ImportedElevationCursor {
+  /** First source point whose distance is at or beyond the current sample. */
+  upperIndex: number;
 }
 
 /** Untrusted altitude container returned by the profile service. */
@@ -191,12 +200,9 @@ export function calculateRouteSegmentsDistance(segments: Coordinate[][]): number
   );
 }
 
-
 /** Measures cumulative geodesic distances at each imported GPX coordinate. */
 function measureImportedSegment(coordinates: Coordinate[]): number[] {
-  const lonLatCoordinates = coordinates.map((coordinate) =>
-    toWgs84(coordinate),
-  );
+  const lonLatCoordinates = toWgs84Coordinates(coordinates);
   const cumulativeDistances = [0];
 
   for (let index = 1; index < lonLatCoordinates.length; index += 1) {
@@ -209,11 +215,22 @@ function measureImportedSegment(coordinates: Coordinate[]): number[] {
   return cumulativeDistances;
 }
 
-/** Interpolates an imported GPX elevation at one cumulative segment distance. */
+/**
+ * Interpolates an imported GPX elevation at one cumulative segment distance.
+ * Samples are requested in ascending order, so the shared cursor advances only
+ * forward instead of rescanning a dense recording from its first point.
+ *
+ * @param cumulativeDistances - Ordered source-point distances in metres.
+ * @param elevationsMeters - Elevations matching the source points one-for-one.
+ * @param distanceMeters - Requested segment-local cumulative distance.
+ * @param cursor - Mutable monotone lookup position for this segment only.
+ * @returns Linearly interpolated elevation in metres.
+ */
 function importedElevationAtDistance(
   cumulativeDistances: number[],
   elevationsMeters: number[],
   distanceMeters: number,
+  cursor: ImportedElevationCursor,
 ): number {
   if (distanceMeters <= 0) {
     return elevationsMeters[0];
@@ -223,21 +240,20 @@ function importedElevationAtDistance(
   const totalDistanceMeters = cumulativeDistances[lastIndex];
 
   if (distanceMeters >= totalDistanceMeters) {
+    cursor.upperIndex = lastIndex;
     return elevationsMeters[lastIndex];
   }
 
-  let upperIndex = 1;
-
   while (
-    upperIndex < cumulativeDistances.length &&
-    cumulativeDistances[upperIndex] < distanceMeters
+    cursor.upperIndex < cumulativeDistances.length &&
+    cumulativeDistances[cursor.upperIndex] < distanceMeters
   ) {
-    upperIndex += 1;
+    cursor.upperIndex += 1;
   }
 
-  const lowerIndex = upperIndex - 1;
+  const lowerIndex = Math.max(0, cursor.upperIndex - 1);
   const lowerDistance = cumulativeDistances[lowerIndex];
-  const upperDistance = cumulativeDistances[upperIndex];
+  const upperDistance = cumulativeDistances[cursor.upperIndex];
   const distanceSpan = upperDistance - lowerDistance;
   const fraction =
     distanceSpan > 0
@@ -246,7 +262,8 @@ function importedElevationAtDistance(
 
   return (
     elevationsMeters[lowerIndex] +
-    (elevationsMeters[upperIndex] - elevationsMeters[lowerIndex]) * fraction
+    (elevationsMeters[cursor.upperIndex] - elevationsMeters[lowerIndex]) *
+      fraction
   );
 }
 
@@ -290,6 +307,7 @@ export function createImportedRouteElevationSummary(
 
     const sampleCount = profileSampleCount(segmentDistanceMeters);
     const segmentPoints: RouteElevationPoint[] = [];
+    const elevationCursor: ImportedElevationCursor = { upperIndex: 1 };
 
     for (let index = 0; index < sampleCount; index += 1) {
       const distanceMeters =
@@ -302,6 +320,7 @@ export function createImportedRouteElevationSummary(
           cumulativeDistances,
           segment.elevationsMeters,
           distanceMeters,
+          elevationCursor,
         ),
       });
     }

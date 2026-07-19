@@ -25,7 +25,7 @@ import {
 import { IMPORTED_ROUTE_MAX_ZOOM } from './config';
 import { updateImportedRouteDisplay } from './importedRoute';
 import type { MapRuntime } from './mapRuntime';
-import { fromWgs84 } from './projection';
+import { fromWgs84Coordinates } from './projection';
 
 /** Inputs required by the imported-GPX workflow. */
 export interface UseImportedRouteOptions {
@@ -120,7 +120,7 @@ export function useImportedRoute(
         }
 
         const projectedSegments = importedRoute.segments.map((segment) =>
-          segment.coordinates.map((coordinate) => fromWgs84(coordinate)),
+          fromWgs84Coordinates(segment.coordinates),
         );
         let embeddedElevationSummary: RouteElevationSummary | null = null;
 

@@ -40,18 +40,12 @@ export class GpxImportError extends Error {
   }
 }
 
-/** Valid coordinate and optional altitude parsed from one GPX point element. */
-interface ParsedGpxPoint {
-  /** WGS 84 longitude and latitude. */
-  coordinate: Coordinate;
-  /** Embedded GPX elevation, or `null` when missing or invalid. */
-  elevationMeters: number | null;
-}
-
 /** Returns direct child text without accidentally reading a nested track point name. */
 function directChildText(element: Element, localName: string): string | null {
-  for (const child of Array.from(element.children)) {
-    if (child.localName === localName) {
+  for (let index = 0; index < element.children.length; index += 1) {
+    const child = element.children.item(index);
+
+    if (child?.localName === localName) {
       const text = child.textContent?.trim();
       return text || null;
     }
@@ -73,9 +67,17 @@ function parseElevation(element: Element): number | null {
 }
 
 /** Parses and validates one GPX latitude/longitude element. */
-function parsePoint(element: Element): ParsedGpxPoint | null {
-  const latitude = Number(element.getAttribute('lat'));
-  const longitude = Number(element.getAttribute('lon'));
+function parseCoordinate(element: Element): Coordinate | null {
+  const latitudeText = element.getAttribute('lat');
+  const longitudeText = element.getAttribute('lon');
+
+  // Missing and empty attributes must not silently become zero through Number().
+  if (!latitudeText?.trim() || !longitudeText?.trim()) {
+    return null;
+  }
+
+  const latitude = Number(latitudeText);
+  const longitude = Number(longitudeText);
 
   if (
     !Number.isFinite(latitude) ||
@@ -88,67 +90,78 @@ function parsePoint(element: Element): ParsedGpxPoint | null {
     return null;
   }
 
-  return {
-    coordinate: [longitude, latitude],
-    elevationMeters: parseElevation(element),
-  };
+  return [longitude, latitude];
 }
 
 /**
- * Removes consecutive duplicate coordinates that can create zero-length
- * features. When only one duplicate contains elevation, that useful value is
- * retained so a harmless duplicate does not force a terrain-service fallback.
+ * Extracts one valid GPX segment while validating and deduplicating points in
+ * one pass. Avoiding intermediate point objects and array pipelines keeps large
+ * GPS recordings from doing several complete allocation-heavy traversals.
+ *
+ * @param parent - Track-segment or route element containing point descendants.
+ * @param pointLocalName - Namespace-independent GPX point element name.
+ * @returns A usable line with at least two coordinates, or `null`.
  */
-function deduplicatePoints(points: ParsedGpxPoint[]): ParsedGpxPoint[] {
-  const result: ParsedGpxPoint[] = [];
-
-  for (const point of points) {
-    const previous = result[result.length - 1];
-
-    if (
-      previous &&
-      previous.coordinate[0] === point.coordinate[0] &&
-      previous.coordinate[1] === point.coordinate[1]
-    ) {
-      if (
-        previous.elevationMeters === null &&
-        point.elevationMeters !== null
-      ) {
-        result[result.length - 1] = point;
-      }
-      continue;
-    }
-
-    result.push(point);
-  }
-
-  return result;
-}
-
-/** Extracts one valid GPX segment from descendant point elements. */
 function extractSegment(
   parent: Element,
   pointLocalName: string,
 ): ImportedGpxSegment | null {
-  const points = deduplicatePoints(
-    Array.from(parent.getElementsByTagNameNS('*', pointLocalName))
-      .map(parsePoint)
-      .filter((point): point is ParsedGpxPoint => point !== null),
-  );
+  const pointElements = parent.getElementsByTagNameNS('*', pointLocalName);
+  const coordinates: Coordinate[] = [];
+  const elevationsMeters: number[] = [];
+  let missingElevationCount = 0;
 
-  if (points.length < 2) {
+  for (let index = 0; index < pointElements.length; index += 1) {
+    const pointElement = pointElements.item(index);
+
+    if (!pointElement) {
+      continue;
+    }
+
+    const coordinate = parseCoordinate(pointElement);
+
+    if (!coordinate) {
+      continue;
+    }
+
+    const elevationMeters = parseElevation(pointElement);
+    const previousIndex = coordinates.length - 1;
+    const previousCoordinate = coordinates[previousIndex];
+
+    if (
+      previousCoordinate &&
+      previousCoordinate[0] === coordinate[0] &&
+      previousCoordinate[1] === coordinate[1]
+    ) {
+      // A duplicate carrying the only valid elevation should enrich the kept
+      // point rather than forcing the complete segment to use GeoAdmin later.
+      if (
+        !Number.isFinite(elevationsMeters[previousIndex]) &&
+        elevationMeters !== null
+      ) {
+        elevationsMeters[previousIndex] = elevationMeters;
+        missingElevationCount -= 1;
+      }
+      continue;
+    }
+
+    coordinates.push(coordinate);
+
+    if (elevationMeters === null) {
+      elevationsMeters.push(Number.NaN);
+      missingElevationCount += 1;
+    } else {
+      elevationsMeters.push(elevationMeters);
+    }
+  }
+
+  if (coordinates.length < 2) {
     return null;
   }
 
-  const hasCompleteElevations = points.every(
-    (point) => point.elevationMeters !== null,
-  );
-
   return {
-    coordinates: points.map((point) => point.coordinate),
-    elevationsMeters: hasCompleteElevations
-      ? points.map((point) => point.elevationMeters as number)
-      : null,
+    coordinates,
+    elevationsMeters: missingElevationCount === 0 ? elevationsMeters : null,
   };
 }
 
@@ -189,13 +202,27 @@ export function parseGpxRoute(xml: string, filename: string): ImportedGpxRoute {
   const segments: ImportedGpxSegment[] = [];
   let routeName: string | null = null;
 
-  for (const track of Array.from(root.getElementsByTagNameNS('*', 'trk'))) {
-    routeName ??= directChildText(track, 'name');
+  const tracks = root.getElementsByTagNameNS('*', 'trk');
 
-    for (const trackSegment of Array.from(
-      track.getElementsByTagNameNS('*', 'trkseg'),
-    )) {
-      const segment = extractSegment(trackSegment, 'trkpt');
+  for (let trackIndex = 0; trackIndex < tracks.length; trackIndex += 1) {
+    const track = tracks.item(trackIndex);
+
+    if (!track) {
+      continue;
+    }
+
+    routeName ??= directChildText(track, 'name');
+    const trackSegments = track.getElementsByTagNameNS('*', 'trkseg');
+
+    for (
+      let segmentIndex = 0;
+      segmentIndex < trackSegments.length;
+      segmentIndex += 1
+    ) {
+      const trackSegment = trackSegments.item(segmentIndex);
+      const segment = trackSegment
+        ? extractSegment(trackSegment, 'trkpt')
+        : null;
 
       if (segment) {
         segments.push(segment);
@@ -203,7 +230,15 @@ export function parseGpxRoute(xml: string, filename: string): ImportedGpxRoute {
     }
   }
 
-  for (const route of Array.from(root.getElementsByTagNameNS('*', 'rte'))) {
+  const routes = root.getElementsByTagNameNS('*', 'rte');
+
+  for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
+    const route = routes.item(routeIndex);
+
+    if (!route) {
+      continue;
+    }
+
     routeName ??= directChildText(route, 'name');
     const segment = extractSegment(route, 'rtept');
 

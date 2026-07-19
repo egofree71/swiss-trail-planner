@@ -84,6 +84,38 @@ describe('route metrics', () => {
     expect(summary.points[firstRepeatedDistanceIndex].elevationMeters).toBe(900);
   });
 
+  it('interpolates irregular embedded GPX elevations across ascending samples', () => {
+    const coordinates = [
+      [2_600_000, 1_200_000],
+      [2_600_010, 1_200_000],
+      [2_600_100, 1_200_000],
+    ];
+    const firstSectionDistance = calculateRouteDistance(coordinates.slice(0, 2));
+    const totalDistance = calculateRouteDistance(coordinates);
+    const summary = createImportedRouteElevationSummary([
+      {
+        coordinates,
+        elevationsMeters: [500, 600, 700],
+      },
+    ]);
+    const firstInteriorSample = summary.points[1];
+    const expectedElevation =
+      600 +
+      ((firstInteriorSample.distanceMeters - firstSectionDistance) /
+        (totalDistance - firstSectionDistance)) *
+        100;
+
+    expect(firstInteriorSample.distanceMeters).toBeGreaterThan(
+      firstSectionDistance,
+    );
+    expect(firstInteriorSample.elevationMeters).toBeCloseTo(
+      expectedElevation,
+      8,
+    );
+    expect(summary.ascentMeters).toBeCloseTo(200, 8);
+    expect(summary.descentMeters).toBe(0);
+  });
+
   it('rejects imported elevation data with no valid measurable segment', () => {
     expect(() =>
       createImportedRouteElevationSummary([

@@ -6,7 +6,12 @@
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import type Projection from 'ol/proj/Projection.js';
-import { get as getProjection, transform } from 'ol/proj.js';
+import {
+  get as getProjection,
+  getTransform,
+  transform,
+  type TransformFunction,
+} from 'ol/proj.js';
 import { register } from 'ol/proj/proj4.js';
 import proj4 from 'proj4';
 
@@ -127,12 +132,78 @@ function registerMapProjection(): Projection {
 /** Registered singleton imported by map sources and the root view. */
 export const MAP_PROJECTION = registerMapProjection();
 
+/** Cached transforms avoid repeated projection-registry lookups for GPX arrays. */
+const WGS84_TO_MAP_TRANSFORM = getTransform(
+  WGS84_PROJECTION_CODE,
+  MAP_PROJECTION_CODE,
+);
+const MAP_TO_WGS84_TRANSFORM = getTransform(
+  MAP_PROJECTION_CODE,
+  WGS84_PROJECTION_CODE,
+);
+
+/**
+ * Transforms an ordered coordinate collection through one flat-array operation.
+ * OpenLayers accepts a stride of two, which avoids one projection-dispatch call
+ * per GPX point while preserving a fresh nested coordinate array for callers.
+ *
+ * @param coordinates - Ordered source coordinates.
+ * @param transformCoordinates - Cached OpenLayers flat-coordinate transform.
+ * @returns Newly allocated coordinates in the destination projection.
+ */
+function transformCoordinateArray(
+  coordinates: Coordinate[],
+  transformCoordinates: TransformFunction,
+): Coordinate[] {
+  if (coordinates.length === 0) {
+    return [];
+  }
+
+  const flatCoordinates = new Array<number>(coordinates.length * 2);
+
+  for (let index = 0; index < coordinates.length; index += 1) {
+    flatCoordinates[index * 2] = coordinates[index][0];
+    flatCoordinates[index * 2 + 1] = coordinates[index][1];
+  }
+
+  const transformed = transformCoordinates(flatCoordinates, undefined, 2, 2);
+  const result = new Array<Coordinate>(coordinates.length);
+
+  for (let index = 0; index < coordinates.length; index += 1) {
+    result[index] = [transformed[index * 2], transformed[index * 2 + 1]];
+  }
+
+  return result;
+}
+
 /** Converts WGS 84 longitude/latitude to the application's LV95 map geometry. */
 export function fromWgs84(coordinate: Coordinate): Coordinate {
   return transform(coordinate, WGS84_PROJECTION_CODE, MAP_PROJECTION_CODE);
 }
 
+/**
+ * Converts an ordered GPX coordinate array to native LV95 in one batch.
+ * @param coordinates - WGS 84 longitude/latitude points.
+ * @returns Newly allocated EPSG:2056 coordinates in the same order.
+ */
+export function fromWgs84Coordinates(
+  coordinates: Coordinate[],
+): Coordinate[] {
+  return transformCoordinateArray(coordinates, WGS84_TO_MAP_TRANSFORM);
+}
+
 /** Converts one LV95 map coordinate to WGS 84 longitude/latitude. */
 export function toWgs84(coordinate: Coordinate): Coordinate {
   return transform(coordinate, MAP_PROJECTION_CODE, WGS84_PROJECTION_CODE);
+}
+
+/**
+ * Converts an ordered native LV95 coordinate array to WGS 84 in one batch.
+ * @param coordinates - EPSG:2056 map coordinates.
+ * @returns Newly allocated longitude/latitude coordinates in the same order.
+ */
+export function toWgs84Coordinates(
+  coordinates: Coordinate[],
+): Coordinate[] {
+  return transformCoordinateArray(coordinates, MAP_TO_WGS84_TRANSFORM);
 }

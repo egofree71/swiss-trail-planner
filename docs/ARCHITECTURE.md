@@ -180,9 +180,10 @@ and stale-result guards explain why the safeguard or heuristic exists.
 
 Automated tests target stable domain contracts before browser presentation. The
 suite covers immutable route transformations, affected-section rebuilds, local
-GPX parsing and export, route metrics, directional-arrow placement, passenger-stop
-filtering, buffered viewport reuse, provider request separation, routing-grid
-footprints, the main-thread Worker facade, and the worker-owned routing engine.
+GPX one-pass parsing, batch projection, and export, route metrics, directional-
+arrow placement, passenger-stop filtering, buffered viewport reuse, provider
+request separation, routing-grid footprints, the main-thread Worker facade, and
+the worker-owned routing engine.
 Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
 reuse, cleanup and retry after an aborted cell request, true least-recently-used
@@ -229,8 +230,8 @@ Browser
    │
    ├── useImportedRoute hook
    │      ├── validate and parse one local GPX file with stale-read protection
-   │      ├── project and display independent read-only LV95 segments
-   │      └── reuse embedded elevations and frame the imported itinerary
+   │      ├── batch-project and display independent read-only LV95 segments
+   │      └── resample embedded elevations and frame the imported itinerary
    │
    ├── mapRuntime factory + useMapRuntime hook
    │      ├── create and dispose the single OpenLayers map and ordered layers
@@ -846,16 +847,18 @@ It returns the selected `File` to `useImportedRoute`; imported geometry never
 becomes editable route history.
 
 `src/import/gpx.ts` parses common GPX tracks and routes locally with
-`DOMParser`. Each `trkseg` remains an independent line, coordinate values are
-validated before transformation from WGS 84, and a complete `<ele>` series is
-preserved for each segment. If any retained point in the itinerary lacks a
-valid elevation, the imported geometry remains valid but the application falls
-back to GeoAdmin for the complete profile. Waypoint-only GPX documents are
-rejected because they do not define an itinerary. A size limit protects the
-browser from accidental oversized files.
+`DOMParser`. Each `trkseg` remains an independent line. Its points are validated,
+deduplicated, and copied into the retained coordinate and elevation arrays in one
+pass, avoiding per-point wrapper objects and repeated array pipelines on dense GPS
+recordings. Missing or empty latitude/longitude attributes are rejected instead of
+being coerced to zero. A complete `<ele>` series is preserved for each segment. If
+any retained point in the itinerary lacks a valid elevation, the imported geometry
+remains valid but the application falls back to GeoAdmin for the complete profile.
+Waypoint-only GPX documents are rejected because they do not define an itinerary.
+A size limit protects the browser from accidental oversized files.
 
 `src/map/useImportedRoute.ts` owns the asynchronous file-read session, size
-validation, parsing, WGS 84 to LV95 conversion, optional embedded-elevation
+validation, parsing, batched WGS 84 to LV95 conversion, optional embedded-elevation
 summary, purple display replacement, and view framing. A slower file read is
 ignored after a newer selection, route creation, or unmount invalidates its
 session. A successful import becomes the single current itinerary: active
@@ -872,10 +875,12 @@ do not hide one symbol beneath the other. `useImportedRoute` fits the view to it
 extent and feeds its projected segments into the shared metrics pipeline.
 Distance is summed per segment. When every retained GPX point has a
 valid `<ele>` value, the embedded altitude function is resampled at the same
-roughly 20 metre spacing used for editable routes; this preserves the exported
-profile while avoiding visible artefacts from irregularly spaced geometry
-vertices. GPX files without a complete elevation series use the normal GeoAdmin
-profile request instead. Elevation accumulation remains segment-local in both
+roughly 20 metre spacing used for editable routes. A monotone interpolation
+cursor advances through each dense source segment only once while producing
+those ordered samples; this preserves the recorded profile without repeated
+scans or visible artefacts from irregularly spaced geometry vertices. GPX files
+without a complete elevation series use the normal GeoAdmin profile request
+instead. Elevation accumulation remains segment-local in both
 paths so deliberate GPX gaps do not create fictional connectors. The resulting
 cumulative samples feed the same collapsible profile and bottom statistics bar
 used by editable routes.
@@ -1001,6 +1006,7 @@ via-helvetica/
 │   │   ├── itineraryDirection.ts
 │   │   ├── itineraryEndpoints.ts
 │   │   ├── mapRuntime.ts
+│   │   ├── projection.test.ts
 │   │   ├── projection.ts
 │   │   ├── route.ts
 │   │   ├── routeDisplay.ts
@@ -1083,7 +1089,7 @@ editing and clear history.
 
 Owns the React-facing read-only GPX capability. It validates the browser file
 size, protects asynchronous `File.text()` reads with a monotonically increasing
-session, parses the GPX locally, projects independent segments into LV95,
+session, parses the GPX locally, batch-projects independent segments into LV95,
 reuses complete embedded elevations when possible, updates or clears the purple
 OpenLayers display, and frames the accepted itinerary above the bottom summary.
 The hook exposes projected segments and the optional elevation summary to
@@ -1349,7 +1355,8 @@ resolve to the latest position in route order.
 
 Calculates geodesic distance from LV95 route geometry, sends native coordinates
 to the official elevation-profile service, validates ordered distance/elevation
-samples, accumulates ascent and descent, and applies the published Schweizer
+samples, resamples complete imported GPX elevations with a segment-local monotone
+lookup cursor, accumulates ascent and descent, and applies the published Schweizer
 Wanderwege 15th-degree hiking-time model to each sampled section. The same
 samples feed the profile chart. Requests are
 abortable so stale route histories cannot update the UI.
@@ -1384,9 +1391,11 @@ geometry without elevations.
 ### `src/import/gpx.ts`
 
 Validates file size policy, parses GPX XML, extracts named tracks and routes,
-keeps disconnected track segments separate, rejects invalid coordinates, and
-returns WGS 84 geometry with a complete elevation series when every retained
-point supplies a valid `<ele>` value. It does not touch OpenLayers state.
+keeps disconnected track segments separate, and validates plus deduplicates each
+point collection in one pass. It rejects missing, empty, non-finite, and
+out-of-range coordinates and returns WGS 84 geometry with a complete elevation
+series when every
+retained point supplies a valid `<ele>` value. It does not touch OpenLayers state.
 
 ### `src/map/importedRoute.ts`
 
@@ -1542,7 +1551,9 @@ Creates and updates the separate vector marker for browser geolocation.
 
 Registers EPSG:2056 through `proj4`, exposes the official LV95 WMTS extent,
 resolutions, matrix availability, and matrix sizes, and provides the only WGS 84
-to LV95 conversion helpers used at external data boundaries.
+to LV95 conversion helpers used at external data boundaries. GPX segment arrays
+use cached flat-coordinate transforms so projection dispatch happens once per
+segment rather than once per point.
 
 ### `src/map/config.ts`
 
@@ -1561,14 +1572,17 @@ The colocated `*.test.ts` files protect stable domain behaviour without opening
 a map or contacting live providers. `routeState.test.ts` covers flattening and
 open or closed reversal; `routeEditing.test.ts` covers exact connectors and
 move, insertion, and deletion rebuilds; `import/gpx.test.ts` covers namespaced
-tracks, segment gaps, duplicate points, elevations, and validation;
-`export/gpx.test.ts` covers section-local simplification, waypoint and loop
-preservation, XML metadata and bounds, profile normalization, elevation
-interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
-distance, segment-local elevation totals, the Swiss hiking-time model, and a
-mocked GeoAdmin profile response; `itineraryDirection.test.ts` protects sparse
-arrow counts, scale limits, waypoint clearance, bend rejection, reversal, and
-out-and-back collision shifts; `publicTransportStopModel.test.ts` covers
+tracks, segment gaps, duplicate points, missing coordinate attributes,
+elevations, and validation; `projection.test.ts` protects batch and single-point
+WGS 84/LV95 equivalence; `export/gpx.test.ts` covers section-local
+simplification, waypoint and loop preservation, XML metadata and bounds,
+profile normalization, elevation interpolation, and geometry-only fallback;
+`routeMetrics.test.ts` covers LV95 distance, segment-local elevation totals,
+monotone imported-profile
+interpolation, the Swiss hiking-time model, and a mocked GeoAdmin profile
+response; `itineraryDirection.test.ts` protects sparse arrow counts, scale
+limits, waypoint clearance, bend rejection, reversal, and out-and-back collision
+shifts; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
 `publicTransportStopsViewport.test.ts` protects request margins, buffered reuse,
 and zoom or canvas-size invalidation; `publicTransportStopsApi.test.ts` protects
@@ -1630,17 +1644,17 @@ disposal.
     location-search marker. Zoom, language, visibility, or route-mode changes
     cancel obsolete information requests and clear stale selections.
 12. `useImportedRoute` validates and parses a selected GPX locally, ignores
-    obsolete file reads, converts its WGS 84 coordinates to LV95, and reuses a
-    complete embedded elevation series when available. After preparation
-    succeeds, `App.tsx` clears the temporary location-search context and asks
+    obsolete file reads, converts each segment from WGS 84 to LV95 in one batch,
+    and reuses a complete embedded elevation series when available. After
+    preparation succeeds, `App.tsx` clears the temporary location-search context and asks
     `useEditableRoute` to leave route creation and clear editable history; the
     import hook then replaces the previous purple itinerary, adds direction
     arrowheads independently to each retained segment, and fits the map to its
     geometry.
 13. Independent GPX segments are measured separately, then combined for the
     shared distance, elevation, walking-time, and profile display. Complete
-    embedded elevations are regularly resampled; otherwise GeoAdmin supplies
-    the profile.
+    embedded elevations are regularly resampled through a monotone per-segment
+    cursor; otherwise GeoAdmin supplies the profile.
 14. Before entering editable route creation, `App.tsx` clears the temporary
     search context and asks `useImportedRoute` to invalidate any unfinished file
     read and remove the imported GPX without prompting.
