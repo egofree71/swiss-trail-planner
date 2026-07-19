@@ -75,6 +75,9 @@ const MAXIMUM_LOCAL_TANGENT_DELTA_RADIANS = (32 * Math.PI) / 180;
 /** Resolution changes below this relative threshold reuse the prior render cache. */
 const RESOLUTION_CACHE_EPSILON = 1e-9;
 
+/** Reuses the two route-colour SVGs across display rebuilds. */
+const arrowDataUrls = new Map<string, string>();
+
 /** Inputs required to append sparse direction symbols to one displayed line. */
 export interface DirectionalLineStyleOptions {
   /** Existing casing and centre-line styles returned before arrow styles. */
@@ -101,6 +104,18 @@ interface CoordinateSample {
   coordinate: Coordinate;
   /** Direction of travel on the source segment containing the sample. */
   localRotation: number;
+}
+
+/** Precomputed planar distances used by every screen-resolution sample. */
+interface DirectionLineIndex {
+  /** Immutable coordinates captured by the display rebuild. */
+  coordinates: Coordinate[];
+  /** Distance from the line start to every coordinate. */
+  cumulativeDistances: number[];
+  /** Coordinate indexes ending non-degenerate segments. */
+  segmentEndIndexes: number[];
+  /** Complete planar length in native LV95 metres. */
+  totalLength: number;
 }
 
 /** Returns planar LV95 distance between two route coordinates. */
@@ -130,6 +145,12 @@ function coordinateAngle(first: Coordinate, second: Coordinate): number {
  * while the route-coloured outline keeps the symbol visually attached to it.
  */
 function createArrowDataUrl(color: string): string {
+  const cachedDataUrl = arrowDataUrls.get(color);
+
+  if (cachedDataUrl) {
+    return cachedDataUrl;
+  }
+
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${DIRECTION_ARROW_WIDTH_PX}" height="${DIRECTION_ARROW_HEIGHT_PX}" viewBox="0 0 24 16">
       <path d="M3 1.8 L21 8 L3 14.2 Z"
@@ -137,45 +158,100 @@ function createArrowDataUrl(color: string): string {
         stroke-linejoin="round"/>
     </svg>
   `;
+  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  arrowDataUrls.set(color, dataUrl);
+  return dataUrl;
 }
 
-/** Samples one coordinate from cumulative distance along a line. */
-function sampleCoordinateAtDistance(
+/** Builds the cumulative-distance index once for one immutable displayed line. */
+function createDirectionLineIndex(
   coordinates: Coordinate[],
-  distance: number,
-): CoordinateSample | null {
-  let traversedDistance = 0;
+): DirectionLineIndex {
+  const cumulativeDistances = [0];
+  const segmentEndIndexes: number[] = [];
 
   for (let index = 1; index < coordinates.length; index += 1) {
-    const start = coordinates[index - 1];
-    const end = coordinates[index];
-    const segmentLength = coordinateDistance(start, end);
+    const segmentLength = coordinateDistance(
+      coordinates[index - 1],
+      coordinates[index],
+    );
+    const totalLength = cumulativeDistances[index - 1] + segmentLength;
 
-    if (segmentLength <= 0) {
-      continue;
+    cumulativeDistances.push(totalLength);
+    if (segmentLength > 0) {
+      segmentEndIndexes.push(index);
     }
-
-    if (traversedDistance + segmentLength >= distance) {
-      const ratio = Math.max(
-        0,
-        Math.min(1, (distance - traversedDistance) / segmentLength),
-      );
-
-      return {
-        coordinate: [
-          start[0] + (end[0] - start[0]) * ratio,
-          start[1] + (end[1] - start[1]) * ratio,
-        ],
-        localRotation: -Math.atan2(end[1] - start[1], end[0] - start[0]),
-      };
-    }
-
-    traversedDistance += segmentLength;
   }
 
-  return null;
+  return {
+    coordinates,
+    cumulativeDistances,
+    segmentEndIndexes,
+    totalLength: cumulativeDistances.at(-1) ?? 0,
+  };
+}
+
+/** Finds the first non-degenerate segment whose end reaches the target distance. */
+function findSegmentEndIndex(
+  lineIndex: DirectionLineIndex,
+  distance: number,
+): number | null {
+  let lower = 0;
+  let upper = lineIndex.segmentEndIndexes.length - 1;
+  let match: number | null = null;
+
+  while (lower <= upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    const segmentEndIndex = lineIndex.segmentEndIndexes[middle];
+
+    if (lineIndex.cumulativeDistances[segmentEndIndex] >= distance) {
+      match = segmentEndIndex;
+      upper = middle - 1;
+    } else {
+      lower = middle + 1;
+    }
+  }
+
+  return match;
+}
+
+/** Samples one coordinate from cumulative distance along an indexed line. */
+function sampleCoordinateAtDistance(
+  lineIndex: DirectionLineIndex,
+  distance: number,
+): CoordinateSample | null {
+  if (lineIndex.segmentEndIndexes.length === 0) {
+    return null;
+  }
+
+  const boundedDistance = Math.max(
+    0,
+    Math.min(lineIndex.totalLength, distance),
+  );
+  const segmentEndIndex = findSegmentEndIndex(lineIndex, boundedDistance);
+
+  if (segmentEndIndex === null) {
+    return null;
+  }
+
+  const start = lineIndex.coordinates[segmentEndIndex - 1];
+  const end = lineIndex.coordinates[segmentEndIndex];
+  const startDistance = lineIndex.cumulativeDistances[segmentEndIndex - 1];
+  const segmentLength =
+    lineIndex.cumulativeDistances[segmentEndIndex] - startDistance;
+  const ratio = Math.max(
+    0,
+    Math.min(1, (boundedDistance - startDistance) / segmentLength),
+  );
+
+  return {
+    coordinate: [
+      start[0] + (end[0] - start[0]) * ratio,
+      start[1] + (end[1] - start[1]) * ratio,
+    ],
+    localRotation: -Math.atan2(end[1] - start[1], end[0] - start[0]),
+  };
 }
 
 /**
@@ -187,12 +263,11 @@ function sampleCoordinateAtDistance(
  * route directly underneath instead of pointing across the inside of a curve.
  */
 function sampleDirectionAtDistance(
-  coordinates: Coordinate[],
+  lineIndex: DirectionLineIndex,
   distance: number,
-  totalLength: number,
   resolution: number,
 ): DirectionSample | null {
-  const centre = sampleCoordinateAtDistance(coordinates, distance);
+  const centre = sampleCoordinateAtDistance(lineIndex, distance);
 
   if (!centre) {
     return null;
@@ -200,12 +275,12 @@ function sampleDirectionAtDistance(
 
   const curvatureHalfWindow = DIRECTION_CURVATURE_HALF_WINDOW_PX * resolution;
   const before = sampleCoordinateAtDistance(
-    coordinates,
+    lineIndex,
     Math.max(0, distance - curvatureHalfWindow),
   );
   const after = sampleCoordinateAtDistance(
-    coordinates,
-    Math.min(totalLength, distance + curvatureHalfWindow),
+    lineIndex,
+    Math.min(lineIndex.totalLength, distance + curvatureHalfWindow),
   );
 
   if (!before || !after) {
@@ -236,12 +311,12 @@ function sampleDirectionAtDistance(
 
   const localHalfWindow = DIRECTION_LOCAL_TANGENT_HALF_WINDOW_PX * resolution;
   const localBefore = sampleCoordinateAtDistance(
-    coordinates,
+    lineIndex,
     Math.max(0, distance - localHalfWindow),
   );
   const localAfter = sampleCoordinateAtDistance(
-    coordinates,
-    Math.min(totalLength, distance + localHalfWindow),
+    lineIndex,
+    Math.min(lineIndex.totalLength, distance + localHalfWindow),
   );
 
   if (!localBefore || !localAfter) {
@@ -341,12 +416,12 @@ function createCandidateDistances(
 
 /** Builds sparse arrow samples for one resolution without altering the line. */
 function createDirectionSamples(
-  coordinates: Coordinate[],
+  lineIndex: DirectionLineIndex,
   avoidCoordinates: Coordinate[],
   resolution: number,
 ): DirectionSample[] {
   if (
-    coordinates.length < 2 ||
+    lineIndex.coordinates.length < 2 ||
     !Number.isFinite(resolution) ||
     resolution <= 0 ||
     resolution > MAX_DIRECTION_ARROW_RESOLUTION
@@ -354,20 +429,14 @@ function createDirectionSamples(
     return [];
   }
 
-  let totalLength = 0;
-
-  for (let index = 1; index < coordinates.length; index += 1) {
-    totalLength += coordinateDistance(coordinates[index - 1], coordinates[index]);
-  }
-
-  const visibleLengthPx = totalLength / resolution;
+  const visibleLengthPx = lineIndex.totalLength / resolution;
 
   if (visibleLengthPx < MINIMUM_VISIBLE_ROUTE_LENGTH_PX) {
     return [];
   }
 
   const endMargin = LINE_END_MARGIN_PX * resolution;
-  const usableLength = totalLength - endMargin * 2;
+  const usableLength = lineIndex.totalLength - endMargin * 2;
 
   if (usableLength <= 0) {
     return [];
@@ -386,7 +455,7 @@ function createDirectionSamples(
   const collisionDistance = DIRECTION_ARROW_COLLISION_DISTANCE_PX * resolution;
   const samples: DirectionSample[] = [];
   const minimumSampleDistance = endMargin;
-  const maximumSampleDistance = totalLength - endMargin;
+  const maximumSampleDistance = lineIndex.totalLength - endMargin;
 
   for (let index = 1; index <= arrowCount; index += 1) {
     const baseDistance = endMargin + evenSpacing * index;
@@ -399,9 +468,8 @@ function createDirectionSamples(
 
     for (const candidateDistance of candidateDistances) {
       const sample = sampleDirectionAtDistance(
-        coordinates,
+        lineIndex,
         candidateDistance,
-        totalLength,
         resolution,
       );
 
@@ -438,6 +506,7 @@ export function createDirectionalLineStyle({
   resolution: number,
 ) => Style[] {
   const arrowDataUrl = createArrowDataUrl(color);
+  const lineIndex = createDirectionLineIndex(coordinates);
   let cachedResolution = Number.NaN;
   let cachedStyles = lineStyles;
 
@@ -451,7 +520,7 @@ export function createDirectionalLineStyle({
     }
 
     const arrowStyles = createDirectionSamples(
-      coordinates,
+      lineIndex,
       avoidCoordinates,
       resolution,
     ).map(

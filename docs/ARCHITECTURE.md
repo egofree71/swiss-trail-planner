@@ -180,8 +180,9 @@ and stale-result guards explain why the safeguard or heuristic exists.
 
 Automated tests target stable domain contracts before browser presentation. The
 suite covers immutable route transformations, affected-section rebuilds, local
-GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
-footprints, the main-thread Worker facade, and the worker-owned routing engine.
+GPX parsing and export, route metrics, directional-arrow placement, passenger-stop
+filtering, routing-grid footprints, the main-thread Worker facade, and the
+worker-owned routing engine.
 Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
 reuse, cleanup and retry after an aborted cell request, true least-recently-used
@@ -195,9 +196,11 @@ services.
 
 Tests live beside the modules they protect. This keeps fixtures close to the
 relevant business rules and makes a future extraction or contract change reveal
-which behaviour needs deliberate review. OpenLayers canvas rendering and full
-pointer workflows remain validated manually until a browser-level test offers
-clear value over its maintenance cost.
+which behaviour needs deliberate review. Directional-arrow tests exercise the
+pure screen-space placement contract through OpenLayers style objects without
+opening a map. OpenLayers canvas rendering and full pointer workflows remain
+validated manually until a browser-level test offers clear value over their
+maintenance cost.
 
 ## 4. Technical overview
 
@@ -984,6 +987,7 @@ via-helvetica/
 │   │   ├── geoAdminPopup.ts
 │   │   ├── config.ts
 │   │   ├── importedRoute.ts
+│   │   ├── itineraryDirection.test.ts
 │   │   ├── itineraryDirection.ts
 │   │   ├── itineraryEndpoints.ts
 │   │   ├── mapRuntime.ts
@@ -1372,14 +1376,17 @@ the first and last retained GPX coordinates.
 ### `src/map/itineraryDirection.ts`
 
 Creates resolution-aware directional line styles shared by editable and imported
-itineraries. It samples the displayed geometry at sparse screen-based intervals,
-caps arrow count, keeps hollow triangular arrowheads away from protected waypoint
-and endpoint coordinates, rejects candidates whose visible curvature is too high,
-orients accepted symbols from a shorter local tangent, desynchronizes colliding
-candidates on repeated out-and-back passages, and caches each style result until
-the map resolution changes. The fixed-size symbols remain centred on the route
-and extend slightly beyond its visible casing for legibility. The module is
-purely presentational and never changes route geometry or hit detection.
+itineraries. It precomputes one planar cumulative-distance index per immutable
+displayed line, then uses binary search for the repeated screen-space samples
+needed at each resolution. It samples the geometry at sparse intervals, caps arrow
+count, keeps hollow triangular arrowheads away from protected waypoint and endpoint
+coordinates, rejects candidates whose visible curvature is too high, orients
+accepted symbols from a shorter local tangent, desynchronizes colliding candidates
+on repeated out-and-back passages, memoizes the route-colour SVG data URLs, and
+caches each style result until the map resolution changes. The fixed-size symbols
+remain centred on the route and extend slightly beyond its visible casing for
+legibility. The module is purely presentational and never changes route geometry
+or hit detection.
 
 ### `src/map/itineraryEndpoints.ts`
 
@@ -1536,7 +1543,9 @@ tracks, segment gaps, duplicate points, elevations, and validation;
 preservation, XML metadata and bounds, profile normalization, elevation
 interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
 distance, segment-local elevation totals, the Swiss hiking-time model, and a
-mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
+mocked GeoAdmin profile response; `itineraryDirection.test.ts` protects sparse
+arrow counts, scale limits, waypoint clearance, bend rejection, reversal, and
+out-and-back collision shifts; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
 `networkRouter.test.ts` protects the structured-clone-safe route result;
 `dynamicRoutingNetworkClient.test.ts` protects Worker request correlation, typed errors, cancellation, ignored late responses, and
