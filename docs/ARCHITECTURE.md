@@ -159,8 +159,7 @@ request identity, hiking time, and bidirectional map/profile exploration.
 `dynamicRoutingWorker.ts` owns a long-lived `DynamicRoutingNetworkEngine` whose
 raw-cell cache, graph LRU, graph construction, snapping, and A* never enter the
 OpenLayers/React thread. Structured-clone messages carry only coordinates,
-route results, cache statistics, diagnostics, cancellation, and serialized
-errors across that boundary.
+route results, cancellation, and serialized errors across that boundary.
 `App.tsx` remains the application composition point and accesses the runtime
 through one stable ref. It connects the focused hooks instead of owning their
 imperative map sessions, route history, or provider-request lifecycles.
@@ -185,8 +184,8 @@ GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
 footprints, the main-thread Worker facade, and the worker-owned routing engine.
 Engine tests mock provider loading and graph construction to protect narrow-to-
 wider corridor retry, straight-fallback signalling, completed and in-flight cell
-reuse, cleanup and retry after an aborted cell request, graph-cache clearing, true
-least-recently-used eviction, size limits, and provider-error propagation without
+reuse, cleanup and retry after an aborted cell request, true least-recently-used
+eviction, size limits, and provider-error propagation without
 live GeoAdmin requests. Focused swissTLM3D API tests additionally protect request
 timeouts, one-shot transient retries, Retry-After handling, and the distinction
 between timeout errors and intentional cancellation. JSDOM provides the
@@ -199,38 +198,6 @@ relevant business rules and makes a future extraction or contract change reveal
 which behaviour needs deliberate review. OpenLayers canvas rendering and full
 pointer workflows remain validated manually until a browser-level test offers
 clear value over its maintenance cost.
-
-### 3.6 Measured worker-routing benchmark
-
-`benchmarks/routing/` is a separate local Vite entry used to validate the
-experimental browser-routing limits without adding controls or assets to the
-published map. It accepts a GPX trace, selects its longest continuous segment,
-and derives deterministic synthetic user clicks. Adaptive regular spacing gives
-a bounded general scenario, fixed spacing accepts values from 50 metres for
-small-section tests, and seeded irregular spacing approximates uneven live route
-planning while remaining exactly reproducible.
-
-Each benchmark first replays the scenario through the real dedicated routing
-worker so all required swissTLM3D cells and snapped endpoints are known. It then
-clears only the worker-owned `RoutingNetwork` LRU while preserving downloaded
-raw cells. The measured pass records worker-side graph-cache lookup, cached-cell
-resolution, feature merging, `RoutingNetwork` construction, start and destination
-snapping, A*, and coordinate reconstruction. End-to-end elapsed time additionally
-includes worker scheduling and structured-clone transfer, while animation-frame
-delay and browser long tasks are observed on the map/UI thread. Immutable route-
-step commit time remains measured on the main thread after each result returns.
-
-Normal session-cache and forced per-section graph-rebuild modes distinguish
-realistic reuse from the worst graph-construction case. After the Worker
-migration, the key validation is no longer only how long construction takes,
-but whether those worker-side builds leave frame delay near the normal refresh
-interval and remove main-thread long tasks. The report still rejects comparisons
-when the raw-cell count increases during the measured pass.
-
-The benchmark is diagnostic rather than a pass/fail regression test: timings
-depend on the browser, CPU, thermal state, region, worker scheduling, and network
-warm-up. Stable generated scenario JSON and schema-version-3 benchmark reports
-can be retained for cross-version and cross-device comparisons.
 
 ## 4. Technical overview
 
@@ -316,14 +283,7 @@ Regression tests
    │
    ├── Vitest
    ├── JSDOM for browser XML APIs
-   └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, routing-engine, and benchmark-sampling suites
-
-Local routing benchmark
-   │
-   ├── separate Vite page outside the production entry graph
-   ├── GPX-to-synthetic-click scenario generation
-   ├── raw-cell warm-up with derived-graph cache reset
-   └── worker-phase, end-to-end latency, main-thread frame-delay, long-task, and cache-contamination reporting
+   └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, and routing-engine suites
 
 Deployment
    │
@@ -667,7 +627,7 @@ root application receives only render state and actions from these hooks.
 lifetime and disposes it on unmount. The facade creates one dedicated module
 Worker lazily, correlates typed requests, forwards cancellation, and reconstructs
 errors used by the UI. The Worker keeps its caches across additions and edits;
-only plain coordinate arrays and diagnostics return to the main thread.
+only plain coordinate arrays return to the main thread.
 
 The current route is an immutable `RouteState`. Its ordered `RouteStep` array
 stores:
@@ -970,18 +930,6 @@ via-helvetica/
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml
-├── benchmarks/
-│   └── routing/
-│       ├── src/
-│       │   ├── benchmarkRunner.ts
-│       │   ├── gpxScenario.test.ts
-│       │   ├── gpxScenario.ts
-│       │   ├── main.ts
-│       │   └── styles.css
-│       ├── index.html
-│       ├── README.md
-│       ├── tsconfig.json
-│       └── vite.config.ts
 ├── docs/
 │   └── ARCHITECTURE.md
 ├── public/
@@ -1484,9 +1432,7 @@ retry policy for transient provider failures.
 
 Builds the walkable regional graph, indexes line segments, matches official
 hiking geometry, snaps waypoints, applies routing costs, and calculates A*
-paths. An optional benchmark-only accumulator separates start snapping,
-destination snapping, A*, and coordinate reconstruction without changing normal
-route results. It contains no React or OpenLayers map lifecycle state.
+paths. It contains no React or OpenLayers map lifecycle state.
 
 ### `src/routing/routeEditing.ts`
 
@@ -1518,17 +1464,15 @@ but it no longer blocks map rendering and its obsolete response is ignored.
 Owns network loading, completed and in-flight raw-cell caches, exact-corridor
 `RoutingNetwork` LRU entries, narrow and widened corridor attempts, feature
 merging, graph construction, snapping, and A*. Cache hits are promoted before
-bounded eviction so repeated local corridors remain available. Read-only cache
-statistics, explicit derived-graph clearing, and diagnosed routing expose worker-
-side phase timings to the benchmark without exposing mutable cache contents.
-Direct engine regression tests use mocked providers and graph doubles so this
-workflow is protected independently from Worker message transport.
+bounded eviction so repeated local corridors remain available. Direct engine regression tests use mocked providers and graph
+doubles so this workflow is protected independently from Worker message
+transport.
 
 ### `src/routing/dynamicRoutingProtocol.ts`
 
-Defines the structured-clone request, cancellation, response, error, cache-stat,
-and diagnostic contracts shared by the Worker and main-thread facade. It also
-owns `RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
+Defines the structured-clone request, cancellation, response, and error
+contracts shared by the Worker and main-thread facade. It also owns
+`RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
 boundary through explicit reconstruction.
 
 ### `src/routing/routingGrid.ts` and `routingConstants.ts`
@@ -1594,37 +1538,19 @@ interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
 distance, segment-local elevation totals, the Swiss hiking-time model, and a
 mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
 multilingual passenger-mode normalization and technical-record rejection;
-`networkRouter.test.ts` protects the optional phase-timing contract without
-changing route geometry; `dynamicRoutingNetworkClient.test.ts` protects Worker
-request correlation, typed errors, cancellation, ignored late responses, and
-disposal; and
-`benchmarks/routing/src/gpxScenario.test.ts`
-protects short fixed intervals,
-adaptive bounds, and seeded irregular reproducibility.
-
-### `benchmarks/routing/`
-
-Contains the local-only routing performance harness. `src/gpxScenario.ts`
-converts the longest continuous GPX segment into deterministic synthetic clicks
-and can export their WGS 84 coordinates as stable JSON. `src/benchmarkRunner.ts`
-warms the real dynamic loader, preserves raw cells, clears derived graphs, and
-measures detailed routing phases for each replayed section. The browser report
-and schema-version-3 JSON export identify dedicated-Worker execution and retain
-worker phase totals, end-to-end per-section timings, cache hits and misses, retry
-use, main-thread frame delay, and long-task observations. Its
-independent `index.html`, Vite config,
-and TypeScript config keep the harness outside the normal GitHub Pages build.
+`networkRouter.test.ts` protects the structured-clone-safe route result;
+`dynamicRoutingNetworkClient.test.ts` protects Worker request correlation, typed errors, cancellation, ignored late responses, and
+disposal.
 
 ### Remaining root files
 
 - `src/main.tsx` mounts React, the language provider, and styles.
 - `index.html` is the browser entry point.
-- `package.json` declares dependencies and npm scripts, including regression,
-  production-build, and local routing-benchmark commands.
+- `package.json` declares dependencies and npm scripts for development,
+  regression tests, and the production build.
 - `package-lock.json` locks dependency versions.
 - `vite.config.ts` configures React and the GitHub Pages base path.
-- `vitest.config.ts` selects JSDOM and the application plus benchmark-sampling
-  test suites.
+- `vitest.config.ts` selects JSDOM and the application test suites.
 - `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
   thumbnails used by the Layers menu without another map request.

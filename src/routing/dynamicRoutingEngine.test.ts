@@ -87,16 +87,13 @@ describe('DynamicRoutingNetworkEngine', () => {
     const start: Coordinate = [1_200, 1_200];
     const end: Coordinate = [3_600, 1_200];
 
-    const result = await engine.routeWithDiagnostics(
+    const result = await engine.route(
       start,
       end,
       new AbortController().signal,
     );
 
-    expect(result.path).toEqual(DEFAULT_PATH);
-    expect(result.timings.routeAttempts).toBe(2);
-    expect(result.timings.retryUsed).toBe(true);
-    expect(result.timings.graphCacheMisses).toBe(2);
+    expect(result).toEqual(DEFAULT_PATH);
     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
     expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(
       createCorridorCellKeys(start, end, 2).size,
@@ -107,15 +104,13 @@ describe('DynamicRoutingNetworkEngine', () => {
     moduleMocks.fromSwissTlm.mockImplementation(() => createNetwork(null));
     const engine = new DynamicRoutingNetworkEngine();
 
-    const result = await engine.routeWithDiagnostics(
+    const result = await engine.route(
       [1_200, 1_200],
       [3_600, 1_200],
       new AbortController().signal,
     );
 
-    expect(result.path).toBeNull();
-    expect(result.timings.routeAttempts).toBe(2);
-    expect(result.timings.retryUsed).toBe(true);
+    expect(result).toBeNull();
     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
   });
 
@@ -135,7 +130,6 @@ describe('DynamicRoutingNetworkEngine', () => {
 
     await vi.waitFor(() => {
       expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(1);
-      expect(engine.getCacheStats().pendingCells).toBe(1);
     });
 
     resolveFetch?.(EMPTY_NETWORK_DATA);
@@ -144,10 +138,6 @@ describe('DynamicRoutingNetworkEngine', () => {
       coordinate,
       coordinate,
     ]);
-    expect(engine.getCacheStats()).toMatchObject({
-      loadedCells: 1,
-      pendingCells: 0,
-    });
   });
 
   it('cleans an aborted pending cell so the same area can be retried', async () => {
@@ -168,19 +158,11 @@ describe('DynamicRoutingNetworkEngine', () => {
 
     await vi.waitFor(() => {
       expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(1);
-      expect(engine.getCacheStats().pendingCells).toBe(1);
     });
 
     controller.abort();
 
     await expect(abortedSnap).rejects.toMatchObject({ name: 'AbortError' });
-    await vi.waitFor(() => {
-      expect(engine.getCacheStats()).toMatchObject({
-        loadedCells: 0,
-        pendingCells: 0,
-      });
-    });
-
     moduleMocks.fetchSwissTlmNetworkData.mockResolvedValueOnce(
       EMPTY_NETWORK_DATA,
     );
@@ -189,27 +171,6 @@ describe('DynamicRoutingNetworkEngine', () => {
       engine.snap(coordinate, new AbortController().signal),
     ).resolves.toEqual(coordinate);
     expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(2);
-    expect(engine.getCacheStats()).toMatchObject({
-      loadedCells: 1,
-      pendingCells: 0,
-    });
-  });
-
-  it('rebuilds a cleared graph from cached raw cells without repeating requests', async () => {
-    const engine = new DynamicRoutingNetworkEngine();
-    const coordinate = coordinateInColumn(0);
-    const signal = new AbortController().signal;
-
-    await engine.route(coordinate, coordinate, signal);
-    const requestCount = moduleMocks.fetchSwissTlmNetworkData.mock.calls.length;
-
-    engine.clearNetworkCache();
-    await engine.route(coordinate, coordinate, signal);
-
-    expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
-    expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(
-      requestCount,
-    );
   });
 
   it('promotes cache hits and evicts the least-recently used graph', async () => {
@@ -223,7 +184,6 @@ describe('DynamicRoutingNetworkEngine', () => {
       await engine.route(coordinate, coordinate, signal);
     }
 
-    expect(engine.getCacheStats().cachedNetworks).toBe(8);
     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(8);
 
     // Reusing the oldest graph promotes it before the ninth graph is inserted.
@@ -236,7 +196,6 @@ describe('DynamicRoutingNetworkEngine', () => {
     // The second-oldest untouched graph was evicted and must now be rebuilt.
     await engine.route(coordinates[1], coordinates[1], signal);
     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(10);
-    expect(engine.getCacheStats().cachedNetworks).toBe(8);
   });
 
   it('rejects an oversized corridor before making provider requests', async () => {

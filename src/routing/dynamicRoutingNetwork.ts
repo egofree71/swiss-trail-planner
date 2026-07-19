@@ -2,15 +2,12 @@
  * Business context: exposes dynamic swissTLM3D routing to the editable-route
  * workflow while keeping all expensive work in a dedicated Web Worker. This
  * facade maps AbortSignals and typed method calls to structured-clone messages;
- * the UI receives only snapped coordinates, route geometry, and diagnostics.
+ * the UI receives only snapped coordinates and route geometry.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import type { RoutedNetworkPath } from './networkRouter';
 import {
   RoutingAreaTooLargeError,
-  type DiagnosedDynamicRoutingResult,
-  type DynamicRoutingCacheStats,
-  type DynamicRoutingPhaseTimings,
   type RoutingWorkerRequest,
   type RoutingWorkerResponse,
   type SerializedRoutingWorkerError,
@@ -18,11 +15,6 @@ import {
 
 export { createLocalCellKeys } from './routingGrid';
 export { RoutingAreaTooLargeError } from './dynamicRoutingProtocol';
-export type {
-  DiagnosedDynamicRoutingResult,
-  DynamicRoutingCacheStats,
-  DynamicRoutingPhaseTimings,
-} from './dynamicRoutingProtocol';
 
 /** Promise callbacks retained until one worker response arrives. */
 interface PendingWorkerRequest {
@@ -75,24 +67,6 @@ export class DynamicRoutingNetworkLoader {
   private readonly pendingRequests = new Map<number, PendingWorkerRequest>();
   private disposed = false;
 
-  /** Clears only derived graphs while preserving worker-owned raw cells. */
-  async clearNetworkCache(): Promise<void> {
-    await this.sendRequest<void>({
-      type: 'request',
-      requestId: 0,
-      operation: 'clearNetworkCache',
-    });
-  }
-
-  /** Reads current worker cache sizes for the diagnostic benchmark. */
-  getCacheStats(): Promise<DynamicRoutingCacheStats> {
-    return this.sendRequest<DynamicRoutingCacheStats>({
-      type: 'request',
-      requestId: 0,
-      operation: 'getCacheStats',
-    });
-  }
-
   /**
    * Loads local cells and snaps one first waypoint inside the worker.
    * @param coordinate - User-selected coordinate in EPSG:2056.
@@ -131,30 +105,6 @@ export class DynamicRoutingNetworkLoader {
         type: 'request',
         requestId: 0,
         operation: 'route',
-        startCoordinate,
-        endCoordinate,
-      },
-      signal,
-    );
-  }
-
-  /**
-   * Routes one section and returns worker-side CPU phase timings.
-   * @param startCoordinate - Existing route endpoint in EPSG:2056.
-   * @param endCoordinate - Synthetic benchmark destination in EPSG:2056.
-   * @param signal - Benchmark cancellation signal.
-   * @returns Routed path and diagnostic timings collected inside the worker.
-   */
-  routeWithDiagnostics(
-    startCoordinate: Coordinate,
-    endCoordinate: Coordinate,
-    signal: AbortSignal,
-  ): Promise<DiagnosedDynamicRoutingResult> {
-    return this.sendRequest<DiagnosedDynamicRoutingResult>(
-      {
-        type: 'request',
-        requestId: 0,
-        operation: 'routeWithDiagnostics',
         startCoordinate,
         endCoordinate,
       },

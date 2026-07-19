@@ -185,7 +185,10 @@ describe('DynamicRoutingNetworkLoader worker facade', () => {
 
   it('terminates the worker and rejects pending work on disposal', async () => {
     const loader = new DynamicRoutingNetworkLoader();
-    const pending = loader.getCacheStats();
+    const pending = loader.snap(
+      [2_500_000, 1_100_000],
+      new AbortController().signal,
+    );
     const worker = currentWorker();
 
     loader.dispose();

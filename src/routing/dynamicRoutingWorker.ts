@@ -2,8 +2,8 @@
 /**
  * Business context: hosts the complete dynamic swissTLM3D routing pipeline in a
  * dedicated browser worker. Network requests, cell caches, graph construction,
- * snapping, and A* stay off the map's main thread; only plain route results and
- * diagnostics cross back to React.
+ * snapping, and A* stay off the map's main thread; only plain route results
+ * cross back to React.
  */
 import { DynamicRoutingNetworkEngine } from './dynamicRoutingEngine';
 import type {
@@ -83,23 +83,6 @@ workerScope.addEventListener(
                 controller.signal,
               ),
             );
-            break;
-          case 'routeWithDiagnostics':
-            postSuccess(
-              request.requestId,
-              await engine.routeWithDiagnostics(
-                request.startCoordinate,
-                request.endCoordinate,
-                controller.signal,
-              ),
-            );
-            break;
-          case 'clearNetworkCache':
-            engine.clearNetworkCache();
-            postSuccess(request.requestId, undefined);
-            break;
-          case 'getCacheStats':
-            postSuccess(request.requestId, engine.getCacheStats());
             break;
         }
       } catch (error) {

@@ -140,18 +140,6 @@ export interface RoutedNetworkPath {
   snapDistanceEnd: number;
 }
 
-/** CPU timings collected only when the local benchmark requests diagnostics. */
-export interface RoutingNetworkPhaseTimings {
-  /** Time spent projecting the requested start onto the indexed network. */
-  startSnapDurationMs: number;
-  /** Time spent projecting the requested destination onto the indexed network. */
-  endSnapDurationMs: number;
-  /** Time spent preparing and executing the A* search. */
-  aStarDurationMs: number;
-  /** Time spent rebuilding the returned coordinate sequence after the search. */
-  routeReconstructionDurationMs: number;
-}
-
 /** Diagnostics describing the graph created from one swissTLM3D data set. */
 export interface RoutingNetworkStats {
   /** Number of source road features received from GeoAdmin. */
@@ -813,33 +801,19 @@ export class RoutingNetwork {
    * costs are included so the search remains accurate between graph nodes.
    * @param startCoordinate - Requested route start in EPSG:2056.
    * @param endCoordinate - Requested route destination in EPSG:2056.
-   * @param timings - Optional benchmark accumulator; normal application calls omit it.
    * @returns Routed geometry and snap distances, or `null` when snapping or connectivity fails.
    */
   route(
     startCoordinate: Coordinate,
     endCoordinate: Coordinate,
-    timings?: RoutingNetworkPhaseTimings,
   ): RoutedNetworkPath | null {
-    const startSnapStartedAt = timings ? performance.now() : 0;
     const startSnap = this.findSnap(startCoordinate);
 
-    if (timings) {
-      timings.startSnapDurationMs += performance.now() - startSnapStartedAt;
-    }
-
-    const endSnapStartedAt = timings ? performance.now() : 0;
     const endSnap = this.findSnap(endCoordinate);
-
-    if (timings) {
-      timings.endSnapDurationMs += performance.now() - endSnapStartedAt;
-    }
 
     if (!startSnap || !endSnap) {
       return null;
     }
-
-    const aStarStartedAt = timings ? performance.now() : 0;
 
     // A same-segment route is both a valid result and an upper bound for pruning A*.
     const directPath = this.routeOnSameSegment(startSnap, endSnap);
@@ -947,12 +921,6 @@ export class RoutingNetwork {
       }
     }
 
-    if (timings) {
-      timings.aStarDurationMs += performance.now() - aStarStartedAt;
-    }
-
-    const reconstructionStartedAt = timings ? performance.now() : 0;
-
     if (directPath && bestGoalNodeId === null) {
       const result = {
         coordinates: directPath.coordinates,
@@ -960,20 +928,10 @@ export class RoutingNetwork {
         snapDistanceEnd: endSnap.distance,
       };
 
-      if (timings) {
-        timings.routeReconstructionDurationMs +=
-          performance.now() - reconstructionStartedAt;
-      }
-
       return result;
     }
 
     if (bestGoalNodeId === null) {
-      if (timings) {
-        timings.routeReconstructionDurationMs +=
-          performance.now() - reconstructionStartedAt;
-      }
-
       return null;
     }
 
@@ -1002,11 +960,6 @@ export class RoutingNetwork {
       snapDistanceStart: startSnap.distance,
       snapDistanceEnd: endSnap.distance,
     };
-
-    if (timings) {
-      timings.routeReconstructionDurationMs +=
-        performance.now() - reconstructionStartedAt;
-    }
 
     return result;
   }

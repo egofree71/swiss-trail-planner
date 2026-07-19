@@ -1,0 +1,3038 @@
+diff --git a/.gitignore b/.gitignore
+index 5bedea9f74a94dcc72717912a1ad3d1805049bc4..84592639d57b721282f2b4e09c75ac68e4915e3d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -3,7 +3,6 @@ node_modules/
+ 
+ # Production build
+ dist/
+-dist-benchmark/
+ 
+ # Local environment files
+ .env
+diff --git a/README.md b/README.md
+index dac0d6b6a58efc4ca2e34e95c73085d2bbec424d..52d63ce62b65178f37648992daab9ea86acbf0ef 100644
+--- a/README.md
++++ b/README.md
+@@ -13,7 +13,6 @@ time.
+ - [Data sources and limitations](#data-sources-and-limitations)
+ - [Documentation](#documentation)
+ - [Regression tests](#regression-tests)
+-- [Routing performance benchmark](#routing-performance-benchmark)
+ - [Production build and deployment](#production-build-and-deployment)
+ - [License](#license)
+ 
+@@ -140,25 +139,6 @@ During development, use `npm run test:watch` to rerun affected tests after each
+ change. GitHub Actions runs the complete suite before building and deploying the
+ site.
+ 
+-## Routing performance benchmark
+-
+-A separate local browser benchmark can derive deterministic synthetic clicks
+-from a GPX trace, warm the swissTLM3D raw-cell cache inside the routing
+-worker, and then measure graph cache lookup, raw-cell access, feature merging,
+-graph construction, endpoint snapping, A*, route reconstruction, end-to-end
+-worker latency, main-thread frame delay, and route-step creation without loading
+-new cells:
+-
+-```bash
+-npm run benchmark:routing
+-```
+-
+-The benchmark lives outside `src/` and `public/`, so it is not part of the
+-published application bundle. Fixed intervals start at 50 metres for short-route
+-tests, while adaptive and seeded-irregular strategies support longer and more
+-realistic scenarios. See `benchmarks/routing/README.md` for the measurement and
+-cache modes.
+-
+ ## Production build and deployment
+ 
+ ```bash
+diff --git a/benchmarks/routing/README.md b/benchmarks/routing/README.md
+deleted file mode 100644
+index cab156a8fa1301bad35ca88263af633cf0670001..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/README.md
++++ /dev/null
+@@ -1,59 +0,0 @@
+-# Routing performance benchmark
+-
+-This local browser tool measures Via Helvetica dynamic routing inside its
+-dedicated Web Worker and checks that the map/UI thread remains responsive,
+-without adding controls or assets to the published application.
+-
+-A detailed GPX trace does not normally contain the sparse waypoints originally
+-chosen by a route-planning user. The tool therefore generates deterministic
+-synthetic clicks along the longest continuous GPX segment:
+-
+-- **Adaptive regular** targets roughly 500-metre sections and caps the scenario
+-  at 24 sections.
+-- **Fixed regular** accepts any interval from 50 metres, so short routes and
+-  small sections can be tested explicitly.
+-- **Seeded irregular** varies section lengths between approximately 55% and
+-  145% of the selected average while remaining reproducible.
+-
+-Run the page with:
+-
+-```bash
+-npm run benchmark:routing
+-```
+-
+-Use the two explicit workflow steps in the page:
+-
+-1. **Generate scenario** reads the selected GPX and previews the deterministic
+-   synthetic clicks. It does not request routing data or measure performance.
+-2. **Run benchmark** performs the network warm-up and then the worker-backed
+-   measured pass. The page switches from the **Scenario** tab to the **Benchmark report**
+-   tab when this second step completes. The report separates exact graph-cache
+-   lookup, cached-cell access, feature merging, graph construction, start and
+-   destination snapping, A*, coordinate reconstruction, and residual overhead.
+-3. **Export benchmark JSON** saves the complete measured report, scenario, cache
+-   mode, browser identity, export time, logical CPU count, and reported device
+-   memory when the browser exposes it.
+-
+-The first pass performs the real GeoAdmin loading inside the Worker and resolves
+-the same sequence of snapped endpoints as live route creation. It then clears
+-only derived graph instances while preserving raw cell data. The measured pass
+-reports each worker-side CPU phase, end-to-end request time, main-thread
+-animation-frame delay, immutable route-step commit time, and browser long tasks
+-when supported. The exported benchmark format uses schema version 3 and records
+-`dedicated-worker` as its execution mode. A
+-non-zero **Measured cells** value means the
+-CPU measurement was contaminated by an unexpected cell load and should be run
+-again before comparison.
+-
+-Two graph-cache modes are available:
+-
+-- **Normal session cache** reproduces the application's exact-corridor graph LRU.
+-- **Rebuild every section** clears that cache before each section to expose the
+-  worst-case graph-construction cost and verify that those builds no longer
+-  create main-thread long tasks.
+-
+-Use several GPX files from contrasting Swiss regions. Keep the scenario JSON when
+-the synthetic clicks should remain stable across versions, and keep the benchmark
+-JSON when comparing devices, browsers, cache modes, or engine revisions.
+-Performance results are diagnostic measurements, not deterministic pass/fail
+-tests.
+diff --git a/benchmarks/routing/index.html b/benchmarks/routing/index.html
+deleted file mode 100644
+index 7e96663baccbe2d86a30c8a47e1c0242b012777a..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/index.html
++++ /dev/null
+@@ -1,137 +0,0 @@
+-<!doctype html>
+-<html lang="en">
+-  <head>
+-    <meta charset="UTF-8" />
+-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-    <title>Via Helvetica routing benchmark</title>
+-  </head>
+-  <body>
+-    <main>
+-      <header>
+-        <h1>Via Helvetica routing benchmark</h1>
+-        <p>
+-          Generate deterministic synthetic clicks from a detailed GPX trace,
+-          warm the swissTLM3D raw-cell cache in the routing Worker, then measure
+-          worker-side graph phases, end-to-end latency, main-thread responsiveness,
+-          and route-step creation without loading new cells.
+-        </p>
+-      </header>
+-
+-      <section class="panel" aria-labelledby="benchmark-setup-title">
+-        <h2 id="benchmark-setup-title">Benchmark setup</h2>
+-        <div class="controls">
+-          <div class="field field--file">
+-            <span class="field-label">GPX trace</span>
+-            <div class="file-picker">
+-              <label class="file-picker-button" for="gpx-file">Choose GPX</label>
+-              <span id="gpx-file-name" class="file-name">No file selected</span>
+-            </div>
+-            <input
+-              id="gpx-file"
+-              class="visually-hidden"
+-              type="file"
+-              accept=".gpx,application/gpx+xml,application/xml,text/xml"
+-              aria-describedby="gpx-file-name"
+-            />
+-          </div>
+-
+-          <label class="field">
+-            <span class="field-label">Sampling strategy</span>
+-            <select id="strategy">
+-              <option value="adaptive">Adaptive regular</option>
+-              <option value="regular">Fixed regular</option>
+-              <option value="irregular">Seeded irregular</option>
+-            </select>
+-          </label>
+-
+-          <label class="field">
+-            <span class="field-label">Interval / average</span>
+-            <input id="spacing" type="number" min="50" step="50" value="500" />
+-            <span class="hint">Metres; try 50, 100, 250, 500, 1000, or 2000.</span>
+-          </label>
+-
+-          <label class="field">
+-            <span class="field-label">Irregular seed</span>
+-            <input id="seed" type="number" step="1" value="42" />
+-          </label>
+-
+-          <label class="field">
+-            <span class="field-label">Measured graph cache</span>
+-            <select id="cache-mode">
+-              <option value="session-cache">Normal session cache</option>
+-              <option value="rebuild-each-segment">Rebuild every section</option>
+-            </select>
+-          </label>
+-        </div>
+-
+-        <div class="actions" aria-label="Benchmark workflow">
+-          <button id="generate" type="button">1. Generate scenario</button>
+-          <button id="run" type="button" disabled>2. Run benchmark</button>
+-          <button id="export" class="secondary" type="button" disabled>
+-            Export scenario JSON
+-          </button>
+-          <button id="export-report" class="secondary" type="button" disabled>
+-            Export benchmark JSON
+-          </button>
+-        </div>
+-        <p class="workflow-hint">
+-          Step 1 only derives the synthetic clicks from the GPX. Step 2 loads and
+-          warms the routing data, then runs the measured pass.
+-        </p>
+-        <p id="status" role="status" aria-live="polite"></p>
+-      </section>
+-
+-      <section class="results" aria-labelledby="results-title">
+-        <h2 id="results-title" class="visually-hidden">Benchmark results</h2>
+-        <div class="result-tabs" role="tablist" aria-label="Benchmark results">
+-          <button
+-            id="scenario-tab"
+-            class="result-tab"
+-            type="button"
+-            role="tab"
+-            aria-selected="true"
+-            aria-controls="scenario-panel"
+-          >
+-            Scenario
+-          </button>
+-          <button
+-            id="report-tab"
+-            class="result-tab"
+-            type="button"
+-            role="tab"
+-            aria-selected="false"
+-            aria-controls="report-panel"
+-            disabled
+-          >
+-            Benchmark report
+-          </button>
+-        </div>
+-
+-        <section
+-          id="scenario-panel"
+-          class="panel output-panel result-panel"
+-          role="tabpanel"
+-          aria-labelledby="scenario-tab"
+-        >
+-          <div id="scenario-output" aria-live="polite"></div>
+-          <p id="scenario-empty" class="empty-result">
+-            Generate a scenario to preview its synthetic clicks.
+-          </p>
+-        </section>
+-        <section
+-          id="report-panel"
+-          class="panel output-panel result-panel"
+-          role="tabpanel"
+-          aria-labelledby="report-tab"
+-          hidden
+-        >
+-          <div id="report-output" aria-live="polite"></div>
+-          <p id="report-empty" class="empty-result">
+-            Run the benchmark to display measured routing results.
+-          </p>
+-        </section>
+-      </section>
+-    </main>
+-    <script type="module" src="./src/main.ts"></script>
+-  </body>
+-</html>
+diff --git a/benchmarks/routing/src/benchmarkRunner.ts b/benchmarks/routing/src/benchmarkRunner.ts
+deleted file mode 100644
+index 9de6164be5bd68b5801ce0c230f6d65f3010475e..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/src/benchmarkRunner.ts
++++ /dev/null
+@@ -1,544 +0,0 @@
+-/**
+- * Business context: replays synthetic route clicks against the real dynamic
+- * swissTLM3D worker. A warm-up pass downloads every cell the scenario needs;
+- * the measured pass then keeps raw cells in worker memory, records worker-side
+- * graph phases, and measures end-to-end latency plus main-thread responsiveness.
+- */
+-import type { Coordinate } from 'ol/coordinate.js';
+-import {
+-  DynamicRoutingNetworkLoader,
+-  type DynamicRoutingPhaseTimings,
+-} from '../../../src/routing/dynamicRoutingNetwork';
+-import { connectRoutedSegmentEndpoint, createStraightRouteStep } from '../../../src/routing/routeEditing';
+-import type { RouteStep } from '../../../src/map/routeState';
+-import type { RoutingBenchmarkScenario } from './gpxScenario';
+-
+-/** Graph-cache policy used during the measured worker pass. */
+-export type GraphCacheMode =
+-  | 'session-cache'
+-  | 'rebuild-each-segment';
+-
+-/** Progress notification displayed by the local benchmark page. */
+-export interface BenchmarkProgress {
+-  /** Current pass: data preparation or measured replay. */
+-  phase: 'warmup' | 'measure';
+-  /** One-based section number currently being processed. */
+-  current: number;
+-  /** Total number of sections in the selected scenario. */
+-  total: number;
+-}
+-
+-/** One segment input resolved during warm-up. */
+-interface WarmedSegment {
+-  /** Actual snapped start used by the live routing sequence. */
+-  startCoordinate: Coordinate;
+-  /** Synthetic GPX-derived click that ends this section. */
+-  clickedCoordinate: Coordinate;
+-  /** Straight LV95 distance between the routed start and the synthetic click. */
+-  directDistanceMeters: number;
+-  /** Whether the warm-up resolved a network path instead of a straight fallback. */
+-  warmupFoundPath: boolean;
+-  /** Number of raw cells added while preparing this section. */
+-  newCellsLoaded: number;
+-}
+-
+-/** Measured result for one synthetic click after the first waypoint. */
+-export interface RoutingSegmentBenchmarkResult {
+-  /** One-based section number in scenario order. */
+-  segmentIndex: number;
+-  /** Straight LV95 distance between the section endpoints. */
+-  directDistanceMeters: number;
+-  /** Worker time spent deriving and searching the exact graph-cache key. */
+-  graphCacheLookupDurationMs: number;
+-  /** Worker time spent resolving raw cells already prepared by warm-up. */
+-  rawCellAccessDurationMs: number;
+-  /** Worker time spent deduplicating features shared by neighbouring cells. */
+-  featureMergeDurationMs: number;
+-  /** Worker time spent building graph nodes, edges, and spatial indexes. */
+-  graphBuildDurationMs: number;
+-  /** Worker time spent snapping the section start to the graph. */
+-  startSnapDurationMs: number;
+-  /** Worker time spent snapping the section destination to the graph. */
+-  endSnapDurationMs: number;
+-  /** Worker time spent in A* after both endpoints are snapped. */
+-  aStarDurationMs: number;
+-  /** Worker time spent rebuilding the ordered route coordinate array. */
+-  routeReconstructionDurationMs: number;
+-  /** End-to-end routing time not covered by explicit worker phase clocks. */
+-  routingOverheadDurationMs: number;
+-  /** Main-thread elapsed time from request dispatch to worker response. */
+-  routeDurationMs: number;
+-  /** Delay of an animation frame requested immediately before routing. */
+-  frameDelayMs: number;
+-  /** Main-thread time spent creating the immutable RouteStep snapshot. */
+-  stateCommitDurationMs: number;
+-  /** Number of exact graph-cache hits used by this section. */
+-  graphCacheHits: number;
+-  /** Number of exact graph-cache misses used by this section. */
+-  graphCacheMisses: number;
+-  /** Number of narrow and optional wider corridor attempts. */
+-  routeAttempts: number;
+-  /** Whether the wider fallback corridor was required. */
+-  retryUsed: boolean;
+-  /** Whether the routing engine returned a network path. */
+-  foundPath: boolean;
+-  /** Number of coordinates returned, or two for the simulated straight fallback. */
+-  outputCoordinateCount: number;
+-  /** Number of derived graphs retained after this section. */
+-  networkCacheEntriesAfter: number;
+-  /** Cells unexpectedly loaded during the measured pass. */
+-  unexpectedNewCells: number;
+-  /** Cells loaded for this section during the preparation pass. */
+-  warmupNewCells: number;
+-  /** Longest main-thread task overlapping this request, when supported. */
+-  longTaskDurationMs: number | null;
+-}
+-
+-/** Aggregated measured CPU phases across every route section. */
+-export interface RoutingBenchmarkPhaseTotals {
+-  /** Sum of exact graph-cache lookup time in the worker. */
+-  graphCacheLookupDurationMs: number;
+-  /** Sum of raw-cell access time in the worker. */
+-  rawCellAccessDurationMs: number;
+-  /** Sum of feature merge and deduplication time in the worker. */
+-  featureMergeDurationMs: number;
+-  /** Sum of graph construction time in the worker. */
+-  graphBuildDurationMs: number;
+-  /** Sum of start-endpoint snapping time in the worker. */
+-  startSnapDurationMs: number;
+-  /** Sum of destination-endpoint snapping time in the worker. */
+-  endSnapDurationMs: number;
+-  /** Sum of A* search time in the worker. */
+-  aStarDurationMs: number;
+-  /** Sum of route-coordinate reconstruction time in the worker. */
+-  routeReconstructionDurationMs: number;
+-  /** Sum of unclassified end-to-end routing overhead. */
+-  routingOverheadDurationMs: number;
+-  /** Total exact graph-cache hits. */
+-  graphCacheHits: number;
+-  /** Total exact graph-cache misses. */
+-  graphCacheMisses: number;
+-  /** Total narrow and wider corridor attempts. */
+-  routeAttempts: number;
+-  /** Number of sections that required the wider corridor. */
+-  retryCount: number;
+-}
+-
+-/** Complete benchmark report for one GPX-derived scenario. */
+-export interface RoutingBenchmarkReport {
+-  /** Execution boundary used for network loading and routing CPU work. */
+-  executionMode: 'dedicated-worker';
+-  /** GPX-derived synthetic clicks replayed by this benchmark. */
+-  scenario: RoutingBenchmarkScenario;
+-  /** Graph-cache policy applied during the measured pass. */
+-  graphCacheMode: GraphCacheMode;
+-  /** Complete preparation-pass duration, including network and routing work. */
+-  warmupDurationMs: number;
+-  /** Raw cells retained after the preparation pass. */
+-  warmupLoadedCells: number;
+-  /** Whether the first synthetic click found a nearby swissTLM3D segment. */
+-  firstWaypointSnapped: boolean;
+-  /** Detailed result for every route section. */
+-  segments: RoutingSegmentBenchmarkResult[];
+-  /** Aggregated worker phases and cache counters. */
+-  phaseTotals: RoutingBenchmarkPhaseTotals;
+-  /** Sum of end-to-end measured route durations. */
+-  totalRouteDurationMs: number;
+-  /** Slowest end-to-end route request. */
+-  maximumRouteDurationMs: number;
+-  /** Largest animation-frame delay observed on the UI thread. */
+-  maximumFrameDelayMs: number;
+-  /** Whether this browser exposes the main-thread Long Tasks API. */
+-  longTaskApiSupported: boolean;
+-  /** Largest overlapping long task, or `null` when none was observed. */
+-  maximumLongTaskDurationMs: number | null;
+-  /** Total cells loaded during measurement, which should remain zero. */
+-  unexpectedNetworkCellLoads: number;
+-}
+-
+-/** Returns horizontal LV95 distance in metres. */
+-function coordinateDistance(first: Coordinate, second: Coordinate): number {
+-  return Math.hypot(second[0] - first[0], second[1] - first[1]);
+-}
+-
+-/**
+- * Returns the phases explicitly timed inside the dynamic routing pipeline.
+- * @param timings - Worker-side phase accumulator for one section.
+- * @returns Sum used to isolate scheduling and structured-clone overhead.
+- */
+-function measuredPhaseDuration(timings: DynamicRoutingPhaseTimings): number {
+-  return (
+-    timings.graphCacheLookupDurationMs +
+-    timings.rawCellAccessDurationMs +
+-    timings.featureMergeDurationMs +
+-    timings.graphBuildDurationMs +
+-    timings.startSnapDurationMs +
+-    timings.endSnapDurationMs +
+-    timings.aStarDurationMs +
+-    timings.routeReconstructionDurationMs
+-  );
+-}
+-
+-/**
+- * Adds every segment's timings to report-level comparison totals.
+- * @param segments - Measured route sections in scenario order.
+- * @returns Aggregate phase durations and cache counters.
+- */
+-function aggregatePhaseTotals(
+-  segments: RoutingSegmentBenchmarkResult[],
+-): RoutingBenchmarkPhaseTotals {
+-  return segments.reduce<RoutingBenchmarkPhaseTotals>(
+-    (totals, segment) => ({
+-      graphCacheLookupDurationMs:
+-        totals.graphCacheLookupDurationMs + segment.graphCacheLookupDurationMs,
+-      rawCellAccessDurationMs:
+-        totals.rawCellAccessDurationMs + segment.rawCellAccessDurationMs,
+-      featureMergeDurationMs:
+-        totals.featureMergeDurationMs + segment.featureMergeDurationMs,
+-      graphBuildDurationMs:
+-        totals.graphBuildDurationMs + segment.graphBuildDurationMs,
+-      startSnapDurationMs:
+-        totals.startSnapDurationMs + segment.startSnapDurationMs,
+-      endSnapDurationMs:
+-        totals.endSnapDurationMs + segment.endSnapDurationMs,
+-      aStarDurationMs: totals.aStarDurationMs + segment.aStarDurationMs,
+-      routeReconstructionDurationMs:
+-        totals.routeReconstructionDurationMs +
+-        segment.routeReconstructionDurationMs,
+-      routingOverheadDurationMs:
+-        totals.routingOverheadDurationMs + segment.routingOverheadDurationMs,
+-      graphCacheHits: totals.graphCacheHits + segment.graphCacheHits,
+-      graphCacheMisses: totals.graphCacheMisses + segment.graphCacheMisses,
+-      routeAttempts: totals.routeAttempts + segment.routeAttempts,
+-      retryCount: totals.retryCount + (segment.retryUsed ? 1 : 0),
+-    }),
+-    {
+-      graphCacheLookupDurationMs: 0,
+-      rawCellAccessDurationMs: 0,
+-      featureMergeDurationMs: 0,
+-      graphBuildDurationMs: 0,
+-      startSnapDurationMs: 0,
+-      endSnapDurationMs: 0,
+-      aStarDurationMs: 0,
+-      routeReconstructionDurationMs: 0,
+-      routingOverheadDurationMs: 0,
+-      graphCacheHits: 0,
+-      graphCacheMisses: 0,
+-      routeAttempts: 0,
+-      retryCount: 0,
+-    },
+-  );
+-}
+-
+-/** Waits for one animation frame so the delay can reveal main-thread blocking. */
+-function nextAnimationFrame(): Promise<number> {
+-  return new Promise((resolve) => requestAnimationFrame(resolve));
+-}
+-
+-/**
+- * Starts a long-task observer when the browser exposes that diagnostics API.
+- * @returns Observer state and a cleanup callback; unsupported browsers return an inert result.
+- */
+-function observeLongTasks(): {
+-  supported: boolean;
+-  entries: PerformanceEntry[];
+-  disconnect: () => void;
+-} {
+-  const entries: PerformanceEntry[] = [];
+-
+-  if (
+-    typeof PerformanceObserver === 'undefined' ||
+-    !PerformanceObserver.supportedEntryTypes.includes('longtask')
+-  ) {
+-    return { supported: false, entries, disconnect: () => undefined };
+-  }
+-
+-  const observer = new PerformanceObserver((list) => {
+-    entries.push(...list.getEntries());
+-  });
+-  observer.observe({ entryTypes: ['longtask'] });
+-
+-  return {
+-    supported: true,
+-    entries,
+-    disconnect: () => observer.disconnect(),
+-  };
+-}
+-
+-/**
+- * Finds the longest observed task overlapping one measured route operation.
+- * @param entries - Long-task entries collected on the main thread.
+- * @param startTime - Route request start in the Performance timeline.
+- * @param endTime - Route response time in the Performance timeline.
+- * @returns Longest overlapping duration, or `null` when none was observed.
+- */
+-function maximumOverlappingLongTask(
+-  entries: PerformanceEntry[],
+-  startTime: number,
+-  endTime: number,
+-): number | null {
+-  const durations = entries
+-    .filter(
+-      (entry) =>
+-        entry.startTime < endTime && entry.startTime + entry.duration > startTime,
+-    )
+-    .map((entry) => entry.duration);
+-
+-  return durations.length > 0 ? Math.max(...durations) : null;
+-}
+-
+-/**
+- * Warms the raw-cell cache by replaying the same route sequence once.
+- * Resolved network endpoints are retained because each later live click starts
+- * from the previous snapped waypoint, not from the original GPX sample.
+- * @param loader - Session-scoped worker facade whose raw cells must be prepared.
+- * @param scenario - Deterministic synthetic clicks to replay.
+- * @param signal - Cancellation signal shared with the benchmark run.
+- * @param onProgress - Optional UI progress callback.
+- * @returns Snapped first point and section inputs resolved by the warm-up pass.
+- * @throws {Error} Propagates loading, routing, and cancellation failures.
+- */
+-async function warmScenario(
+-  loader: DynamicRoutingNetworkLoader,
+-  scenario: RoutingBenchmarkScenario,
+-  signal: AbortSignal,
+-  onProgress?: (progress: BenchmarkProgress) => void,
+-): Promise<{
+-  firstWaypoint: Coordinate;
+-  firstWaypointSnapped: boolean;
+-  segments: WarmedSegment[];
+-}> {
+-  const [firstClick, ...remainingClicks] = scenario.waypointsLv95;
+-  const snappedFirst = await loader.snap(firstClick, signal);
+-  let currentCoordinate = snappedFirst ?? [...firstClick];
+-  const segments: WarmedSegment[] = [];
+-
+-  for (let index = 0; index < remainingClicks.length; index += 1) {
+-    onProgress?.({
+-      phase: 'warmup',
+-      current: index + 1,
+-      total: remainingClicks.length,
+-    });
+-    const clickedCoordinate = remainingClicks[index];
+-    const before = await loader.getCacheStats();
+-    const routedPath = await loader.route(
+-      currentCoordinate,
+-      clickedCoordinate,
+-      signal,
+-    );
+-    const after = await loader.getCacheStats();
+-
+-    segments.push({
+-      startCoordinate: [...currentCoordinate],
+-      clickedCoordinate: [...clickedCoordinate],
+-      directDistanceMeters: coordinateDistance(
+-        currentCoordinate,
+-        clickedCoordinate,
+-      ),
+-      warmupFoundPath: Boolean(routedPath),
+-      newCellsLoaded: Math.max(0, after.loadedCells - before.loadedCells),
+-    });
+-
+-    currentCoordinate = routedPath
+-      ? [...routedPath.coordinates[routedPath.coordinates.length - 1]]
+-      : [...clickedCoordinate];
+-  }
+-
+-  return {
+-    firstWaypoint: [...(snappedFirst ?? firstClick)],
+-    firstWaypointSnapped: Boolean(snappedFirst),
+-    segments,
+-  };
+-}
+-
+-/**
+- * Simulates the immutable route-step work performed after one routing result.
+- * @param steps - Previously committed route steps.
+- * @param routedCoordinates - Worker result, or `null` for a straight fallback.
+- * @param clickedCoordinate - Synthetic destination selected by the scenario.
+- * @returns A new route-step array matching the editable-route update pattern.
+- */
+-function commitMeasuredStep(
+-  steps: RouteStep[],
+-  routedCoordinates: Coordinate[] | null,
+-  clickedCoordinate: Coordinate,
+-): RouteStep[] {
+-  const previousStep = steps[steps.length - 1];
+-  let step: RouteStep;
+-
+-  if (!routedCoordinates || routedCoordinates.length < 2) {
+-    step = createStraightRouteStep(previousStep, clickedCoordinate);
+-  } else {
+-    const segment = routedCoordinates.map((coordinate): Coordinate => [
+-      ...coordinate,
+-    ]);
+-    connectRoutedSegmentEndpoint(segment, previousStep.waypoint, 'start');
+-    step = {
+-      waypoint: [...segment[segment.length - 1]],
+-      segment,
+-      mode: 'network',
+-    };
+-  }
+-
+-  return [...steps, step];
+-}
+-
+-/**
+- * Runs a worker-focused benchmark with network data already present in memory.
+- * @param scenario - GPX-derived synthetic clicks to prepare and replay.
+- * @param graphCacheMode - Cache policy applied only during the measured pass.
+- * @param signal - Cancellation signal for worker and benchmark operations.
+- * @param onProgress - Optional UI progress callback.
+- * @returns Complete per-section and aggregate performance report.
+- * @throws {Error} Propagates GPX routing, loading, parsing, and cancellation failures.
+- */
+-export async function runRoutingBenchmark(
+-  scenario: RoutingBenchmarkScenario,
+-  graphCacheMode: GraphCacheMode,
+-  signal: AbortSignal,
+-  onProgress?: (progress: BenchmarkProgress) => void,
+-): Promise<RoutingBenchmarkReport> {
+-  if (scenario.waypointsLv95.length < 2) {
+-    throw new Error('A benchmark scenario needs at least two synthetic clicks.');
+-  }
+-
+-  const loader = new DynamicRoutingNetworkLoader();
+-
+-  try {
+-    const warmupStart = performance.now();
+-    const warmed = await warmScenario(loader, scenario, signal, onProgress);
+-    const warmupDurationMs = performance.now() - warmupStart;
+-    const warmupLoadedCells = (await loader.getCacheStats()).loadedCells;
+-
+-    // The measured pass intentionally keeps raw cells but discards derived graphs.
+-    await loader.clearNetworkCache();
+-    let routeSteps: RouteStep[] = [
+-      {
+-        waypoint: [...warmed.firstWaypoint],
+-        segment: null,
+-        mode: warmed.firstWaypointSnapped ? 'network' : 'straight',
+-      },
+-    ];
+-    const longTasks = observeLongTasks();
+-    const results: RoutingSegmentBenchmarkResult[] = [];
+-    const measurementWindows: Array<{ startTime: number; endTime: number }> = [];
+-
+-    try {
+-      for (let index = 0; index < warmed.segments.length; index += 1) {
+-        onProgress?.({
+-          phase: 'measure',
+-          current: index + 1,
+-          total: warmed.segments.length,
+-        });
+-
+-        if (graphCacheMode === 'rebuild-each-segment') {
+-          await loader.clearNetworkCache();
+-        }
+-
+-        const segment = warmed.segments[index];
+-        const before = await loader.getCacheStats();
+-        await nextAnimationFrame();
+-        const frameRequestTime = performance.now();
+-        const framePromise = nextAnimationFrame();
+-        const routeStart = performance.now();
+-        const diagnosedRoute = await loader.routeWithDiagnostics(
+-          segment.startCoordinate,
+-          segment.clickedCoordinate,
+-          signal,
+-        );
+-        const routeEnd = performance.now();
+-        const routedPath = diagnosedRoute.path;
+-        const routingOverheadDurationMs = Math.max(
+-          0,
+-          routeEnd - routeStart - measuredPhaseDuration(diagnosedRoute.timings),
+-        );
+-        const nextFrameTime = await framePromise;
+-        const commitStart = performance.now();
+-        routeSteps = commitMeasuredStep(
+-          routeSteps,
+-          routedPath?.coordinates ?? null,
+-          segment.clickedCoordinate,
+-        );
+-        const stateCommitDurationMs = performance.now() - commitStart;
+-        const after = await loader.getCacheStats();
+-
+-        results.push({
+-          segmentIndex: index + 1,
+-          directDistanceMeters: segment.directDistanceMeters,
+-          graphCacheLookupDurationMs:
+-            diagnosedRoute.timings.graphCacheLookupDurationMs,
+-          rawCellAccessDurationMs: diagnosedRoute.timings.rawCellAccessDurationMs,
+-          featureMergeDurationMs: diagnosedRoute.timings.featureMergeDurationMs,
+-          graphBuildDurationMs: diagnosedRoute.timings.graphBuildDurationMs,
+-          startSnapDurationMs: diagnosedRoute.timings.startSnapDurationMs,
+-          endSnapDurationMs: diagnosedRoute.timings.endSnapDurationMs,
+-          aStarDurationMs: diagnosedRoute.timings.aStarDurationMs,
+-          routeReconstructionDurationMs:
+-            diagnosedRoute.timings.routeReconstructionDurationMs,
+-          routingOverheadDurationMs,
+-          routeDurationMs: routeEnd - routeStart,
+-          frameDelayMs: Math.max(0, nextFrameTime - frameRequestTime),
+-          stateCommitDurationMs,
+-          graphCacheHits: diagnosedRoute.timings.graphCacheHits,
+-          graphCacheMisses: diagnosedRoute.timings.graphCacheMisses,
+-          routeAttempts: diagnosedRoute.timings.routeAttempts,
+-          retryUsed: diagnosedRoute.timings.retryUsed,
+-          foundPath: Boolean(routedPath),
+-          outputCoordinateCount: routedPath?.coordinates.length ?? 2,
+-          networkCacheEntriesAfter: after.cachedNetworks,
+-          unexpectedNewCells: Math.max(0, after.loadedCells - before.loadedCells),
+-          warmupNewCells: segment.newCellsLoaded,
+-          longTaskDurationMs: null,
+-        });
+-        measurementWindows.push({ startTime: routeStart, endTime: routeEnd });
+-      }
+-
+-      // PerformanceObserver delivery is asynchronous; one task boundary makes
+-      // completed long-task entries available before they are assigned to rows.
+-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+-
+-      for (let index = 0; index < results.length; index += 1) {
+-        const window = measurementWindows[index];
+-        results[index].longTaskDurationMs = maximumOverlappingLongTask(
+-          longTasks.entries,
+-          window.startTime,
+-          window.endTime,
+-        );
+-      }
+-    } finally {
+-      longTasks.disconnect();
+-    }
+-
+-    const routeDurations = results.map((result) => result.routeDurationMs);
+-    const frameDelays = results.map((result) => result.frameDelayMs);
+-    const observedLongTasks = results
+-      .map((result) => result.longTaskDurationMs)
+-      .filter((duration): duration is number => duration !== null);
+-
+-    return {
+-      scenario,
+-      executionMode: 'dedicated-worker',
+-      graphCacheMode,
+-      warmupDurationMs,
+-      warmupLoadedCells,
+-      firstWaypointSnapped: warmed.firstWaypointSnapped,
+-      segments: results,
+-      phaseTotals: aggregatePhaseTotals(results),
+-      totalRouteDurationMs: routeDurations.reduce(
+-        (sum, duration) => sum + duration,
+-        0,
+-      ),
+-      maximumRouteDurationMs: Math.max(0, ...routeDurations),
+-      maximumFrameDelayMs: Math.max(0, ...frameDelays),
+-      longTaskApiSupported: longTasks.supported,
+-      maximumLongTaskDurationMs:
+-        observedLongTasks.length > 0 ? Math.max(...observedLongTasks) : null,
+-      unexpectedNetworkCellLoads: results.reduce(
+-        (sum, result) => sum + result.unexpectedNewCells,
+-        0,
+-      ),
+-    };
+-  } finally {
+-    loader.dispose();
+-  }
+-}
+diff --git a/benchmarks/routing/src/gpxScenario.test.ts b/benchmarks/routing/src/gpxScenario.test.ts
+deleted file mode 100644
+index b3818815f0123e8fd4b5ae6dcd141c1afa98f3f7..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/src/gpxScenario.test.ts
++++ /dev/null
+@@ -1,66 +0,0 @@
+-/**
+- * Business context: protects deterministic GPX waypoint sampling so benchmark
+- * results remain comparable across code versions and devices.
+- */
+-import { describe, expect, it } from 'vitest';
+-import { generateWaypointDistances } from './gpxScenario';
+-
+-describe('generateWaypointDistances', () => {
+-  it('supports short fixed intervals for small-route benchmarks', () => {
+-    expect(
+-      generateWaypointDistances(550, {
+-        kind: 'regular',
+-        spacingMeters: 100,
+-      }),
+-    ).toEqual([0, 100, 200, 300, 400, 500, 550]);
+-  });
+-
+-  it('keeps adaptive scenarios bounded while preserving both endpoints', () => {
+-    const distances = generateWaypointDistances(18_000, { kind: 'adaptive' });
+-
+-    expect(distances[0]).toBe(0);
+-    expect(distances[distances.length - 1]).toBe(18_000);
+-    expect(distances).toHaveLength(25);
+-  });
+-
+-  it('generates reproducible irregular spacing from a fixed seed', () => {
+-    const first = generateWaypointDistances(4_000, {
+-      kind: 'irregular',
+-      averageSpacingMeters: 500,
+-      seed: 42,
+-    });
+-    const second = generateWaypointDistances(4_000, {
+-      kind: 'irregular',
+-      averageSpacingMeters: 500,
+-      seed: 42,
+-    });
+-    const differentSeed = generateWaypointDistances(4_000, {
+-      kind: 'irregular',
+-      averageSpacingMeters: 500,
+-      seed: 43,
+-    });
+-
+-    expect(second).toEqual(first);
+-    expect(differentSeed).not.toEqual(first);
+-    expect(first[0]).toBe(0);
+-    expect(first[first.length - 1]).toBe(4_000);
+-  });
+-
+-  it('rejects a tiny interval on a long GPX instead of creating one huge final section', () => {
+-    expect(() =>
+-      generateWaypointDistances(10_000, {
+-        kind: 'regular',
+-        spacingMeters: 50,
+-      }),
+-    ).toThrow('use a shorter GPX');
+-  });
+-
+-  it('rejects fixed intervals below the diagnostic safety minimum', () => {
+-    expect(() =>
+-      generateWaypointDistances(500, {
+-        kind: 'regular',
+-        spacingMeters: 25,
+-      }),
+-    ).toThrow('at least 50 metres');
+-  });
+-});
+diff --git a/benchmarks/routing/src/gpxScenario.ts b/benchmarks/routing/src/gpxScenario.ts
+deleted file mode 100644
+index f70cda5d567dd8bf4adfbdb7e835c8ff19776588..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/src/gpxScenario.ts
++++ /dev/null
+@@ -1,334 +0,0 @@
+-/**
+- * Business context: converts a detailed read-only GPX trace into deterministic
+- * synthetic clicks for the browser routing benchmark. GPX track vertices are
+- * display geometry, not the sparse decisions a hiker would make in a planner,
+- * so the benchmark samples a controlled subset along one continuous segment.
+- */
+-import type { Coordinate } from 'ol/coordinate.js';
+-import { parseGpxRoute } from '../../../src/import/gpx';
+-import { fromWgs84, toWgs84 } from '../../../src/map/projection';
+-
+-/** Maximum generated route sections, preventing accidental benchmark overload. */
+-const MAX_GENERATED_SEGMENTS = 24;
+-/** Typical click spacing in metres used by the adaptive strategy. */
+-const ADAPTIVE_TARGET_SPACING_METERS = 500;
+-
+-/** Supported deterministic waypoint-generation strategies. */
+-export type WaypointGenerationStrategy =
+-  | {
+-      /** Chooses a route-length-dependent segment count around 500-metre sections. */
+-      kind: 'adaptive';
+-    }
+-  | {
+-      /** Places clicks at one fixed ground interval, including very short tests. */
+-      kind: 'regular';
+-      /** Requested distance in metres between consecutive synthetic clicks. */
+-      spacingMeters: number;
+-    }
+-  | {
+-      /** Varies section lengths around a configured average with a stable seed. */
+-      kind: 'irregular';
+-      /** Mean section length in metres before deterministic variation is applied. */
+-      averageSpacingMeters: number;
+-      /** Seed that keeps the generated irregular pattern stable between runs. */
+-      seed: number;
+-    };
+-
+-/** Reproducible browser-routing scenario generated from one GPX segment. */
+-export interface RoutingBenchmarkScenario {
+-  /** Display name inherited from the GPX document. */
+-  name: string;
+-  /** Original uploaded filename. */
+-  sourceFilename: string;
+-  /** Strategy that produced the synthetic clicks. */
+-  strategy: WaypointGenerationStrategy;
+-  /** Total selected GPX segment length in LV95 metres. */
+-  sourceLengthMeters: number;
+-  /** Number of detailed vertices in the selected GPX segment. */
+-  sourcePointCount: number;
+-  /** Number of additional disconnected GPX segments deliberately ignored. */
+-  ignoredSegmentCount: number;
+-  /** Synthetic user clicks in native LV95 map coordinates. */
+-  waypointsLv95: Coordinate[];
+-  /** Cumulative distance of every synthetic click along the source trace. */
+-  waypointDistancesMeters: number[];
+-}
+-
+-/** Portable JSON representation suitable for committing as a future fixture. */
+-export interface SerializedRoutingBenchmarkScenario {
+-  /** Display name inherited from the GPX document. */
+-  name: string;
+-  /** Original uploaded filename retained for traceability. */
+-  sourceFilename: string;
+-  /** Strategy that produced the serialized click sequence. */
+-  strategy: WaypointGenerationStrategy;
+-  /** Total selected GPX segment length in metres. */
+-  sourceLengthMeters: number;
+-  /** Number of detailed vertices in the selected source segment. */
+-  sourcePointCount: number;
+-  /** Number of disconnected GPX segments excluded from this scenario. */
+-  ignoredSegmentCount: number;
+-  /** Synthetic clicks stored as WGS 84 longitude/latitude pairs. */
+-  waypointsWgs84: Coordinate[];
+-  /** Cumulative ground distance of each synthetic click. */
+-  waypointDistancesMeters: number[];
+-}
+-
+-/** Returns horizontal LV95 distance in metres. */
+-function coordinateDistance(first: Coordinate, second: Coordinate): number {
+-  return Math.hypot(second[0] - first[0], second[1] - first[1]);
+-}
+-
+-/** Calculates cumulative ground distances for one continuous LV95 polyline. */
+-function cumulativeDistances(coordinates: Coordinate[]): number[] {
+-  const distances = [0];
+-
+-  for (let index = 1; index < coordinates.length; index += 1) {
+-    distances.push(
+-      distances[index - 1] +
+-        coordinateDistance(coordinates[index - 1], coordinates[index]),
+-    );
+-  }
+-
+-  return distances;
+-}
+-
+-/** Small deterministic generator; benchmark scenarios must not change between runs. */
+-function createSeededRandom(seed: number): () => number {
+-  let state = Math.trunc(seed) >>> 0;
+-
+-  return () => {
+-    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+-    return state / 4_294_967_296;
+-  };
+-}
+-
+-/** Keeps an integer inside inclusive limits. */
+-function clampInteger(value: number, minimum: number, maximum: number): number {
+-  return Math.min(maximum, Math.max(minimum, Math.round(value)));
+-}
+-
+-/**
+- * Validates a user-configurable ground interval.
+- * @param value - Requested spacing in metres.
+- * @returns The unchanged spacing when it is finite and supported.
+- * @throws {Error} When the interval is below 50 metres or not finite.
+- */
+-function validatedSpacing(value: number): number {
+-  if (!Number.isFinite(value) || value < 50) {
+-    throw new Error('Waypoint spacing must be at least 50 metres.');
+-  }
+-
+-  return value;
+-}
+-
+-/**
+- * Generates cumulative sample distances along a trace.
+- * @param totalDistanceMeters - Complete continuous trace length.
+- * @param strategy - Deterministic spacing strategy.
+- * @returns Ordered distances beginning at zero and ending at the trace length.
+- * @throws {Error} When the trace length or selected spacing cannot produce a bounded scenario.
+- */
+-export function generateWaypointDistances(
+-  totalDistanceMeters: number,
+-  strategy: WaypointGenerationStrategy,
+-): number[] {
+-  if (!Number.isFinite(totalDistanceMeters) || totalDistanceMeters <= 0) {
+-    throw new Error('The selected GPX segment has no measurable length.');
+-  }
+-
+-  if (strategy.kind === 'regular') {
+-    const spacingMeters = validatedSpacing(strategy.spacingMeters);
+-    const requiredSegments = Math.ceil(totalDistanceMeters / spacingMeters);
+-
+-    if (requiredSegments > MAX_GENERATED_SEGMENTS) {
+-      throw new Error(
+-        `This interval would generate ${requiredSegments} sections; use a shorter GPX or an interval of at least ${Math.ceil(
+-          totalDistanceMeters / MAX_GENERATED_SEGMENTS,
+-        )} metres.`,
+-      );
+-    }
+-
+-    const distances = [0];
+-
+-    for (
+-      let distance = spacingMeters;
+-      distance < totalDistanceMeters;
+-      distance += spacingMeters
+-    ) {
+-      distances.push(distance);
+-    }
+-
+-    distances.push(totalDistanceMeters);
+-    return distances;
+-  }
+-
+-  const averageSpacingMeters =
+-    strategy.kind === 'irregular'
+-      ? validatedSpacing(strategy.averageSpacingMeters)
+-      : ADAPTIVE_TARGET_SPACING_METERS;
+-  const segmentCount = clampInteger(
+-    totalDistanceMeters / averageSpacingMeters,
+-    1,
+-    MAX_GENERATED_SEGMENTS,
+-  );
+-
+-  if (strategy.kind === 'adaptive') {
+-    return Array.from(
+-      { length: segmentCount + 1 },
+-      (_, index) => (totalDistanceMeters * index) / segmentCount,
+-    );
+-  }
+-
+-  const random = createSeededRandom(strategy.seed);
+-  // A 55-145% spread creates visibly irregular sections without producing one
+-  // pathological micro-segment next to a very long corridor.
+-  const weights = Array.from(
+-    { length: segmentCount },
+-    () => 0.55 + random() * 0.9,
+-  );
+-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+-  const distances = [0];
+-  let cumulativeWeight = 0;
+-
+-  for (let index = 0; index < weights.length - 1; index += 1) {
+-    cumulativeWeight += weights[index];
+-    distances.push((totalDistanceMeters * cumulativeWeight) / totalWeight);
+-  }
+-
+-  distances.push(totalDistanceMeters);
+-  return distances;
+-}
+-
+-/**
+- * Interpolates one LV95 coordinate at a cumulative ground distance.
+- * @param coordinates - Continuous source polyline in EPSG:2056.
+- * @param distances - Cumulative metres matching the source coordinates.
+- * @param targetDistance - Requested cumulative distance in metres.
+- * @returns Interpolated coordinate, clamped to the source endpoints.
+- */
+-function coordinateAtDistance(
+-  coordinates: Coordinate[],
+-  distances: number[],
+-  targetDistance: number,
+-): Coordinate {
+-  if (targetDistance <= 0) {
+-    return [...coordinates[0]];
+-  }
+-
+-  const totalDistance = distances[distances.length - 1];
+-
+-  if (targetDistance >= totalDistance) {
+-    return [...coordinates[coordinates.length - 1]];
+-  }
+-
+-  let upperIndex = 1;
+-
+-  while (distances[upperIndex] < targetDistance) {
+-    upperIndex += 1;
+-  }
+-
+-  const lowerIndex = upperIndex - 1;
+-  const sectionDistance = distances[upperIndex] - distances[lowerIndex];
+-  const fraction =
+-    sectionDistance === 0
+-      ? 0
+-      : (targetDistance - distances[lowerIndex]) / sectionDistance;
+-  const start = coordinates[lowerIndex];
+-  const end = coordinates[upperIndex];
+-
+-  return [
+-    start[0] + (end[0] - start[0]) * fraction,
+-    start[1] + (end[1] - start[1]) * fraction,
+-  ];
+-}
+-
+-/**
+- * Selects the longest continuous GPX segment so deliberate gaps stay disconnected.
+- * @param segments - Projected GPX segments that must not be joined together.
+- * @returns Selected coordinates and their cumulative distances.
+- * @throws {Error} When the GPX contains no continuous segment.
+- */
+-function selectLongestSegment(segments: Coordinate[][]): {
+-  coordinates: Coordinate[];
+-  distances: number[];
+-} {
+-  let selectedCoordinates: Coordinate[] | null = null;
+-  let selectedDistances: number[] | null = null;
+-  let selectedLength = -1;
+-
+-  for (const coordinates of segments) {
+-    const distances = cumulativeDistances(coordinates);
+-    const length = distances[distances.length - 1];
+-
+-    if (length > selectedLength) {
+-      selectedCoordinates = coordinates;
+-      selectedDistances = distances;
+-      selectedLength = length;
+-    }
+-  }
+-
+-  if (!selectedCoordinates || !selectedDistances) {
+-    throw new Error('The GPX contains no continuous segment.');
+-  }
+-
+-  return { coordinates: selectedCoordinates, distances: selectedDistances };
+-}
+-
+-/**
+- * Parses a GPX and generates deterministic synthetic route-creation clicks.
+- * @param xml - Complete GPX XML text.
+- * @param filename - Uploaded source filename.
+- * @param strategy - Click-spacing strategy selected for the benchmark.
+- * @returns Reproducible LV95 click scenario based on the longest GPX segment.
+- * @throws {Error} When GPX parsing or deterministic sampling fails.
+- */
+-export function createScenarioFromGpx(
+-  xml: string,
+-  filename: string,
+-  strategy: WaypointGenerationStrategy,
+-): RoutingBenchmarkScenario {
+-  const route = parseGpxRoute(xml, filename);
+-  const projectedSegments = route.segments.map((segment) =>
+-    segment.coordinates.map(fromWgs84),
+-  );
+-  const selected = selectLongestSegment(projectedSegments);
+-  const totalDistance = selected.distances[selected.distances.length - 1];
+-  const waypointDistancesMeters = generateWaypointDistances(
+-    totalDistance,
+-    strategy,
+-  );
+-
+-  return {
+-    name: route.name,
+-    sourceFilename: filename,
+-    strategy,
+-    sourceLengthMeters: totalDistance,
+-    sourcePointCount: selected.coordinates.length,
+-    ignoredSegmentCount: Math.max(0, projectedSegments.length - 1),
+-    waypointsLv95: waypointDistancesMeters.map((distance) =>
+-      coordinateAtDistance(selected.coordinates, selected.distances, distance),
+-    ),
+-    waypointDistancesMeters,
+-  };
+-}
+-
+-/**
+- * Converts a generated scenario to stable, human-readable JSON data.
+- * @param scenario - In-memory LV95 benchmark scenario.
+- * @returns Portable WGS 84 representation suitable for a committed fixture.
+- */
+-export function serializeScenario(
+-  scenario: RoutingBenchmarkScenario,
+-): SerializedRoutingBenchmarkScenario {
+-  return {
+-    name: scenario.name,
+-    sourceFilename: scenario.sourceFilename,
+-    strategy: scenario.strategy,
+-    sourceLengthMeters: scenario.sourceLengthMeters,
+-    sourcePointCount: scenario.sourcePointCount,
+-    ignoredSegmentCount: scenario.ignoredSegmentCount,
+-    waypointsWgs84: scenario.waypointsLv95.map(toWgs84),
+-    waypointDistancesMeters: scenario.waypointDistancesMeters,
+-  };
+-}
+diff --git a/benchmarks/routing/src/main.ts b/benchmarks/routing/src/main.ts
+deleted file mode 100644
+index ef5a639106fb4c85f22d7aac390810629a169ac5..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/src/main.ts
++++ /dev/null
+@@ -1,413 +0,0 @@
+-/**
+- * Business context: local-only browser interface for generating reproducible
+- * GPX routing scenarios, measuring worker-side routing phases, and checking
+- * main-thread responsiveness without adding controls to the published map.
+- */
+-import './styles.css';
+-import {
+-  createScenarioFromGpx,
+-  serializeScenario,
+-  type RoutingBenchmarkScenario,
+-  type WaypointGenerationStrategy,
+-} from './gpxScenario';
+-import {
+-  runRoutingBenchmark,
+-  type GraphCacheMode,
+-  type RoutingBenchmarkReport,
+-} from './benchmarkRunner';
+-
+-/**
+- * Resolves one required benchmark control during startup.
+- * @param selector - CSS selector for an element declared by the benchmark page.
+- * @returns Matching element with the requested DOM type.
+- * @throws {Error} When the benchmark HTML and its TypeScript bindings diverge.
+- */
+-function requiredElement<T extends Element>(selector: string): T {
+-  const element = document.querySelector<T>(selector);
+-
+-  if (!element) {
+-    throw new Error(`The routing benchmark is missing ${selector}.`);
+-  }
+-
+-  return element;
+-}
+-
+-const fileInput = requiredElement<HTMLInputElement>('#gpx-file');
+-const fileNameOutput = requiredElement<HTMLElement>('#gpx-file-name');
+-const strategySelect = requiredElement<HTMLSelectElement>('#strategy');
+-const spacingInput = requiredElement<HTMLInputElement>('#spacing');
+-const seedInput = requiredElement<HTMLInputElement>('#seed');
+-const cacheModeSelect = requiredElement<HTMLSelectElement>('#cache-mode');
+-const generateButton = requiredElement<HTMLButtonElement>('#generate');
+-const runButton = requiredElement<HTMLButtonElement>('#run');
+-const exportButton = requiredElement<HTMLButtonElement>('#export');
+-const exportReportButton = requiredElement<HTMLButtonElement>('#export-report');
+-const status = requiredElement<HTMLElement>('#status');
+-const scenarioOutput = requiredElement<HTMLElement>('#scenario-output');
+-const reportOutput = requiredElement<HTMLElement>('#report-output');
+-const scenarioEmpty = requiredElement<HTMLElement>('#scenario-empty');
+-const reportEmpty = requiredElement<HTMLElement>('#report-empty');
+-const scenarioTab = requiredElement<HTMLButtonElement>('#scenario-tab');
+-const reportTab = requiredElement<HTMLButtonElement>('#report-tab');
+-const scenarioPanel = requiredElement<HTMLElement>('#scenario-panel');
+-const reportPanel = requiredElement<HTMLElement>('#report-panel');
+-
+-let currentScenario: RoutingBenchmarkScenario | null = null;
+-let currentReport: RoutingBenchmarkReport | null = null;
+-let currentAbortController: AbortController | null = null;
+-const defaultRunButtonText = runButton.textContent ?? '2. Run benchmark';
+-
+-/** Selects one result tab while keeping keyboard and assistive state synchronized. */
+-function selectResultTab(tab: 'scenario' | 'report'): void {
+-  const showScenario = tab === 'scenario';
+-  scenarioTab.setAttribute('aria-selected', String(showScenario));
+-  reportTab.setAttribute('aria-selected', String(!showScenario));
+-  scenarioPanel.hidden = !showScenario;
+-  reportPanel.hidden = showScenario;
+-}
+-
+-scenarioTab.addEventListener('click', () => selectResultTab('scenario'));
+-reportTab.addEventListener('click', () => {
+-  if (!reportTab.disabled) {
+-    selectResultTab('report');
+-  }
+-});
+-
+-/** Escapes user-derived text before inserting small report fragments. */
+-function escapeHtml(value: string): string {
+-  return value
+-    .replaceAll('&', '&amp;')
+-    .replaceAll('<', '&lt;')
+-    .replaceAll('>', '&gt;')
+-    .replaceAll('"', '&quot;')
+-    .replaceAll("'", '&#039;');
+-}
+-
+-/** Formats milliseconds without hiding short but measurable work. */
+-function formatMilliseconds(value: number): string {
+-  return value < 10 ? `${value.toFixed(2)} ms` : `${value.toFixed(1)} ms`;
+-}
+-
+-/** Formats LV95 ground distance for compact tables. */
+-function formatDistance(value: number): string {
+-  return value < 1_000 ? `${Math.round(value)} m` : `${(value / 1_000).toFixed(2)} km`;
+-}
+-
+-/** Returns the selected deterministic sampling strategy. */
+-function selectedStrategy(): WaypointGenerationStrategy {
+-  const spacingMeters = Number(spacingInput.value);
+-  const seed = Number(seedInput.value);
+-
+-  switch (strategySelect.value) {
+-    case 'regular':
+-      return { kind: 'regular', spacingMeters };
+-    case 'irregular':
+-      return { kind: 'irregular', averageSpacingMeters: spacingMeters, seed };
+-    default:
+-      return { kind: 'adaptive' };
+-  }
+-}
+-
+-/** Clears generated results when an input changes so stale settings cannot be run. */
+-function invalidateScenario(): void {
+-  if (!currentScenario) {
+-    return;
+-  }
+-
+-  currentScenario = null;
+-  currentReport = null;
+-  runButton.disabled = true;
+-  exportButton.disabled = true;
+-  exportReportButton.disabled = true;
+-  scenarioOutput.replaceChildren();
+-  reportOutput.replaceChildren();
+-  scenarioEmpty.hidden = false;
+-  reportEmpty.hidden = false;
+-  reportTab.disabled = true;
+-  selectResultTab('scenario');
+-  status.textContent = 'Settings changed. Generate the scenario again before running the benchmark.';
+-}
+-
+-/** Keeps strategy-specific controls understandable without hiding their values. */
+-function updateStrategyControls(): void {
+-  const adaptive = strategySelect.value === 'adaptive';
+-  const irregular = strategySelect.value === 'irregular';
+-  spacingInput.disabled = adaptive;
+-  seedInput.disabled = !irregular;
+-}
+-
+-/** Renders generated synthetic clicks before any network request is made. */
+-function renderScenario(scenario: RoutingBenchmarkScenario): void {
+-  const segmentRows = scenario.waypointDistancesMeters
+-    .slice(1)
+-    .map((distance, index) => {
+-      const previousDistance = scenario.waypointDistancesMeters[index];
+-      return `<tr><td>${index + 1}</td><td>${formatDistance(
+-        distance - previousDistance,
+-      )}</td><td>${formatDistance(distance)}</td></tr>`;
+-    })
+-    .join('');
+-
+-  scenarioOutput.innerHTML = `
+-    <h2>Generated scenario</h2>
+-    <dl class="summary-grid">
+-      <div><dt>Name</dt><dd>${escapeHtml(scenario.name)}</dd></div>
+-      <div><dt>Source length</dt><dd>${formatDistance(
+-        scenario.sourceLengthMeters,
+-      )}</dd></div>
+-      <div><dt>Synthetic clicks</dt><dd>${scenario.waypointsLv95.length}</dd></div>
+-      <div><dt>Route sections</dt><dd>${scenario.waypointsLv95.length - 1}</dd></div>
+-      <div><dt>Source vertices</dt><dd>${scenario.sourcePointCount}</dd></div>
+-      <div><dt>Ignored GPX segments</dt><dd>${scenario.ignoredSegmentCount}</dd></div>
+-    </dl>
+-    <table>
+-      <thead><tr><th>Section</th><th>Sample interval</th><th>Cumulative</th></tr></thead>
+-      <tbody>${segmentRows}</tbody>
+-    </table>
+-  `;
+-}
+-
+-/** Renders worker-side phase timings and the main-thread responsiveness guard. */
+-function renderReport(report: RoutingBenchmarkReport): void {
+-  const rows = report.segments
+-    .map(
+-      (segment) => `<tr>
+-        <td>${segment.segmentIndex}</td>
+-        <td>${formatDistance(segment.directDistanceMeters)}</td>
+-        <td>${formatMilliseconds(segment.graphCacheLookupDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.rawCellAccessDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.featureMergeDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.graphBuildDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.startSnapDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.endSnapDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.aStarDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.routeReconstructionDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.routingOverheadDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.routeDurationMs)}</td>
+-        <td>${formatMilliseconds(segment.frameDelayMs)}</td>
+-        <td>${formatMilliseconds(segment.stateCommitDurationMs)}</td>
+-        <td>${segment.longTaskDurationMs === null ? '—' : formatMilliseconds(segment.longTaskDurationMs)}</td>
+-        <td>${segment.graphCacheHits}/${segment.graphCacheMisses}</td>
+-        <td>${segment.routeAttempts}</td>
+-        <td>${segment.retryUsed ? 'yes' : 'no'}</td>
+-        <td>${segment.warmupNewCells}</td>
+-        <td>${segment.unexpectedNewCells}</td>
+-        <td>${segment.foundPath ? 'network' : 'straight fallback'}</td>
+-      </tr>`,
+-    )
+-    .join('');
+-  const networkGuard =
+-    report.unexpectedNetworkCellLoads === 0
+-      ? '<span class="ok">No new cells were loaded during measurement.</span>'
+-      : `<span class="warning">${report.unexpectedNetworkCellLoads} cells were unexpectedly loaded; rerun before comparing CPU results.</span>`;
+-  const totalSnapDurationMs =
+-    report.phaseTotals.startSnapDurationMs +
+-    report.phaseTotals.endSnapDurationMs;
+-
+-  reportOutput.innerHTML = `
+-    <h2>Benchmark report</h2>
+-    <p>${networkGuard}</p>
+-    <dl class="summary-grid">
+-      <div><dt>Execution</dt><dd>${escapeHtml(report.executionMode)}</dd></div>
+-      <div><dt>Graph cache mode</dt><dd>${escapeHtml(report.graphCacheMode)}</dd></div>
+-      <div><dt>Warm-up</dt><dd>${formatMilliseconds(report.warmupDurationMs)}</dd></div>
+-      <div><dt>Raw cells cached</dt><dd>${report.warmupLoadedCells}</dd></div>
+-      <div><dt>Total measured routing</dt><dd>${formatMilliseconds(report.totalRouteDurationMs)}</dd></div>
+-      <div><dt>Total graph build</dt><dd>${formatMilliseconds(report.phaseTotals.graphBuildDurationMs)}</dd></div>
+-      <div><dt>Total endpoint snapping</dt><dd>${formatMilliseconds(totalSnapDurationMs)}</dd></div>
+-      <div><dt>Total A*</dt><dd>${formatMilliseconds(report.phaseTotals.aStarDurationMs)}</dd></div>
+-      <div><dt>Total reconstruction</dt><dd>${formatMilliseconds(report.phaseTotals.routeReconstructionDurationMs)}</dd></div>
+-      <div><dt>Cache hits / misses</dt><dd>${report.phaseTotals.graphCacheHits} / ${report.phaseTotals.graphCacheMisses}</dd></div>
+-      <div><dt>Wider retries</dt><dd>${report.phaseTotals.retryCount}</dd></div>
+-      <div><dt>Slowest section</dt><dd>${formatMilliseconds(report.maximumRouteDurationMs)}</dd></div>
+-      <div><dt>Largest frame delay</dt><dd>${formatMilliseconds(report.maximumFrameDelayMs)}</dd></div>
+-      <div><dt>Largest long task</dt><dd>${
+-        !report.longTaskApiSupported
+-          ? 'not exposed by this browser'
+-          : report.maximumLongTaskDurationMs === null
+-            ? 'none observed'
+-            : formatMilliseconds(report.maximumLongTaskDurationMs)
+-      }</dd></div>
+-      <div><dt>First click snapped</dt><dd>${report.firstWaypointSnapped ? 'yes' : 'no'}</dd></div>
+-    </dl>
+-    <p class="table-hint">Phase columns are measured inside the routing worker. “Other” includes worker scheduling, structured-clone transfer, and remaining control-flow overhead needed to reconcile them with end-to-end routing duration. Frame delay and long tasks are measured on the map/UI thread.</p>
+-    <table class="benchmark-table">
+-      <thead><tr>
+-        <th>Section</th><th>Distance</th><th>Cache lookup</th><th>Cell access</th>
+-        <th>Feature merge</th><th>Graph build</th><th>Start snap</th><th>End snap</th>
+-        <th>A*</th><th>Reconstruct</th><th>Other</th><th>Total routing</th>
+-        <th>Frame delay</th><th>State commit</th><th>Long task</th><th>Cache H/M</th>
+-        <th>Attempts</th><th>Retry</th><th>Warm-up cells</th><th>Measured cells</th><th>Result</th>
+-      </tr></thead>
+-      <tbody>${rows}</tbody>
+-    </table>
+-  `;
+-}
+-
+-fileInput.addEventListener('change', () => {
+-  const fileName = fileInput.files?.[0]?.name ?? 'No file selected';
+-  fileNameOutput.textContent = fileName;
+-  fileNameOutput.title = fileName;
+-  invalidateScenario();
+-});
+-
+-strategySelect.addEventListener('change', () => {
+-  updateStrategyControls();
+-  invalidateScenario();
+-});
+-spacingInput.addEventListener('input', invalidateScenario);
+-seedInput.addEventListener('input', invalidateScenario);
+-cacheModeSelect.addEventListener('change', () => {
+-  currentReport = null;
+-  exportReportButton.disabled = true;
+-  reportTab.disabled = true;
+-  reportOutput.replaceChildren();
+-  reportEmpty.hidden = false;
+-  reportEmpty.hidden = false;
+-  reportTab.disabled = true;
+-  selectResultTab('scenario');
+-  if (currentScenario) {
+-    status.textContent = 'Graph cache mode changed. Run the benchmark again.';
+-  }
+-});
+-updateStrategyControls();
+-
+-generateButton.addEventListener('click', async () => {
+-  const file = fileInput.files?.[0];
+-
+-  if (!file) {
+-    status.textContent = 'Select a GPX file first.';
+-    return;
+-  }
+-
+-  try {
+-    status.textContent = 'Reading GPX and generating synthetic clicks…';
+-    const xml = await file.text();
+-    currentScenario = createScenarioFromGpx(
+-      xml,
+-      file.name,
+-      selectedStrategy(),
+-    );
+-    renderScenario(currentScenario);
+-    scenarioEmpty.hidden = true;
+-    selectResultTab('scenario');
+-    currentReport = null;
+-    reportOutput.replaceChildren();
+-    reportEmpty.hidden = false;
+-    reportTab.disabled = true;
+-    exportReportButton.disabled = true;
+-    runButton.disabled = false;
+-    exportButton.disabled = false;
+-    status.textContent =
+-      'Scenario ready. Click “2. Run benchmark” to load routing data and start the measurement.';
+-  } catch (error) {
+-    currentScenario = null;
+-    currentReport = null;
+-    runButton.disabled = true;
+-    exportButton.disabled = true;
+-    exportReportButton.disabled = true;
+-    reportTab.disabled = true;
+-    status.textContent = error instanceof Error ? error.message : String(error);
+-  }
+-});
+-
+-runButton.addEventListener('click', async () => {
+-  if (!currentScenario) {
+-    return;
+-  }
+-
+-  currentAbortController?.abort();
+-  currentAbortController = new AbortController();
+-  runButton.disabled = true;
+-  runButton.textContent = 'Benchmark running…';
+-  currentReport = null;
+-  exportReportButton.disabled = true;
+-  reportTab.disabled = true;
+-  reportOutput.replaceChildren();
+-  reportEmpty.hidden = false;
+-  document.querySelector('.panel')?.setAttribute('aria-busy', 'true');
+-
+-  try {
+-    const report = await runRoutingBenchmark(
+-      currentScenario,
+-      cacheModeSelect.value as GraphCacheMode,
+-      currentAbortController.signal,
+-      (progress) => {
+-        status.textContent = `${
+-          progress.phase === 'warmup' ? 'Loading/warming' : 'Measuring'
+-        } section ${progress.current} of ${progress.total}…`;
+-      },
+-    );
+-    currentReport = report;
+-    renderReport(report);
+-    reportEmpty.hidden = true;
+-    reportTab.disabled = false;
+-    selectResultTab('report');
+-    exportReportButton.disabled = false;
+-    status.textContent = 'Benchmark complete. The report can now be exported as JSON.';
+-  } catch (error) {
+-    status.textContent = error instanceof Error ? error.message : String(error);
+-  } finally {
+-    runButton.disabled = false;
+-    runButton.textContent = defaultRunButtonText;
+-    document.querySelector('.panel')?.removeAttribute('aria-busy');
+-    currentAbortController = null;
+-  }
+-});
+-
+-/** Downloads a JSON value with a stable scenario-derived filename. */
+-function downloadJson(data: unknown, filename: string): void {
+-  const blob = new Blob([JSON.stringify(data, null, 2)], {
+-    type: 'application/json',
+-  });
+-  const url = URL.createObjectURL(blob);
+-  const link = document.createElement('a');
+-  link.href = url;
+-  link.download = filename;
+-  link.click();
+-  URL.revokeObjectURL(url);
+-}
+-
+-/** Produces a filesystem-safe base name without changing the scenario itself. */
+-function scenarioFileBase(name: string): string {
+-  return (
+-    name
+-      .toLowerCase()
+-      .replace(/[^a-z0-9]+/g, '-')
+-      .replace(/^-|-$/g, '') || 'routing-scenario'
+-  );
+-}
+-
+-exportButton.addEventListener('click', () => {
+-  if (!currentScenario) {
+-    return;
+-  }
+-
+-  downloadJson(
+-    serializeScenario(currentScenario),
+-    `${scenarioFileBase(currentScenario.name)}.json`,
+-  );
+-});
+-
+-exportReportButton.addEventListener('click', () => {
+-  if (!currentReport) {
+-    return;
+-  }
+-
+-  downloadJson(
+-    {
+-      schemaVersion: 3,
+-      exportedAt: new Date().toISOString(),
+-      environment: {
+-        userAgent: navigator.userAgent,
+-        hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+-        deviceMemoryGb:
+-          'deviceMemory' in navigator
+-            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null
+-            : null,
+-      },
+-      benchmark: currentReport,
+-    },
+-    `${scenarioFileBase(currentReport.scenario.name)}-benchmark.json`,
+-  );
+-});
+diff --git a/benchmarks/routing/src/styles.css b/benchmarks/routing/src/styles.css
+deleted file mode 100644
+index a241df42c3e43075318942dc299453ce09c9180f..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/src/styles.css
++++ /dev/null
+@@ -1,347 +0,0 @@
+-:root {
+-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+-  color: #1d252c;
+-  background: #eef1f3;
+-  font-synthesis: none;
+-}
+-
+-* {
+-  box-sizing: border-box;
+-}
+-
+-body {
+-  margin: 0;
+-}
+-
+-main {
+-  width: min(1180px, calc(100% - 32px));
+-  margin: 32px auto 64px;
+-}
+-
+-header,
+-.panel {
+-  background: #fff;
+-  border: 1px solid #d7dde1;
+-  border-radius: 12px;
+-  box-shadow: 0 4px 18px rgb(24 39 51 / 7%);
+-}
+-
+-header {
+-  padding: 24px 28px;
+-  margin-bottom: 18px;
+-}
+-
+-header h1,
+-h2 {
+-  margin-top: 0;
+-}
+-
+-header p {
+-  max-width: 72ch;
+-  margin-bottom: 0;
+-  color: #4b5963;
+-}
+-
+-.panel {
+-  padding: 22px 24px;
+-  margin-top: 18px;
+-  overflow-x: auto;
+-}
+-
+-[hidden] {
+-  display: none !important;
+-}
+-
+-.results {
+-  margin-top: 18px;
+-}
+-
+-.result-tabs {
+-  display: flex;
+-  gap: 4px;
+-  padding: 0 8px;
+-  border-bottom: 1px solid #cbd3d8;
+-}
+-
+-button.result-tab {
+-  min-height: 40px;
+-  margin-bottom: -1px;
+-  border: 1px solid transparent;
+-  border-bottom-color: #cbd3d8;
+-  border-radius: 8px 8px 0 0;
+-  padding-inline: 18px;
+-  background: transparent;
+-  color: #4b5963;
+-}
+-
+-button.result-tab[aria-selected="true"] {
+-  border-color: #cbd3d8;
+-  border-bottom-color: #fff;
+-  background: #fff;
+-  color: #1d252c;
+-}
+-
+-button.result-tab:disabled {
+-  opacity: 0.45;
+-}
+-
+-.result-panel {
+-  margin-top: 0;
+-  border-top-left-radius: 0;
+-}
+-
+-.empty-result {
+-  margin: 0;
+-  color: #5c6972;
+-}
+-
+-.controls {
+-  display: grid;
+-  grid-template-columns:
+-    minmax(270px, 1.45fr)
+-    minmax(180px, 1fr)
+-    minmax(205px, 1fr)
+-    minmax(150px, 0.75fr)
+-    minmax(215px, 1.1fr);
+-  gap: 14px;
+-  align-items: start;
+-}
+-
+-.field {
+-  display: grid;
+-  min-width: 0;
+-  gap: 6px;
+-}
+-
+-.field-label {
+-  font-weight: 650;
+-}
+-
+-input,
+-select,
+-button,
+-.file-picker-button {
+-  min-height: 42px;
+-  border-radius: 8px;
+-  border: 1px solid #aeb8bf;
+-  padding: 8px 10px;
+-  font: inherit;
+-}
+-
+-input,
+-select {
+-  width: 100%;
+-  min-width: 0;
+-  background: #fff;
+-}
+-
+-.file-picker {
+-  display: grid;
+-  grid-template-columns: max-content minmax(0, 1fr);
+-  align-items: center;
+-  min-height: 42px;
+-  border: 1px solid #aeb8bf;
+-  border-radius: 8px;
+-  background: #fff;
+-  overflow: hidden;
+-}
+-
+-.file-picker-button {
+-  display: inline-flex;
+-  align-items: center;
+-  min-height: 40px;
+-  border: 0;
+-  border-right: 1px solid #aeb8bf;
+-  border-radius: 0;
+-  cursor: pointer;
+-  background: #f4f6f7;
+-  font-weight: 650;
+-  white-space: nowrap;
+-}
+-
+-.file-picker-button:hover {
+-  background: #e8ecef;
+-}
+-
+-.file-picker-button:focus-visible {
+-  outline: 2px solid #1d252c;
+-  outline-offset: -3px;
+-}
+-
+-.field--file:focus-within .file-picker {
+-  outline: 2px solid #1d252c;
+-  outline-offset: 2px;
+-}
+-
+-.file-name {
+-  min-width: 0;
+-  padding: 0 11px;
+-  overflow: hidden;
+-  color: #37444d;
+-  text-overflow: ellipsis;
+-  white-space: nowrap;
+-}
+-
+-.visually-hidden {
+-  position: absolute;
+-  width: 1px;
+-  height: 1px;
+-  padding: 0;
+-  margin: -1px;
+-  overflow: hidden;
+-  clip: rect(0, 0, 0, 0);
+-  white-space: nowrap;
+-  border: 0;
+-}
+-
+-.actions {
+-  display: flex;
+-  flex-wrap: wrap;
+-  align-items: center;
+-  gap: 12px;
+-  margin-top: 18px;
+-}
+-
+-button {
+-  cursor: pointer;
+-  border-color: #1d252c;
+-  background: #1d252c;
+-  color: #fff;
+-  font-weight: 700;
+-}
+-
+-button.secondary {
+-  background: #fff;
+-  color: #1d252c;
+-}
+-
+-button:disabled,
+-input:disabled {
+-  cursor: not-allowed;
+-  opacity: 0.5;
+-}
+-
+-.workflow-hint {
+-  margin: 10px 0 0;
+-  color: #5c6972;
+-  font-size: 0.92rem;
+-}
+-
+-#status {
+-  min-height: 24px;
+-  margin: 12px 0 0;
+-  font-weight: 650;
+-}
+-
+-.hint {
+-  color: #5c6972;
+-  font-size: 0.9rem;
+-  font-weight: 400;
+-}
+-
+-.summary-grid {
+-  display: grid;
+-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+-  gap: 10px;
+-  margin: 0 0 18px;
+-}
+-
+-.summary-grid div {
+-  padding: 10px 12px;
+-  background: #f4f6f7;
+-  border-radius: 8px;
+-}
+-
+-.summary-grid dt {
+-  color: #5c6972;
+-  font-size: 0.82rem;
+-}
+-
+-.summary-grid dd {
+-  margin: 3px 0 0;
+-  font-weight: 750;
+-}
+-
+-table {
+-  width: 100%;
+-  border-collapse: collapse;
+-  white-space: nowrap;
+-}
+-
+-th,
+-td {
+-  border-bottom: 1px solid #dce1e4;
+-  padding: 9px 10px;
+-  text-align: right;
+-}
+-
+-th:first-child,
+-td:first-child,
+-th:last-child,
+-td:last-child {
+-  text-align: left;
+-}
+-
+-.ok {
+-  color: #166534;
+-  font-weight: 700;
+-}
+-
+-.warning {
+-  color: #9a3412;
+-  font-weight: 700;
+-}
+-
+-@media (max-width: 1080px) {
+-  .controls {
+-    grid-template-columns: repeat(2, minmax(0, 1fr));
+-  }
+-
+-  .field--file {
+-    grid-column: 1 / -1;
+-  }
+-}
+-
+-@media (max-width: 640px) {
+-  main {
+-    width: min(100% - 20px, 1180px);
+-    margin-top: 10px;
+-  }
+-
+-  header,
+-  .panel {
+-    padding: 18px;
+-  }
+-
+-  .controls {
+-    grid-template-columns: minmax(0, 1fr);
+-  }
+-
+-  .field--file {
+-    grid-column: auto;
+-  }
+-
+-  .actions {
+-    align-items: stretch;
+-    flex-direction: column;
+-  }
+-
+-  .actions button {
+-    width: 100%;
+-  }
+-}
+-
+-.table-hint {
+-  margin: -4px 0 14px;
+-  color: #5c6972;
+-  font-size: 0.9rem;
+-}
+-
+-.benchmark-table {
+-  font-size: 0.88rem;
+-}
+-
+-.benchmark-table th,
+-.benchmark-table td {
+-  padding-inline: 8px;
+-}
+diff --git a/benchmarks/routing/tsconfig.json b/benchmarks/routing/tsconfig.json
+deleted file mode 100644
+index 9a71072d1accd5a8e6b5f0d806d8e6269c33ac56..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/tsconfig.json
++++ /dev/null
+@@ -1,7 +0,0 @@
+-{
+-  "extends": "../../tsconfig.json",
+-  "compilerOptions": {
+-    "types": ["vite/client"]
+-  },
+-  "include": ["src", "vite.config.ts"]
+-}
+diff --git a/benchmarks/routing/vite.config.ts b/benchmarks/routing/vite.config.ts
+deleted file mode 100644
+index 6bf119c8c75f1a4a4fcee43ebfe4dda7db1c7595..0000000000000000000000000000000000000000
+--- a/benchmarks/routing/vite.config.ts
++++ /dev/null
+@@ -1,22 +0,0 @@
+-/**
+- * Business context: serves and builds the local routing benchmark as a separate
+- * Vite entry. The production Via Helvetica application never imports this page
+- * or its fixtures, so GitHub Pages output remains unchanged.
+- */
+-import { defineConfig } from 'vite';
+-
+-export default defineConfig({
+-  root: '.',
+-  base: './',
+-  appType: 'mpa',
+-  server: {
+-    open: '/benchmarks/routing/index.html',
+-  },
+-  build: {
+-    outDir: 'dist-benchmark',
+-    emptyOutDir: true,
+-    rollupOptions: {
+-      input: 'benchmarks/routing/index.html',
+-    },
+-  },
+-});
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 26d26faf078d65f202cb842bbbe6cebb9b27716c..b7ceaa811f09f1f6b96770b806ec46e3a60d3be5 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -159,8 +159,7 @@ request identity, hiking time, and bidirectional map/profile exploration.
+ `dynamicRoutingWorker.ts` owns a long-lived `DynamicRoutingNetworkEngine` whose
+ raw-cell cache, graph LRU, graph construction, snapping, and A* never enter the
+ OpenLayers/React thread. Structured-clone messages carry only coordinates,
+-route results, cache statistics, diagnostics, cancellation, and serialized
+-errors across that boundary.
++route results, cancellation, and serialized errors across that boundary.
+ `App.tsx` remains the application composition point and accesses the runtime
+ through one stable ref. It connects the focused hooks instead of owning their
+ imperative map sessions, route history, or provider-request lifecycles.
+@@ -185,8 +184,8 @@ GPX parsing and export, route metrics, passenger-stop filtering, routing-grid
+ footprints, the main-thread Worker facade, and the worker-owned routing engine.
+ Engine tests mock provider loading and graph construction to protect narrow-to-
+ wider corridor retry, straight-fallback signalling, completed and in-flight cell
+-reuse, cleanup and retry after an aborted cell request, graph-cache clearing, true
+-least-recently-used eviction, size limits, and provider-error propagation without
++reuse, cleanup and retry after an aborted cell request, true least-recently-used
++eviction, size limits, and provider-error propagation without
+ live GeoAdmin requests. Focused swissTLM3D API tests additionally protect request
+ timeouts, one-shot transient retries, Retry-After handling, and the distinction
+ between timeout errors and intentional cancellation. JSDOM provides the
+@@ -200,38 +199,6 @@ which behaviour needs deliberate review. OpenLayers canvas rendering and full
+ pointer workflows remain validated manually until a browser-level test offers
+ clear value over its maintenance cost.
+ 
+-### 3.6 Measured worker-routing benchmark
+-
+-`benchmarks/routing/` is a separate local Vite entry used to validate the
+-experimental browser-routing limits without adding controls or assets to the
+-published map. It accepts a GPX trace, selects its longest continuous segment,
+-and derives deterministic synthetic user clicks. Adaptive regular spacing gives
+-a bounded general scenario, fixed spacing accepts values from 50 metres for
+-small-section tests, and seeded irregular spacing approximates uneven live route
+-planning while remaining exactly reproducible.
+-
+-Each benchmark first replays the scenario through the real dedicated routing
+-worker so all required swissTLM3D cells and snapped endpoints are known. It then
+-clears only the worker-owned `RoutingNetwork` LRU while preserving downloaded
+-raw cells. The measured pass records worker-side graph-cache lookup, cached-cell
+-resolution, feature merging, `RoutingNetwork` construction, start and destination
+-snapping, A*, and coordinate reconstruction. End-to-end elapsed time additionally
+-includes worker scheduling and structured-clone transfer, while animation-frame
+-delay and browser long tasks are observed on the map/UI thread. Immutable route-
+-step commit time remains measured on the main thread after each result returns.
+-
+-Normal session-cache and forced per-section graph-rebuild modes distinguish
+-realistic reuse from the worst graph-construction case. After the Worker
+-migration, the key validation is no longer only how long construction takes,
+-but whether those worker-side builds leave frame delay near the normal refresh
+-interval and remove main-thread long tasks. The report still rejects comparisons
+-when the raw-cell count increases during the measured pass.
+-
+-The benchmark is diagnostic rather than a pass/fail regression test: timings
+-depend on the browser, CPU, thermal state, region, worker scheduling, and network
+-warm-up. Stable generated scenario JSON and schema-version-3 benchmark reports
+-can be retained for cross-version and cross-device comparisons.
+-
+ ## 4. Technical overview
+ 
+ ```text
+@@ -316,14 +283,7 @@ Regression tests
+    │
+    ├── Vitest
+    ├── JSDOM for browser XML APIs
+-   └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, routing-engine, and benchmark-sampling suites
+-
+-Local routing benchmark
+-   │
+-   ├── separate Vite page outside the production entry graph
+-   ├── GPX-to-synthetic-click scenario generation
+-   ├── raw-cell warm-up with derived-graph cache reset
+-   └── worker-phase, end-to-end latency, main-thread frame-delay, long-task, and cache-contamination reporting
++   └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, and routing-engine suites
+ 
+ Deployment
+    │
+@@ -667,7 +627,7 @@ root application receives only render state and actions from these hooks.
+ lifetime and disposes it on unmount. The facade creates one dedicated module
+ Worker lazily, correlates typed requests, forwards cancellation, and reconstructs
+ errors used by the UI. The Worker keeps its caches across additions and edits;
+-only plain coordinate arrays and diagnostics return to the main thread.
++only plain coordinate arrays return to the main thread.
+ 
+ The current route is an immutable `RouteState`. Its ordered `RouteStep` array
+ stores:
+@@ -970,18 +930,6 @@ via-helvetica/
+ ├── .github/
+ │   └── workflows/
+ │       └── deploy.yml
+-├── benchmarks/
+-│   └── routing/
+-│       ├── src/
+-│       │   ├── benchmarkRunner.ts
+-│       │   ├── gpxScenario.test.ts
+-│       │   ├── gpxScenario.ts
+-│       │   ├── main.ts
+-│       │   └── styles.css
+-│       ├── index.html
+-│       ├── README.md
+-│       ├── tsconfig.json
+-│       └── vite.config.ts
+ ├── docs/
+ │   └── ARCHITECTURE.md
+ ├── public/
+@@ -1484,9 +1432,7 @@ retry policy for transient provider failures.
+ 
+ Builds the walkable regional graph, indexes line segments, matches official
+ hiking geometry, snaps waypoints, applies routing costs, and calculates A*
+-paths. An optional benchmark-only accumulator separates start snapping,
+-destination snapping, A*, and coordinate reconstruction without changing normal
+-route results. It contains no React or OpenLayers map lifecycle state.
++paths. It contains no React or OpenLayers map lifecycle state.
+ 
+ ### `src/routing/routeEditing.ts`
+ 
+@@ -1518,17 +1464,15 @@ but it no longer blocks map rendering and its obsolete response is ignored.
+ Owns network loading, completed and in-flight raw-cell caches, exact-corridor
+ `RoutingNetwork` LRU entries, narrow and widened corridor attempts, feature
+ merging, graph construction, snapping, and A*. Cache hits are promoted before
+-bounded eviction so repeated local corridors remain available. Read-only cache
+-statistics, explicit derived-graph clearing, and diagnosed routing expose worker-
+-side phase timings to the benchmark without exposing mutable cache contents.
+-Direct engine regression tests use mocked providers and graph doubles so this
+-workflow is protected independently from Worker message transport.
++bounded eviction so repeated local corridors remain available. Direct engine regression tests use mocked providers and graph
++doubles so this workflow is protected independently from Worker message
++transport.
+ 
+ ### `src/routing/dynamicRoutingProtocol.ts`
+ 
+-Defines the structured-clone request, cancellation, response, error, cache-stat,
+-and diagnostic contracts shared by the Worker and main-thread facade. It also
+-owns `RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
++Defines the structured-clone request, cancellation, response, and error
++contracts shared by the Worker and main-thread facade. It also owns
++`RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
+ boundary through explicit reconstruction.
+ 
+ ### `src/routing/routingGrid.ts` and `routingConstants.ts`
+@@ -1594,37 +1538,19 @@ interpolation, and geometry-only fallback; `routeMetrics.test.ts` covers LV95
+ distance, segment-local elevation totals, the Swiss hiking-time model, and a
+ mocked GeoAdmin profile response; `publicTransportStopModel.test.ts` covers
+ multilingual passenger-mode normalization and technical-record rejection;
+-`networkRouter.test.ts` protects the optional phase-timing contract without
+-changing route geometry; `dynamicRoutingNetworkClient.test.ts` protects Worker
+-request correlation, typed errors, cancellation, ignored late responses, and
+-disposal; and
+-`benchmarks/routing/src/gpxScenario.test.ts`
+-protects short fixed intervals,
+-adaptive bounds, and seeded irregular reproducibility.
+-
+-### `benchmarks/routing/`
+-
+-Contains the local-only routing performance harness. `src/gpxScenario.ts`
+-converts the longest continuous GPX segment into deterministic synthetic clicks
+-and can export their WGS 84 coordinates as stable JSON. `src/benchmarkRunner.ts`
+-warms the real dynamic loader, preserves raw cells, clears derived graphs, and
+-measures detailed routing phases for each replayed section. The browser report
+-and schema-version-3 JSON export identify dedicated-Worker execution and retain
+-worker phase totals, end-to-end per-section timings, cache hits and misses, retry
+-use, main-thread frame delay, and long-task observations. Its
+-independent `index.html`, Vite config,
+-and TypeScript config keep the harness outside the normal GitHub Pages build.
++`networkRouter.test.ts` protects the structured-clone-safe route result;
++`dynamicRoutingNetworkClient.test.ts` protects Worker request correlation, typed errors, cancellation, ignored late responses, and
++disposal.
+ 
+ ### Remaining root files
+ 
+ - `src/main.tsx` mounts React, the language provider, and styles.
+ - `index.html` is the browser entry point.
+-- `package.json` declares dependencies and npm scripts, including regression,
+-  production-build, and local routing-benchmark commands.
++- `package.json` declares dependencies and npm scripts for development,
++  regression tests, and the production build.
+ - `package-lock.json` locks dependency versions.
+ - `vite.config.ts` configures React and the GitHub Pages base path.
+-- `vitest.config.ts` selects JSDOM and the application plus benchmark-sampling
+-  test suites.
++- `vitest.config.ts` selects JSDOM and the application test suites.
+ - `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
+ - `public/base-map-previews/*.png` provides the static color, grey, and aerial
+   thumbnails used by the Layers menu without another map request.
+diff --git a/package.json b/package.json
+index 151bc3597620ac13858374513188a82765737d27..5bd59f4bff3997fe1748009a3e38cbca2169fc24 100644
+--- a/package.json
++++ b/package.json
+@@ -8,9 +8,7 @@
+     "build": "tsc --noEmit && vite build",
+     "preview": "vite preview",
+     "test": "vitest run",
+-    "test:watch": "vitest",
+-    "benchmark:routing": "vite --config benchmarks/routing/vite.config.ts",
+-    "benchmark:routing:build": "tsc -p benchmarks/routing/tsconfig.json --noEmit && vite build --config benchmarks/routing/vite.config.ts"
++    "test:watch": "vitest"
+   },
+   "dependencies": {
+     "ol": "^10.9.0",
+diff --git a/src/routing/dynamicRoutingEngine.test.ts b/src/routing/dynamicRoutingEngine.test.ts
+index d07cc8526210fade3d3a31685a678ab2815a7727..c93f91fd34dec7e4c7ca1bebaf6411fc4bcfe401 100644
+--- a/src/routing/dynamicRoutingEngine.test.ts
++++ b/src/routing/dynamicRoutingEngine.test.ts
+@@ -87,16 +87,13 @@ describe('DynamicRoutingNetworkEngine', () => {
+     const start: Coordinate = [1_200, 1_200];
+     const end: Coordinate = [3_600, 1_200];
+ 
+-    const result = await engine.routeWithDiagnostics(
++    const result = await engine.route(
+       start,
+       end,
+       new AbortController().signal,
+     );
+ 
+-    expect(result.path).toEqual(DEFAULT_PATH);
+-    expect(result.timings.routeAttempts).toBe(2);
+-    expect(result.timings.retryUsed).toBe(true);
+-    expect(result.timings.graphCacheMisses).toBe(2);
++    expect(result).toEqual(DEFAULT_PATH);
+     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
+     expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(
+       createCorridorCellKeys(start, end, 2).size,
+@@ -107,15 +104,13 @@ describe('DynamicRoutingNetworkEngine', () => {
+     moduleMocks.fromSwissTlm.mockImplementation(() => createNetwork(null));
+     const engine = new DynamicRoutingNetworkEngine();
+ 
+-    const result = await engine.routeWithDiagnostics(
++    const result = await engine.route(
+       [1_200, 1_200],
+       [3_600, 1_200],
+       new AbortController().signal,
+     );
+ 
+-    expect(result.path).toBeNull();
+-    expect(result.timings.routeAttempts).toBe(2);
+-    expect(result.timings.retryUsed).toBe(true);
++    expect(result).toBeNull();
+     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
+   });
+ 
+@@ -135,7 +130,6 @@ describe('DynamicRoutingNetworkEngine', () => {
+ 
+     await vi.waitFor(() => {
+       expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(1);
+-      expect(engine.getCacheStats().pendingCells).toBe(1);
+     });
+ 
+     resolveFetch?.(EMPTY_NETWORK_DATA);
+@@ -144,10 +138,6 @@ describe('DynamicRoutingNetworkEngine', () => {
+       coordinate,
+       coordinate,
+     ]);
+-    expect(engine.getCacheStats()).toMatchObject({
+-      loadedCells: 1,
+-      pendingCells: 0,
+-    });
+   });
+ 
+   it('cleans an aborted pending cell so the same area can be retried', async () => {
+@@ -168,19 +158,11 @@ describe('DynamicRoutingNetworkEngine', () => {
+ 
+     await vi.waitFor(() => {
+       expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(1);
+-      expect(engine.getCacheStats().pendingCells).toBe(1);
+     });
+ 
+     controller.abort();
+ 
+     await expect(abortedSnap).rejects.toMatchObject({ name: 'AbortError' });
+-    await vi.waitFor(() => {
+-      expect(engine.getCacheStats()).toMatchObject({
+-        loadedCells: 0,
+-        pendingCells: 0,
+-      });
+-    });
+-
+     moduleMocks.fetchSwissTlmNetworkData.mockResolvedValueOnce(
+       EMPTY_NETWORK_DATA,
+     );
+@@ -189,27 +171,6 @@ describe('DynamicRoutingNetworkEngine', () => {
+       engine.snap(coordinate, new AbortController().signal),
+     ).resolves.toEqual(coordinate);
+     expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(2);
+-    expect(engine.getCacheStats()).toMatchObject({
+-      loadedCells: 1,
+-      pendingCells: 0,
+-    });
+-  });
+-
+-  it('rebuilds a cleared graph from cached raw cells without repeating requests', async () => {
+-    const engine = new DynamicRoutingNetworkEngine();
+-    const coordinate = coordinateInColumn(0);
+-    const signal = new AbortController().signal;
+-
+-    await engine.route(coordinate, coordinate, signal);
+-    const requestCount = moduleMocks.fetchSwissTlmNetworkData.mock.calls.length;
+-
+-    engine.clearNetworkCache();
+-    await engine.route(coordinate, coordinate, signal);
+-
+-    expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(2);
+-    expect(moduleMocks.fetchSwissTlmNetworkData).toHaveBeenCalledTimes(
+-      requestCount,
+-    );
+   });
+ 
+   it('promotes cache hits and evicts the least-recently used graph', async () => {
+@@ -223,7 +184,6 @@ describe('DynamicRoutingNetworkEngine', () => {
+       await engine.route(coordinate, coordinate, signal);
+     }
+ 
+-    expect(engine.getCacheStats().cachedNetworks).toBe(8);
+     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(8);
+ 
+     // Reusing the oldest graph promotes it before the ninth graph is inserted.
+@@ -236,7 +196,6 @@ describe('DynamicRoutingNetworkEngine', () => {
+     // The second-oldest untouched graph was evicted and must now be rebuilt.
+     await engine.route(coordinates[1], coordinates[1], signal);
+     expect(moduleMocks.fromSwissTlm).toHaveBeenCalledTimes(10);
+-    expect(engine.getCacheStats().cachedNetworks).toBe(8);
+   });
+ 
+   it('rejects an oversized corridor before making provider requests', async () => {
+diff --git a/src/routing/dynamicRoutingEngine.ts b/src/routing/dynamicRoutingEngine.ts
+index b12b94a5894391ece69857d8dd2666eeb4484ecf..6d2fc8e895251c341bc42ebbdc02b28fb8b28ce4 100644
+--- a/src/routing/dynamicRoutingEngine.ts
++++ b/src/routing/dynamicRoutingEngine.ts
+@@ -16,12 +16,7 @@ import {
+   extentForCellKey,
+   type CellKey,
+ } from './routingGrid';
+-import {
+-  RoutingAreaTooLargeError,
+-  type DiagnosedDynamicRoutingResult,
+-  type DynamicRoutingCacheStats,
+-  type DynamicRoutingPhaseTimings,
+-} from './dynamicRoutingProtocol';
++import { RoutingAreaTooLargeError } from './dynamicRoutingProtocol';
+ import {
+   fetchSwissTlmNetworkData,
+   type SwissTlmLineFeature,
+@@ -64,24 +59,6 @@ interface PendingCell {
+   signal: AbortSignal;
+ }
+ 
+-/** Creates an empty accumulator so retry phases can be added consistently. */
+-function createRoutingPhaseTimings(): DynamicRoutingPhaseTimings {
+-  return {
+-    graphCacheLookupDurationMs: 0,
+-    rawCellAccessDurationMs: 0,
+-    featureMergeDurationMs: 0,
+-    graphBuildDurationMs: 0,
+-    startSnapDurationMs: 0,
+-    endSnapDurationMs: 0,
+-    aStarDurationMs: 0,
+-    routeReconstructionDurationMs: 0,
+-    graphCacheHits: 0,
+-    graphCacheMisses: 0,
+-    routeAttempts: 0,
+-    retryUsed: false,
+-  };
+-}
+-
+ /**
+  * Maps cells with a bounded worker pool to protect the public API and browser.
+  * @param values - Ordered inputs to process.
+@@ -150,24 +127,6 @@ export class DynamicRoutingNetworkEngine {
+   /** Small most-recent-first cache of graphs for exact corridor cell sets. */
+   private readonly networkCache: CachedNetwork[] = [];
+ 
+-  /**
+-   * Clears only derived corridor graphs while preserving downloaded raw cells.
+-   * This is useful for deterministic diagnostics that must measure graph
+-   * reconstruction without repeating GeoAdmin traffic.
+-   */
+-  clearNetworkCache(): void {
+-    this.networkCache.length = 0;
+-  }
+-
+-  /** Returns current session cache sizes without exposing mutable cache entries. */
+-  getCacheStats(): DynamicRoutingCacheStats {
+-    return {
+-      loadedCells: this.loadedCells.size,
+-      pendingCells: this.pendingCells.size,
+-      cachedNetworks: this.networkCache.length,
+-    };
+-  }
+-
+   /**
+    * Loads a neighbourhood around a point and snaps it to the local network.
+    * @param coordinate - User-selected coordinate in EPSG:2056.
+@@ -214,38 +173,11 @@ export class DynamicRoutingNetworkEngine {
+     return this.routeInternal(startCoordinate, endCoordinate, signal);
+   }
+ 
+-  /**
+-   * Routes one section while exposing CPU phase timings to the local benchmark.
+-   * The normal application deliberately calls `route()` and pays no diagnostic
+-   * clock-reading overhead.
+-   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+-   * @param endCoordinate - Synthetic benchmark destination in EPSG:2056.
+-   * @param signal - Abort signal owned by the benchmark session.
+-   * @returns Routed path and aggregated worker-side phase timings.
+-   * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
+-   * @throws {Error} When GeoAdmin loading or graph construction fails.
+-   */
+-  async routeWithDiagnostics(
+-    startCoordinate: Coordinate,
+-    endCoordinate: Coordinate,
+-    signal: AbortSignal,
+-  ): Promise<DiagnosedDynamicRoutingResult> {
+-    const timings = createRoutingPhaseTimings();
+-    const path = await this.routeInternal(
+-      startCoordinate,
+-      endCoordinate,
+-      signal,
+-      timings,
+-    );
+-    return { path, timings };
+-  }
+-
+   /**
+    * Executes the shared narrow-corridor and optional wider-retry workflow.
+    * @param startCoordinate - Existing route endpoint in EPSG:2056.
+    * @param endCoordinate - Newly selected destination in EPSG:2056.
+    * @param signal - Abort signal owned by the caller.
+-   * @param timings - Optional benchmark accumulator updated across both attempts.
+    * @returns Routed path, or `null` after normal coverage/connectivity misses.
+    * @throws {RoutingAreaTooLargeError} If either corridor exceeds the safety limit.
+    * @throws {Error} When provider loading or graph construction fails.
+@@ -254,7 +186,6 @@ export class DynamicRoutingNetworkEngine {
+     startCoordinate: Coordinate,
+     endCoordinate: Coordinate,
+     signal: AbortSignal,
+-    timings?: DynamicRoutingPhaseTimings,
+   ): Promise<RoutedNetworkPath | null> {
+     const initialCellKeys = createCorridorCellKeys(
+       startCoordinate,
+@@ -263,22 +194,13 @@ export class DynamicRoutingNetworkEngine {
+     );
+     let initialPath: RoutedNetworkPath | null = null;
+ 
+-    if (timings) {
+-      timings.routeAttempts += 1;
+-    }
+-
+     try {
+       const initialNetwork = await this.getNetwork(
+         initialCellKeys,
+         signal,
+-        timings,
+       );
+ 
+-      initialPath = initialNetwork.route(
+-        startCoordinate,
+-        endCoordinate,
+-        timings,
+-      );
++      initialPath = initialNetwork.route(startCoordinate, endCoordinate);
+     } catch (error) {
+       // A narrow corridor can be entirely outside swissTLM3D coverage. The
+       // wider retry may still reach a usable network near a national border.
+@@ -293,9 +215,6 @@ export class DynamicRoutingNetworkEngine {
+ 
+     // A wider retry allows realistic detours around barriers without paying
+     // that loading cost for every segment.
+-    if (timings) {
+-      timings.retryUsed = true;
+-    }
+ 
+     const retryCellKeys = createCorridorCellKeys(
+       startCoordinate,
+@@ -303,18 +222,13 @@ export class DynamicRoutingNetworkEngine {
+       ROUTE_RETRY_CELL_RADIUS,
+     );
+ 
+-    if (timings) {
+-      timings.routeAttempts += 1;
+-    }
+-
+     try {
+       const retryNetwork = await this.getNetwork(
+         retryCellKeys,
+         signal,
+-        timings,
+       );
+ 
+-      return retryNetwork.route(startCoordinate, endCoordinate, timings);
++      return retryNetwork.route(startCoordinate, endCoordinate);
+     } catch (error) {
+       // No walkable data after both attempts is a normal coverage miss. The
+       // route editor can preserve continuity with a straight fallback segment.
+@@ -330,7 +244,6 @@ export class DynamicRoutingNetworkEngine {
+    * Returns a graph for one exact set of cells, loading and merging missing data.
+    * @param cellKeys - Exact corridor cells required by this routing attempt.
+    * @param signal - Abort signal shared by cell requests.
+-   * @param timings - Optional benchmark accumulator for cache and build phases.
+    * @returns Cached or newly built immutable routing graph.
+    * @throws {RoutingAreaTooLargeError} When the set exceeds the per-operation cell limit.
+    * @throws {Error} When cell loading or graph construction fails.
+@@ -338,29 +251,19 @@ export class DynamicRoutingNetworkEngine {
+   private async getNetwork(
+     cellKeys: Set<CellKey>,
+     signal: AbortSignal,
+-    timings?: DynamicRoutingPhaseTimings,
+   ): Promise<RoutingNetwork> {
+     if (cellKeys.size > MAX_CELLS_PER_OPERATION) {
+       throw new RoutingAreaTooLargeError();
+     }
+ 
+     // Sorting makes the cache key independent of insertion order.
+-    const cacheLookupStartedAt = timings ? performance.now() : 0;
+     const cacheKey = [...cellKeys].sort().join('|');
+     const cachedNetworkIndex = this.networkCache.findIndex(
+       (entry) => entry.key === cacheKey,
+     );
+     const cachedNetwork = this.networkCache[cachedNetworkIndex];
+ 
+-    if (timings) {
+-      timings.graphCacheLookupDurationMs +=
+-        performance.now() - cacheLookupStartedAt;
+-    }
+-
+     if (cachedNetwork) {
+-      if (timings) {
+-        timings.graphCacheHits += 1;
+-      }
+ 
+       // Promote a reused graph so the bounded cache evicts the least-recently
+       // used corridor rather than the oldest corridor regardless of access.
+@@ -372,23 +275,12 @@ export class DynamicRoutingNetworkEngine {
+       return cachedNetwork.network;
+     }
+ 
+-    if (timings) {
+-      timings.graphCacheMisses += 1;
+-    }
+-
+-    const rawCellAccessStartedAt = timings ? performance.now() : 0;
+     const cells = await mapWithConcurrency(
+       [...cellKeys],
+       CELL_LOAD_CONCURRENCY,
+       (key) => this.loadCell(key, signal),
+     );
+ 
+-    if (timings) {
+-      timings.rawCellAccessDurationMs +=
+-        performance.now() - rawCellAccessStartedAt;
+-    }
+-
+-    const featureMergeStartedAt = timings ? performance.now() : 0;
+     const data: SwissTlmNetworkData = {
+       roads: mergeFeatures(cells, (cellData) => cellData.roads),
+       hikingTrails: mergeFeatures(
+@@ -397,23 +289,7 @@ export class DynamicRoutingNetworkEngine {
+       ),
+     };
+ 
+-    if (timings) {
+-      timings.featureMergeDurationMs +=
+-        performance.now() - featureMergeStartedAt;
+-    }
+-
+-    const graphBuildStartedAt = timings ? performance.now() : 0;
+-    let network: RoutingNetwork;
+-
+-    try {
+-      network = RoutingNetwork.fromSwissTlm(combinedExtent(cellKeys), data);
+-    } finally {
+-      // Empty coverage throws from graph construction but still represents CPU
+-      // work that matters for border and disconnected benchmark scenarios.
+-      if (timings) {
+-        timings.graphBuildDurationMs += performance.now() - graphBuildStartedAt;
+-      }
+-    }
++    const network = RoutingNetwork.fromSwissTlm(combinedExtent(cellKeys), data);
+ 
+     // Most-recently-built graphs stay at the front. This small cache avoids
+     // rebuilding common local corridors.
+diff --git a/src/routing/dynamicRoutingNetwork.ts b/src/routing/dynamicRoutingNetwork.ts
+index 58f25ecdd7209ac073785a8962e508221e83efce..37d0ca2e4874258faeb2e9bb1d952f179e99fd0b 100644
+--- a/src/routing/dynamicRoutingNetwork.ts
++++ b/src/routing/dynamicRoutingNetwork.ts
+@@ -2,15 +2,12 @@
+  * Business context: exposes dynamic swissTLM3D routing to the editable-route
+  * workflow while keeping all expensive work in a dedicated Web Worker. This
+  * facade maps AbortSignals and typed method calls to structured-clone messages;
+- * the UI receives only snapped coordinates, route geometry, and diagnostics.
++ * the UI receives only snapped coordinates and route geometry.
+  */
+ import type { Coordinate } from 'ol/coordinate.js';
+ import type { RoutedNetworkPath } from './networkRouter';
+ import {
+   RoutingAreaTooLargeError,
+-  type DiagnosedDynamicRoutingResult,
+-  type DynamicRoutingCacheStats,
+-  type DynamicRoutingPhaseTimings,
+   type RoutingWorkerRequest,
+   type RoutingWorkerResponse,
+   type SerializedRoutingWorkerError,
+@@ -18,11 +15,6 @@ import {
+ 
+ export { createLocalCellKeys } from './routingGrid';
+ export { RoutingAreaTooLargeError } from './dynamicRoutingProtocol';
+-export type {
+-  DiagnosedDynamicRoutingResult,
+-  DynamicRoutingCacheStats,
+-  DynamicRoutingPhaseTimings,
+-} from './dynamicRoutingProtocol';
+ 
+ /** Promise callbacks retained until one worker response arrives. */
+ interface PendingWorkerRequest {
+@@ -75,24 +67,6 @@ export class DynamicRoutingNetworkLoader {
+   private readonly pendingRequests = new Map<number, PendingWorkerRequest>();
+   private disposed = false;
+ 
+-  /** Clears only derived graphs while preserving worker-owned raw cells. */
+-  async clearNetworkCache(): Promise<void> {
+-    await this.sendRequest<void>({
+-      type: 'request',
+-      requestId: 0,
+-      operation: 'clearNetworkCache',
+-    });
+-  }
+-
+-  /** Reads current worker cache sizes for the diagnostic benchmark. */
+-  getCacheStats(): Promise<DynamicRoutingCacheStats> {
+-    return this.sendRequest<DynamicRoutingCacheStats>({
+-      type: 'request',
+-      requestId: 0,
+-      operation: 'getCacheStats',
+-    });
+-  }
+-
+   /**
+    * Loads local cells and snaps one first waypoint inside the worker.
+    * @param coordinate - User-selected coordinate in EPSG:2056.
+@@ -138,30 +112,6 @@ export class DynamicRoutingNetworkLoader {
+     );
+   }
+ 
+-  /**
+-   * Routes one section and returns worker-side CPU phase timings.
+-   * @param startCoordinate - Existing route endpoint in EPSG:2056.
+-   * @param endCoordinate - Synthetic benchmark destination in EPSG:2056.
+-   * @param signal - Benchmark cancellation signal.
+-   * @returns Routed path and diagnostic timings collected inside the worker.
+-   */
+-  routeWithDiagnostics(
+-    startCoordinate: Coordinate,
+-    endCoordinate: Coordinate,
+-    signal: AbortSignal,
+-  ): Promise<DiagnosedDynamicRoutingResult> {
+-    return this.sendRequest<DiagnosedDynamicRoutingResult>(
+-      {
+-        type: 'request',
+-        requestId: 0,
+-        operation: 'routeWithDiagnostics',
+-        startCoordinate,
+-        endCoordinate,
+-      },
+-      signal,
+-    );
+-  }
+-
+   /** Terminates the worker and rejects requests that can no longer complete. */
+   dispose(): void {
+     if (this.disposed) {
+diff --git a/src/routing/dynamicRoutingNetworkClient.test.ts b/src/routing/dynamicRoutingNetworkClient.test.ts
+index c7a6f6c597184c73f1e2962b4a35a1852c69d6b6..694797f303fae5d94a78f495313c01f49a1c8d3c 100644
+--- a/src/routing/dynamicRoutingNetworkClient.test.ts
++++ b/src/routing/dynamicRoutingNetworkClient.test.ts
+@@ -185,7 +185,10 @@ describe('DynamicRoutingNetworkLoader worker facade', () => {
+ 
+   it('terminates the worker and rejects pending work on disposal', async () => {
+     const loader = new DynamicRoutingNetworkLoader();
+-    const pending = loader.getCacheStats();
++    const pending = loader.snap(
++      [2_500_000, 1_100_000],
++      new AbortController().signal,
++    );
+     const worker = currentWorker();
+ 
+     loader.dispose();
+diff --git a/src/routing/dynamicRoutingProtocol.ts b/src/routing/dynamicRoutingProtocol.ts
+index 3afaa8c48275bc31e9c7ae60c18715967e577192..af3424c08698a03abe1e7c263b21cea8eb3e50d3 100644
+--- a/src/routing/dynamicRoutingProtocol.ts
++++ b/src/routing/dynamicRoutingProtocol.ts
+@@ -4,48 +4,6 @@
+  * boundary; swissTLM3D cells, graphs, and spatial indexes remain worker-owned.
+  */
+ import type { Coordinate } from 'ol/coordinate.js';
+-import type {
+-  RoutedNetworkPath,
+-  RoutingNetworkPhaseTimings,
+-} from './networkRouter';
+-
+-/** Session cache sizes exposed for diagnostics and the local benchmark. */
+-export interface DynamicRoutingCacheStats {
+-  /** Raw swissTLM3D cells retained for the current page session. */
+-  loadedCells: number;
+-  /** Cell requests currently in flight. */
+-  pendingCells: number;
+-  /** Exact corridor graphs retained by the small LRU cache. */
+-  cachedNetworks: number;
+-}
+-
+-/** Detailed local timings collected only by the routing benchmark. */
+-export interface DynamicRoutingPhaseTimings extends RoutingNetworkPhaseTimings {
+-  /** Time spent calculating the exact graph-cache key and searching the LRU. */
+-  graphCacheLookupDurationMs: number;
+-  /** Time spent resolving already-cached raw cells into the requested corridor. */
+-  rawCellAccessDurationMs: number;
+-  /** Time spent deduplicating and merging road and hiking features from cells. */
+-  featureMergeDurationMs: number;
+-  /** Time spent constructing RoutingNetwork nodes, edges, and spatial indexes. */
+-  graphBuildDurationMs: number;
+-  /** Number of exact corridor graphs reused from the session LRU. */
+-  graphCacheHits: number;
+-  /** Number of exact corridor graphs that had to be constructed. */
+-  graphCacheMisses: number;
+-  /** Number of narrow or retry corridor route attempts. */
+-  routeAttempts: number;
+-  /** Whether the wider fallback corridor was required. */
+-  retryUsed: boolean;
+-}
+-
+-/** Routed result together with phase timings for one benchmarked section. */
+-export interface DiagnosedDynamicRoutingResult {
+-  /** Routed geometry, or `null` when both corridors fail. */
+-  path: RoutedNetworkPath | null;
+-  /** Aggregated timings across the initial and optional retry corridor. */
+-  timings: DynamicRoutingPhaseTimings;
+-}
+ 
+ /** Signals that a route corridor exceeded the bounded browser safety limit. */
+ export class RoutingAreaTooLargeError extends Error {
+@@ -83,40 +41,6 @@ export interface RouteWorkerRequest {
+   endCoordinate: Coordinate;
+ }
+ 
+-/** Benchmark-only route request that returns worker-side phase timings. */
+-export interface DiagnosedRouteWorkerRequest {
+-  /** Discriminator for an operation that expects a response. */
+-  type: 'request';
+-  /** Correlation identifier generated by the benchmark facade. */
+-  requestId: number;
+-  /** Diagnostic operation excluded from the normal application path. */
+-  operation: 'routeWithDiagnostics';
+-  /** Existing route endpoint in EPSG:2056. */
+-  startCoordinate: Coordinate;
+-  /** Synthetic benchmark destination in EPSG:2056. */
+-  endCoordinate: Coordinate;
+-}
+-
+-/** Request that clears only derived graphs while retaining downloaded cells. */
+-export interface ClearNetworkCacheWorkerRequest {
+-  /** Discriminator for an operation that expects a response. */
+-  type: 'request';
+-  /** Correlation identifier generated by the benchmark facade. */
+-  requestId: number;
+-  /** Diagnostic operation that preserves the expensive raw-cell cache. */
+-  operation: 'clearNetworkCache';
+-}
+-
+-/** Request that reads worker-owned cache sizes. */
+-export interface CacheStatsWorkerRequest {
+-  /** Discriminator for an operation that expects a response. */
+-  type: 'request';
+-  /** Correlation identifier generated by the benchmark facade. */
+-  requestId: number;
+-  /** Diagnostic operation that returns immutable cache counts. */
+-  operation: 'getCacheStats';
+-}
+-
+ /** Cancels one outstanding operation. */
+ export interface CancelRoutingWorkerRequest {
+   /** Discriminator handled without creating another worker operation. */
+@@ -129,9 +53,6 @@ export interface CancelRoutingWorkerRequest {
+ export type RoutingWorkerRequest =
+   | SnapWorkerRequest
+   | RouteWorkerRequest
+-  | DiagnosedRouteWorkerRequest
+-  | ClearNetworkCacheWorkerRequest
+-  | CacheStatsWorkerRequest
+   | CancelRoutingWorkerRequest;
+ 
+ /** Serialized error safe to pass through structured clone. */
+diff --git a/src/routing/dynamicRoutingWorker.ts b/src/routing/dynamicRoutingWorker.ts
+index 9bc392b884b130c1fb360950f333d0c9a6750b56..aa5c794063e97d93b728a91e610ef582a8d5cdb3 100644
+--- a/src/routing/dynamicRoutingWorker.ts
++++ b/src/routing/dynamicRoutingWorker.ts
+@@ -2,8 +2,8 @@
+ /**
+  * Business context: hosts the complete dynamic swissTLM3D routing pipeline in a
+  * dedicated browser worker. Network requests, cell caches, graph construction,
+- * snapping, and A* stay off the map's main thread; only plain route results and
+- * diagnostics cross back to React.
++ * snapping, and A* stay off the map's main thread; only plain route results
++ * cross back to React.
+  */
+ import { DynamicRoutingNetworkEngine } from './dynamicRoutingEngine';
+ import type {
+@@ -84,23 +84,6 @@ workerScope.addEventListener(
+               ),
+             );
+             break;
+-          case 'routeWithDiagnostics':
+-            postSuccess(
+-              request.requestId,
+-              await engine.routeWithDiagnostics(
+-                request.startCoordinate,
+-                request.endCoordinate,
+-                controller.signal,
+-              ),
+-            );
+-            break;
+-          case 'clearNetworkCache':
+-            engine.clearNetworkCache();
+-            postSuccess(request.requestId, undefined);
+-            break;
+-          case 'getCacheStats':
+-            postSuccess(request.requestId, engine.getCacheStats());
+-            break;
+         }
+       } catch (error) {
+         postFailure(request.requestId, error);
+diff --git a/src/routing/networkRouter.test.ts b/src/routing/networkRouter.test.ts
+index be1fc60932a0fcef2760e763cea37bf27e45c607..27dbe328a2c7186f26450b2e09c4892550b3de37 100644
+--- a/src/routing/networkRouter.test.ts
++++ b/src/routing/networkRouter.test.ts
+@@ -1,13 +1,9 @@
+ /**
+- * Business context: protects optional benchmark timing diagnostics without
+- * changing normal swissTLM3D routing results. The application does not request
+- * these timings, while the local benchmark relies on every phase being present.
++ * Business context: protects the plain-data route contract returned across the
++ * dedicated Worker boundary without contacting live GeoAdmin services.
+  */
+ import { describe, expect, it } from 'vitest';
+-import {
+-  RoutingNetwork,
+-  type RoutingNetworkPhaseTimings,
+-} from './networkRouter';
++import { RoutingNetwork } from './networkRouter';
+ import type { SwissTlmNetworkData } from './swissTlmApi';
+ 
+ /** Creates a small connected path whose endpoints require graph traversal. */
+@@ -32,35 +28,11 @@ function createTestNetwork(): RoutingNetwork {
+   return RoutingNetwork.fromSwissTlm([-100, -100, 300, 100], data);
+ }
+ 
+-/** Returns a fresh accumulator matching the benchmark contract. */
+-function createTimings(): RoutingNetworkPhaseTimings {
+-  return {
+-    startSnapDurationMs: 0,
+-    endSnapDurationMs: 0,
+-    aStarDurationMs: 0,
+-    routeReconstructionDurationMs: 0,
+-  };
+-}
+-
+-describe('RoutingNetwork benchmark diagnostics', () => {
+-
++describe('RoutingNetwork route result', () => {
+   it('returns a structured-clone-safe plain-data route result', () => {
+     const route = createTestNetwork().route([10, 2], [190, -2]);
+ 
+     expect(route).not.toBeNull();
+     expect(structuredClone(route)).toEqual(route);
+   });
+-
+-  it('returns the same route while filling non-negative phase timings', () => {
+-    const network = createTestNetwork();
+-    const normalRoute = network.route([10, 2], [190, -2]);
+-    const timings = createTimings();
+-    const diagnosedRoute = network.route([10, 2], [190, -2], timings);
+-
+-    expect(diagnosedRoute).toEqual(normalRoute);
+-    expect(diagnosedRoute?.coordinates.length).toBeGreaterThanOrEqual(3);
+-    expect(Object.values(timings).every((duration) => duration >= 0)).toBe(
+-      true,
+-    );
+-  });
+ });
+diff --git a/src/routing/networkRouter.ts b/src/routing/networkRouter.ts
+index 306b9e8c886d1ff773df0296f34ad101cf0ec8ca..79d833960f53e6acea2dd6a98600053b7b84c646 100644
+--- a/src/routing/networkRouter.ts
++++ b/src/routing/networkRouter.ts
+@@ -140,18 +140,6 @@ export interface RoutedNetworkPath {
+   snapDistanceEnd: number;
+ }
+ 
+-/** CPU timings collected only when the local benchmark requests diagnostics. */
+-export interface RoutingNetworkPhaseTimings {
+-  /** Time spent projecting the requested start onto the indexed network. */
+-  startSnapDurationMs: number;
+-  /** Time spent projecting the requested destination onto the indexed network. */
+-  endSnapDurationMs: number;
+-  /** Time spent preparing and executing the A* search. */
+-  aStarDurationMs: number;
+-  /** Time spent rebuilding the returned coordinate sequence after the search. */
+-  routeReconstructionDurationMs: number;
+-}
+-
+ /** Diagnostics describing the graph created from one swissTLM3D data set. */
+ export interface RoutingNetworkStats {
+   /** Number of source road features received from GeoAdmin. */
+@@ -813,34 +801,20 @@ export class RoutingNetwork {
+    * costs are included so the search remains accurate between graph nodes.
+    * @param startCoordinate - Requested route start in EPSG:2056.
+    * @param endCoordinate - Requested route destination in EPSG:2056.
+-   * @param timings - Optional benchmark accumulator; normal application calls omit it.
+    * @returns Routed geometry and snap distances, or `null` when snapping or connectivity fails.
+    */
+   route(
+     startCoordinate: Coordinate,
+     endCoordinate: Coordinate,
+-    timings?: RoutingNetworkPhaseTimings,
+   ): RoutedNetworkPath | null {
+-    const startSnapStartedAt = timings ? performance.now() : 0;
+     const startSnap = this.findSnap(startCoordinate);
+ 
+-    if (timings) {
+-      timings.startSnapDurationMs += performance.now() - startSnapStartedAt;
+-    }
+-
+-    const endSnapStartedAt = timings ? performance.now() : 0;
+     const endSnap = this.findSnap(endCoordinate);
+ 
+-    if (timings) {
+-      timings.endSnapDurationMs += performance.now() - endSnapStartedAt;
+-    }
+-
+     if (!startSnap || !endSnap) {
+       return null;
+     }
+ 
+-    const aStarStartedAt = timings ? performance.now() : 0;
+-
+     // A same-segment route is both a valid result and an upper bound for pruning A*.
+     const directPath = this.routeOnSameSegment(startSnap, endSnap);
+ 
+@@ -947,12 +921,6 @@ export class RoutingNetwork {
+       }
+     }
+ 
+-    if (timings) {
+-      timings.aStarDurationMs += performance.now() - aStarStartedAt;
+-    }
+-
+-    const reconstructionStartedAt = timings ? performance.now() : 0;
+-
+     if (directPath && bestGoalNodeId === null) {
+       const result = {
+         coordinates: directPath.coordinates,
+@@ -960,20 +928,10 @@ export class RoutingNetwork {
+         snapDistanceEnd: endSnap.distance,
+       };
+ 
+-      if (timings) {
+-        timings.routeReconstructionDurationMs +=
+-          performance.now() - reconstructionStartedAt;
+-      }
+-
+       return result;
+     }
+ 
+     if (bestGoalNodeId === null) {
+-      if (timings) {
+-        timings.routeReconstructionDurationMs +=
+-          performance.now() - reconstructionStartedAt;
+-      }
+-
+       return null;
+     }
+ 
+@@ -1003,11 +961,6 @@ export class RoutingNetwork {
+       snapDistanceEnd: endSnap.distance,
+     };
+ 
+-    if (timings) {
+-      timings.routeReconstructionDurationMs +=
+-        performance.now() - reconstructionStartedAt;
+-    }
+-
+     return result;
+   }
+ 
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 5a4337aa845a4067a3bc115e6d75bf8529a2c300..b14630a565f1bf3b5c8c52c580b54aeffac94695 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -8,7 +8,7 @@ import { defineConfig } from 'vitest/config';
+ export default defineConfig({
+   test: {
+     environment: 'jsdom',
+-    include: ['src/**/*.test.ts', 'benchmarks/routing/src/**/*.test.ts'],
++    include: ['src/**/*.test.ts'],
+     clearMocks: true,
+     restoreMocks: true,
+   },
