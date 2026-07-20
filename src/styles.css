@@ -984,6 +984,10 @@ select {
   text-align: right;
 }
 
+.route-statistics-direction-icon {
+  display: none;
+}
+
 .route-profile-toggle {
   display: grid;
   width: 3.5rem;
@@ -1370,19 +1374,16 @@ select {
     border: 0;
   }
 
-  .route-statistics-item:nth-child(2)::before,
-  .route-statistics-item:nth-child(3)::before {
-    color: #53606b;
-    font-size: 0.95rem;
-    line-height: 1;
-  }
-
-  .route-statistics-item:nth-child(2)::before {
-    content: '↑';
-  }
-
-  .route-statistics-item:nth-child(3)::before {
-    content: '↓';
+  .route-statistics-direction-icon {
+    display: block;
+    width: 0.75rem;
+    height: 0.9rem;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: #43515d;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.4;
   }
 
   .route-statistics-item strong {

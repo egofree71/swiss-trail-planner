@@ -153,6 +153,15 @@ export default function RouteStatistics({
 
         <div className="route-statistics-item">
           <span className="route-statistics-label">{t('statistics.ascent')}</span>
+          <svg
+            className="route-statistics-direction-icon"
+            viewBox="0 0 12 14"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M6 12V2" />
+            <path d="m2.5 5.5 3.5-3.5 3.5 3.5" />
+          </svg>
           <strong>
             {hasElevation
               ? formatElevation(ascentMeters, integerFormat)
@@ -162,6 +171,15 @@ export default function RouteStatistics({
 
         <div className="route-statistics-item">
           <span className="route-statistics-label">{t('statistics.descent')}</span>
+          <svg
+            className="route-statistics-direction-icon"
+            viewBox="0 0 12 14"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M6 2v10" />
+            <path d="m2.5 8.5 3.5 3.5 3.5-3.5" />
+          </svg>
           <strong>
             {hasElevation
               ? formatElevation(descentMeters, integerFormat)
