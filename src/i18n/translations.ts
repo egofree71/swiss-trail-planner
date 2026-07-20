@@ -73,6 +73,8 @@ const frenchTranslations = {
     'Ce segment est trop long pour le chargement dynamique actuel. Ajoutez un point intermédiaire.',
   'route.networkLoadError':
     'Le réseau swissTLM3D de cette zone n’a pas pu être chargé.',
+  'route.hikingEnrichmentUnavailable':
+    'Les informations sur les chemins de randonnée sont indisponibles. Pour cette session, le routage utilise uniquement le réseau de routes et de chemins swissTLM3D.',
 
   'geolocation.show': 'Afficher ma position',
   'geolocation.recenter': 'Recentrer sur ma position',
@@ -221,6 +223,8 @@ const germanTranslations: Record<TranslationKey, string> = {
     'Dieses Segment ist für das aktuelle dynamische Laden zu lang. Fügen Sie einen Zwischenpunkt hinzu.',
   'route.networkLoadError':
     'Das swissTLM3D-Netz in diesem Gebiet konnte nicht geladen werden.',
+  'route.hikingEnrichmentUnavailable':
+    'Die Wanderweg-Informationen sind nicht verfügbar. Für diese Sitzung verwendet die Routenberechnung nur das swissTLM3D-Strassen- und Wegenetz.',
 
   'geolocation.show': 'Meinen Standort anzeigen',
   'geolocation.recenter': 'Auf meinen Standort zentrieren',
@@ -368,6 +372,8 @@ const italianTranslations: Record<TranslationKey, string> = {
     'Questo segmento è troppo lungo per il caricamento dinamico attuale. Aggiungi un punto intermedio.',
   'route.networkLoadError':
     'Non è stato possibile caricare la rete swissTLM3D di questa zona.',
+  'route.hikingEnrichmentUnavailable':
+    'Le informazioni sui sentieri escursionistici non sono disponibili. Per questa sessione, il calcolo del percorso utilizza soltanto la rete di strade e sentieri swissTLM3D.',
 
   'geolocation.show': 'Mostra la mia posizione',
   'geolocation.recenter': 'Ricentra sulla mia posizione',
@@ -515,6 +521,8 @@ const englishTranslations: Record<TranslationKey, string> = {
     'This segment is too long for the current dynamic loading strategy. Add an intermediate point.',
   'route.networkLoadError':
     'The swissTLM3D network for this area could not be loaded.',
+  'route.hikingEnrichmentUnavailable':
+    'Hiking-trail information is unavailable. For this session, routing uses only the swissTLM3D road and path network.',
 
   'geolocation.show': 'Show my location',
   'geolocation.recenter': 'Recenter on my location',

@@ -37,7 +37,10 @@ import { DynamicRoutingNetworkEngine } from './dynamicRoutingEngine';
 import { RoutingAreaTooLargeError } from './dynamicRoutingProtocol';
 import { createCorridorCellKeys } from './routingGrid';
 import type { RoutedNetworkPath } from './networkRouter';
-import type { SwissTlmNetworkData } from './swissTlmApi';
+import type {
+  NetworkLoadOptions,
+  SwissTlmNetworkData,
+} from './swissTlmApi';
 
 const EMPTY_NETWORK_DATA: SwissTlmNetworkData = {
   roads: [],
@@ -138,6 +141,104 @@ describe('DynamicRoutingNetworkEngine', () => {
       coordinate,
       coordinate,
     ]);
+  });
+
+  it('starts in roads-only mode when local fallback testing disables enrichment', async () => {
+    const enrichmentChoices: boolean[] = [];
+    const onHikingEnrichmentUnavailable = vi.fn();
+
+    moduleMocks.fetchSwissTlmNetworkData.mockImplementation(
+      (
+        _extent: unknown,
+        _signal: AbortSignal,
+        options: NetworkLoadOptions,
+      ) => {
+        enrichmentChoices.push(
+          options.shouldRequestHikingEnrichment?.() ?? true,
+        );
+        return Promise.resolve(EMPTY_NETWORK_DATA);
+      },
+    );
+
+    const engine = new DynamicRoutingNetworkEngine({
+      initialHikingEnrichmentEnabled: false,
+      onHikingEnrichmentUnavailable,
+    });
+
+    // The notice must not be emitted during Worker construction, when the
+    // main-thread subscriber may not yet be ready to receive it.
+    expect(onHikingEnrichmentUnavailable).not.toHaveBeenCalled();
+
+    await engine.snap(
+      coordinateInColumn(0),
+      new AbortController().signal,
+    );
+
+    expect(enrichmentChoices).not.toHaveLength(0);
+    expect(enrichmentChoices).toEqual(
+      Array(enrichmentChoices.length).fill(false),
+    );
+    expect(onHikingEnrichmentUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports local roads-only mode when route is the first Worker operation', async () => {
+    const onHikingEnrichmentUnavailable = vi.fn();
+    const engine = new DynamicRoutingNetworkEngine({
+      initialHikingEnrichmentEnabled: false,
+      onHikingEnrichmentUnavailable,
+    });
+
+    expect(onHikingEnrichmentUnavailable).not.toHaveBeenCalled();
+
+    await engine.route(
+      coordinateInColumn(0),
+      coordinateInColumn(1),
+      new AbortController().signal,
+    );
+
+    expect(onHikingEnrichmentUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops requesting hiking enrichment after the first session failure', async () => {
+    const enrichmentChoices: boolean[] = [];
+    const onHikingEnrichmentUnavailable = vi.fn();
+
+    moduleMocks.fetchSwissTlmNetworkData.mockImplementation(
+      (
+        _extent: unknown,
+        _signal: AbortSignal,
+        options: NetworkLoadOptions,
+      ) => {
+        enrichmentChoices.push(
+          options.shouldRequestHikingEnrichment?.() ?? true,
+        );
+
+        if (enrichmentChoices.length === 1) {
+          options.onHikingEnrichmentUnavailable?.();
+        }
+
+        return Promise.resolve(EMPTY_NETWORK_DATA);
+      },
+    );
+
+    const engine = new DynamicRoutingNetworkEngine({
+      onHikingEnrichmentUnavailable,
+    });
+
+    await engine.snap(
+      coordinateInColumn(0),
+      new AbortController().signal,
+    );
+    await engine.snap(
+      coordinateInColumn(10),
+      new AbortController().signal,
+    );
+
+    expect(enrichmentChoices[0]).toBe(true);
+    expect(enrichmentChoices.slice(1)).toEqual(
+      Array(enrichmentChoices.length - 1).fill(false),
+    );
+    expect(onHikingEnrichmentUnavailable).toHaveBeenCalledTimes(1);
   });
 
   it('cleans an aborted pending cell so the same area can be retried', async () => {

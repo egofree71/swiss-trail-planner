@@ -22,6 +22,13 @@ The long-term functional target is similar to BRouter-Web, with one central
 difference: the map, topographic network, and future routing graph should rely
 primarily on official swisstopo data.
 
+The public service is deliberately designed to remain free to use without an
+account. Browser-side route calculation and static hosting avoid a
+project-owned application server, user database, or recurring routing-backend
+cost. This is a product constraint as well as a deployment choice: a backend or
+preprocessed national graph should be introduced only when measured usage or
+routing quality justifies its operational cost.
+
 The product is intentionally focused:
 
 - the map occupies almost the entire screen;
@@ -55,9 +62,9 @@ It can:
 - drag an existing route section to insert a new waypoint and reshape that section using the current snap mode;
 - show contextual hover guidance for waypoint and route-section editing;
 - create or rebuild straight segments when snapping is disabled or a snapped section cannot be resolved;
-- load swissTLM3D road and hiking geometries dynamically around selected waypoints;
+- load required swissTLM3D road geometries and optional hiking geometries dynamically around selected waypoints;
 - build a regional walkable graph and calculate snapped sections with A* in a dedicated Web Worker;
-- prefer official hiking-trail sections through routing costs;
+- prefer official hiking-trail sections through routing costs when the optional enrichment is available;
 - undo and redo complete route edits with their exact stored geometry;
 - reverse the complete route without recalculating sections;
 - mark the displayed start and finish with compact A and B symbols that swap on reversal;
@@ -192,8 +199,9 @@ wider corridor retry, straight-fallback signalling, completed and in-flight cell
 reuse, cleanup and retry after an aborted cell request, true least-recently-used
 eviction, size limits, and provider-error propagation without
 live GeoAdmin requests. Focused swissTLM3D API tests additionally protect request
-timeouts, one-shot transient retries, Retry-After handling, and the distinction
-between timeout errors and intentional cancellation. JSDOM provides the
+timeouts, one-shot transient retries, Retry-After handling, the road-only
+fallback after a rejected combined layer request, and the distinction between
+timeout errors and intentional cancellation. JSDOM provides the
 browser XML primitives needed by GPX import and export tests; provider calls are
 mocked so the suite remains deterministic and does not depend on external
 services.
@@ -206,6 +214,19 @@ opening a map. OpenLayers canvas rendering and full pointer workflows remain
 validated manually until a browser-level test offers clear value over their
 maintenance cost, while the low-level touch interaction contract is exercised
 directly with synthetic OpenLayers pointer events.
+
+### 3.6 Free, no-account static operation
+
+The deployed application contains no project-owned backend, authentication, or
+remote route storage. GitHub Pages serves the compiled application, while the
+browser contacts external official providers directly and performs routing in a
+Web Worker. This keeps the application available without registration and
+limits recurring project costs.
+
+This constraint does not forbid a future static routing-data store or backend,
+but either change requires measured evidence that the current bounded provider
+requests or browser computation are no longer adequate. Provider limitations
+must degrade optional enrichment before they disable the core route editor.
 
 ## 4. Technical overview
 
@@ -272,10 +293,12 @@ Browser
    ├── Main-thread dynamic-routing facade
    │      ├── typed request/response correlation
    │      ├── AbortSignal-to-worker cancellation bridge
-   │      └── route results and serialized error reconstruction
+   │      ├── route results and serialized error reconstruction
+   │      └── non-blocking session notices for provider degradation
    │
    ├── Dedicated routing Web Worker
    │      ├── GeoAdmin identify requests for regular swissTLM3D cells
+   │      ├── session-wide switch from combined layers to roads only
    │      ├── worker-owned raw-cell and graph caches
    │      ├── corridor-based graph construction
    │      ├── spatial indexes for trail matching and waypoint snapping
@@ -498,20 +521,66 @@ visible hiking closure and then a visible military danger zone. Both official
 HTML popups pass through the shared sanitizer; the danger-zone module also
 removes PDF download links.
 
-For dynamic routing, `src/routing/swissTlmApi.ts` calls the official GeoAdmin
-`MapServer/identify` endpoint for two technical layers:
+For dynamic routing, `src/routing/swissTlmApi.ts` calls the official,
+documented GeoAdmin `MapServer/identify` REST endpoint for two official
+technical layers:
 
-- `ch.swisstopo.swisstlm3d-strassen` for roads and paths;
-- `ch.swisstopo.swisstlm3d-wanderwege` for official hiking routes.
+- `ch.swisstopo.swisstlm3d-strassen` supplies the required roads and paths that
+  become the routable graph;
+- `ch.swisstopo.swisstlm3d-wanderwege` supplies optional hiking geometry used
+  only to lower the routing cost of matching road segments.
+
+The application does not download or preprocess the official national
+swissTLM3D packages. That choice preserves a frontend-only, no-account service
+and avoids hosting a national routing dataset, but it also makes interactive
+routing dependent on bounded GeoAdmin requests. The identify endpoint is
+documented, while the GeoAdmin layer table advertises feature tooltips for the
+road layer and not for the hiking layer. The hiking dataset and portrayal are
+official; retrieving its vector geometry through this endpoint is nevertheless
+treated as non-guaranteed optional enrichment.
+
+During normal operation one request asks for both layers so hiking enrichment
+does not double provider traffic. If GeoAdmin rejects that combined layer
+request with a non-retryable HTTP response, the same tile is requested again
+with the road layer alone. Network failures, timeouts, rate limiting, and
+transient service responses keep their normal bounded retry and are not mistaken
+for a layer-specific failure. A missing hiking response therefore reduces route
+preference quality but does not remove the road-and-path graph.
+
+The first layer-specific rejection also disables new hiking-layer requests for
+the remaining lifetime of the routing Worker. Concurrent cell loads share the
+same engine-owned availability flag, so later subdivisions, cells, waypoints,
+and route edits request roads alone instead of repeating a known unsupported
+combination. Hiking data already cached from successful earlier cells remains
+valid enrichment. The Worker emits one structured session notice when this
+transition occurs; the main-thread facade forwards it to `useEditableRoute`,
+which displays one temporary translated information message. The facade retains
+received session notices and replays them to a later subscriber. Worker creation
+and notice subscription share the same `useEditableRoute` effect lifetime, so
+React Strict Mode's deliberate development setup-cleanup-setup cycle recreates
+both together instead of leaving the replacement Worker without a listener. The
+notice does not reject or delay the route operation that triggered the fallback.
+
+`src/routing/routingConfig.ts` also provides a deliberately narrow manual test
+switch. When `useHikingEnrichment` is `false` and the Worker hostname is
+`localhost`, `127.0.0.1`, or an IPv6 loopback address, the engine starts directly
+in roads-only mode and emits the same translated notice when its first routing
+operation starts. Delaying the notice until an operation arrives ensures the
+main-thread subscriber is registered after lazy Worker creation. The switch is ignored
+on every other hostname, even if the source value is accidentally left disabled,
+so it cannot alter the GitHub Pages build. It affects only vector enrichment used
+by route costs; the rendered WMTS hiking overlay remains independent.
 
 The dynamic loader requests geometries directly in `EPSG:2056` and uses regular
-2.4 km routing cells whose dimensions are now true LV95 metres. Each cell is
-internally
-split into smaller identify requests, and a request that reaches the API's
-200-feature limit is recursively subdivided rather than silently accepting a
-truncated result. Empty cells are valid near borders, lakes, and areas outside
-swissTLM3D coverage. This remains a bounded on-demand experiment rather than a
-national bulk-data architecture.
+2.4 km routing cells whose dimensions are true LV95 metres. Each cell is
+internally split into smaller identify requests. A road response that reaches
+the API's 200-feature limit is recursively subdivided and remains a hard error
+if the smallest request is still capped because missing roads could break graph
+connectivity. Hiking responses are also subdivided while possible, but a capped
+hiking response at the minimum tile size is accepted as partial enrichment
+instead of blocking routing. Empty road cells are valid near borders, lakes, and
+areas outside swissTLM3D coverage. This remains a bounded on-demand experiment
+rather than a national bulk-data architecture.
 
 ## 7. Coordinate reference systems
 
@@ -650,10 +719,12 @@ route toolbar. `src/map/useRouteInteractions.ts` attaches the OpenLayers click
 and drag listeners only while editing is active, keeps transient previews out of
 React state, and translates pointer gestures into semantic edit requests. The
 root application receives only render state and actions from these hooks.
-`useEditableRoute` retains one `DynamicRoutingNetworkLoader` facade for its
-lifetime and disposes it on unmount. The facade creates one dedicated module
-Worker lazily, correlates typed requests, forwards cancellation, and reconstructs
-errors used by the UI. The Worker keeps its caches across additions and edits;
+`useEditableRoute` owns one active `DynamicRoutingNetworkLoader` facade through
+a React effect and disposes it with that effect. Keeping facade creation and
+notice subscription in the same lifecycle also supports React Strict Mode's
+development cleanup and recreation without losing session notices. The facade
+creates one dedicated module Worker lazily, correlates typed requests, forwards
+cancellation, and reconstructs errors used by the UI. The Worker keeps its caches across additions and edits;
 only plain coordinate arrays return to the main thread.
 
 The current route is an immutable `RouteState`. Its ordered `RouteStep` array
@@ -1077,6 +1148,8 @@ via-helvetica/
 │   │   ├── networkRouter.ts
 │   │   ├── routeEditing.test.ts
 │   │   ├── routeEditing.ts
+│   │   ├── routingConfig.test.ts
+│   │   ├── routingConfig.ts
 │   │   ├── routingConstants.ts
 │   │   ├── routingGrid.ts
 │   │   └── swissTlmApi.ts
@@ -1126,7 +1199,8 @@ moves, insertions, deletions, reversal, and loop changes, and publishes the
 busy/message state consumed by route controls. It exposes self-contained route
 actions; the application shell coordinates unrelated search and imported-GPX
 workflows before invoking them. A successful GPX import asks the hook to abort
-editing and clear history.
+editing and clear history. It also subscribes to non-blocking routing Worker
+notices and translates the one-time hiking-enrichment fallback message.
 
 ### `src/map/useImportedRoute.ts`
 
@@ -1518,13 +1592,27 @@ Keeps the historical editable-route import path stable by re-exporting the
 focused display and pointer-interaction APIs. It contains no rendering or
 interaction implementation.
 
+### `src/routing/routingConfig.ts`
+
+Defines the manually editable local-development choice for optional hiking
+routing enrichment. The resolver accepts only localhost and loopback hostnames;
+on every deployed hostname it returns `true` regardless of the local source
+value. Starting locally with enrichment disabled exercises the real roads-only
+Worker strategy and translated session notice on the first routing operation
+without issuing an artificial failed provider request. It does not control the separately rendered hiking
+map overlay.
+
 ### `src/routing/swissTlmApi.ts`
 
-Fetches bounded road and hiking geometries from the GeoAdmin identify endpoint
-directly in EPSG:2056. It owns request tiling, recursive subdivision at result
-limits, response normalization, attribute extraction, deduplication,
-cancellation, empty-cell handling, per-attempt timeouts, and the single bounded
-retry policy for transient provider failures.
+Fetches bounded road geometry and optional hiking enrichment from the GeoAdmin
+identify endpoint directly in EPSG:2056. It normally requests both layers
+together, retries a rejected layer combination with roads alone, and consults
+engine-supplied callbacks so every concurrent cell observes the session-wide
+roads-only switch. It keeps road-result truncation blocking while allowing
+incomplete hiking enrichment at the minimum tile size, and owns request tiling,
+response normalization, attribute extraction, deduplication, cancellation,
+empty-cell handling, per-attempt timeouts, and the single bounded retry policy
+for transient provider failures.
 
 ### `src/routing/networkRouter.ts`
 
@@ -1546,30 +1634,35 @@ straight geometry.
 Provides the main-thread `DynamicRoutingNetworkLoader` facade. It creates the
 module Worker lazily, correlates request identifiers, forwards `AbortSignal`
 cancellation, returns structured-clone-safe route results, recreates typed area-
-limit and abort errors, restarts after an unexpected Worker failure, and disposes
-pending work with the editable-route lifecycle. It owns no cells or graphs.
+limit and abort errors, retains and forwards non-blocking session notices to
+subscribers so late React effects still receive them, restarts after an unexpected
+Worker failure, and disposes pending work with the
+editable-route lifecycle. It owns no cells or graphs.
 
 ### `src/routing/dynamicRoutingWorker.ts`
 
 Is the dedicated module-Worker entry. It owns one session-scoped
 `DynamicRoutingNetworkEngine`, maps typed protocol operations to engine methods,
 creates per-request abort controllers, and serializes failures before posting
-responses. Synchronous graph construction can finish after a late cancellation,
+responses. It also posts one independent notice when the engine disables hiking
+enrichment. Synchronous graph construction can finish after a late cancellation,
 but it no longer blocks map rendering and its obsolete response is ignored.
 
 ### `src/routing/dynamicRoutingEngine.ts`
 
 Owns network loading, completed and in-flight raw-cell caches, exact-corridor
 `RoutingNetwork` LRU entries, narrow and widened corridor attempts, feature
-merging, graph construction, snapping, and A*. Cache hits are promoted before
+merging, graph construction, snapping, and A*. It owns the session-wide hiking-
+enrichment availability flag shared by every concurrent cell load and reports
+its one-way transition to roads-only loading once. Cache hits are promoted before
 bounded eviction so repeated local corridors remain available. Direct engine regression tests use mocked providers and graph
 doubles so this workflow is protected independently from Worker message
 transport.
 
 ### `src/routing/dynamicRoutingProtocol.ts`
 
-Defines the structured-clone request, cancellation, response, and error
-contracts shared by the Worker and main-thread facade. It also owns
+Defines the structured-clone request, cancellation, response, error, and
+non-blocking notice contracts shared by the Worker and main-thread facade. It also owns
 `RoutingAreaTooLargeError` so `instanceof` handling survives the Worker
 boundary through explicit reconstruction.
 
@@ -1658,7 +1751,8 @@ and zoom or canvas-size invalidation; `publicTransportStopsApi.test.ts` protects
 the separation between the requested geometry and real identify scale;
 `networkRouter.test.ts` protects the structured-clone-safe route result;
 `dynamicRoutingNetworkClient.test.ts` protects Worker request correlation, typed errors, cancellation, ignored late responses, and
-disposal.
+disposal; `routingConfig.test.ts` protects localhost recognition and guarantees
+that a disabled local test value cannot escape to a deployed hostname.
 
 ### Remaining root files
 
@@ -1736,95 +1830,104 @@ disposal.
     drag interaction while the contextual toolbar is visible. The snap control is
     immediately available before the first waypoint is placed.
 17. With snapping disabled, a map click stores a direct section immediately.
-18. The first snapped click derives and loads only the one to four cells that
-    intersect its 260-metre snap box while the route toggle shows a compact
-    spinner.
-19. Dense EPSG:2056 identify requests are subdivided when either layer reaches
-    200 results.
-20. Returned LV95 road vertices become graph nodes and edges; hiking geometry
-    marks
-    preferred edges through spatial matching.
-21. The first clicked point is snapped to the nearest walkable segment.
-22. Later clicks derive a corridor of cells between waypoints, load only missing
+18. The first snapped click creates the routing Worker. Before loading data, the
+    Worker resolves the local-only enrichment switch from its hostname; deployed
+    hosts always enable optional hiking requests, while a localhost test may
+    start directly in roads-only mode and emit the normal translated notice only
+    after this first routing operation has reached the Worker. It
+    then derives and loads only the one to four cells that intersect the
+    260-metre snap box while the route toggle shows a compact spinner.
+19. Each tile normally requests roads and hiking geometry together. If GeoAdmin
+    rejects that layer combination with a non-retryable HTTP response, the tile
+    is retried with the required road layer alone. The engine then disables new
+    hiking-layer requests for the rest of the Worker session and sends one
+    translated non-blocking notice through the main-thread facade.
+20. Dense EPSG:2056 identify requests are subdivided when either layer reaches
+    200 results. Road truncation remains blocking at the minimum tile size;
+    hiking truncation is accepted there as partial optional enrichment.
+21. Returned LV95 road vertices become graph nodes and edges; available hiking
+    geometry marks preferred edges through spatial matching.
+22. The first clicked point is snapped to the nearest walkable segment.
+23. Later clicks derive a corridor of cells between waypoints, load only missing
     cells, and run A* on the resulting graph.
-23. A disconnected or empty corridor is retried once with a wider cell radius.
-24. If no routable path remains, the current click becomes a free point or a
+24. A disconnected or empty corridor is retried once with a wider cell radius.
+25. If no routable path remains, the current click becomes a free point or a
     straight fallback section while snap mode stays enabled.
-25. Pressing an existing waypoint starts a potential move or deletion sequence
+26. Pressing an existing waypoint starts a potential move or deletion sequence
     and prevents map panning. A mouse or pen click deletes it, while a drag moves
     it. A finger tap also deletes it without first opening a preview; moving at
     least eight pixels instead starts waypoint dragging. A second finger cancels
     the preview so pinch zoom can take over.
-26. Pressing the route line outside a waypoint selects the closest stored normal
+27. Pressing the route line outside a waypoint selects the closest stored normal
     or closing section and starts a potential insertion sequence. Touch selection
     uses a narrow ten-pixel screen tolerance, so a finger drag starting very close
     to the route reshapes it while a drag starting elsewhere continues to pan the
     map. Exact overlap ties select the section latest in the current route order.
-27. Pointer movement draws straight previews only: adjacent sections for a moved
+28. Pointer movement draws straight previews only: adjacent sections for a moved
     point, or two halves around a temporary inserted point. No routing request is
     made during the drag. Releasing a route section without a genuine drag
     restores the committed display and lets the delayed map click append a new
     endpoint from the current route end.
-28. Releasing a moved point recalculates its affected normal sections with the
+29. Releasing a moved point recalculates its affected normal sections with the
     current snap mode and, for the first or last point of a closed route, also
     rebuilds the closing section with that mode.
-29. Releasing a dragged normal or closing section after a genuine movement
+30. Releasing a dragged normal or closing section after a genuine movement
     replaces that section with two sections through the new waypoint; each half
     uses the current snap mode and independently falls back to a straight line
     when network routing cannot be resolved.
-30. The loop button creates one dedicated section from the final waypoint back
+31. The loop button creates one dedicated section from the final waypoint back
     to the first using the current snap mode, or removes that section to reopen
     the route. No duplicate start waypoint is created.
-31. While the loop is closed, empty-map clicks do not append another waypoint;
+32. While the loop is closed, empty-map clicks do not append another waypoint;
     the closing section remains draggable and the first and last waypoints remain editable.
-32. Clicking or tapping a waypoint deletes it; any replacement connection or
+33. Clicking or tapping a waypoint deletes it; any replacement connection or
     rebuilt loop uses the current snap mode, while unrelated sections remain
     unchanged.
-33. Every addition, waypoint move, waypoint insertion, waypoint deletion,
+34. Every addition, waypoint move, waypoint insertion, waypoint deletion,
     reversal, loop closure, or reopening records the previous complete immutable
     route state and clears obsolete redo states.
-34. Updating the committed route state rebuilds the route line, sparse direction
+35. Updating the committed route state rebuilds the route line, sparse direction
     arrows, indexed waypoint features, and A/B endpoint markers. Reversal swaps
     open-route markers and arrow direction; a closed route keeps one combined
     marker at the same physical start while its arrows reverse.
-35. `useItineraryMetrics` selects the editable geometry or imported GPX segments
+36. `useItineraryMetrics` selects the editable geometry or imported GPX segments
     and recalculates their local distance without inventing links across gaps.
-36. After a short debounce, an abortable profile request refreshes ascent,
+37. After a short debounce, an abortable profile request refreshes ascent,
     descent, estimated walking time, and reusable chart samples; the result is
     accepted only for the exact segment collection that requested it.
-37. The profile button reveals or hides the SVG chart without another request.
-38. The metrics hook maps pointer movement across the displayed itinerary to a
+38. The profile button reveals or hides the SVG chart without another request.
+39. The metrics hook maps pointer movement across the displayed itinerary to a
     cumulative distance and transient circle. When the profile is open, the same
     distance updates its guide, altitude, and distance.
-39. Moving a mouse or dragging one finger across the chart performs the inverse
+40. Moving a mouse or dragging one finger across the chart performs the inverse
     lookup through the same hook and updates the transient marker above the
     corresponding map position.
-40. Undo and redo exchange complete stored route states without routing again.
-41. Reversal rebuilds normal and closing geometry in the opposite direction as
+41. Undo and redo exchange complete stored route states without routing again.
+42. Reversal rebuilds normal and closing geometry in the opposite direction as
     one undoable edit.
-42. Deletion clears the current route and all undo/redo states and hides the summary.
-43. GPX export opens a modal naming form before any XML is generated.
-44. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
+43. Deletion clears the current route and all undo/redo states and hides the summary.
+44. GPX export opens a modal naming form before any XML is generated.
+45. Confirming the form converts the flattened LV95 route to WGS 84, merges exact
     route vertices with regular elevation samples in one ordered pass, calculates
     geographic metadata bounds from the final points, and downloads a GPX track
     whose internal name and proposed filename come from the same user value.
-45. Changing language clears the temporary location search and marker, then
+46. Changing language clears the temporary location search and marker, then
     updates interface text, number formatting, document metadata, and subsequent
     GeoAdmin requests without recreating the map.
-46. Leaving route mode removes the route-click listener and drag interaction,
+47. Leaving route mode removes the route-click listener and drag interaction,
     aborts active network work, and restores any uncommitted drag preview while
     keeping completed cells, committed route geometry, and statistics available.
-47. `useMapViewControls` requests fullscreen for the root application element.
-48. `useMapRuntime` publishes `fullscreenchange` state and resizes OpenLayers.
-49. Focusing the location-search field closes any stop, hiking-closure, or
+48. `useMapViewControls` requests fullscreen for the root application element.
+49. `useMapRuntime` publishes `fullscreenchange` state and resizes OpenLayers.
+50. Focusing the location-search field closes any stop, hiking-closure, or
     shooting-danger popup, clears its selection, and aborts obsolete popup work
     before existing or newly requested suggestions appear. Exact successful
     searches can reopen immediately from the bounded language-aware session
     cache; uncached input keeps the normal debounce and abort lifecycle. Location
     search and browser geolocation otherwise continue to operate independently.
-50. On unmount, map listeners, interactions, timers, requests, references, and
+51. On unmount, map listeners, interactions, timers, requests, references, and
     the map target are cleaned up by their owning components.
-51. A push to `main` triggers the Pages workflow, which installs locked
+52. A push to `main` triggers the Pages workflow, which installs locked
     dependencies, runs the regression suite, builds the application, and deploys
     `dist`.
 
@@ -1850,10 +1953,15 @@ moved waypoint or created on either side of an inserted waypoint. Snap mode
 remains enabled for the next click.
 
 Overly large single sections, persistent GeoAdmin transport or parsing
-failures, and result-limit overflow remain errors; they do not modify the
+failures, and road-result-limit overflow remain errors; they do not modify the
 existing route. One transient identify failure is retried within the bounded
-routing loader, but the second failure is surfaced normally. A failed waypoint
-move or insertion discards the temporary preview and restores the last committed
+routing loader, but the second failure is surfaced normally. If the combined
+road-and-hiking request is rejected with a non-retryable HTTP response, the
+loader retries that tile with roads alone, disables later hiking-layer requests
+for the remaining Worker session, and displays one translated informational
+message. Missing or incomplete hiking enrichment is non-blocking because it
+changes route preference rather than graph connectivity. A failed waypoint move
+or insertion discards the temporary preview and restores the last committed
 route state. An active operation is aborted when route mode is left or the
 application unmounts. There is no persistent logging or application-wide retry
 mechanism.

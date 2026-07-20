@@ -118,6 +118,66 @@ describe('DynamicRoutingNetworkLoader worker facade', () => {
     loader.dispose();
   });
 
+  it('delivers a session notice without resolving the active request', async () => {
+    const loader = new DynamicRoutingNetworkLoader();
+    const notices: string[] = [];
+    const unsubscribe = loader.subscribeToNotices((notice) => {
+      notices.push(notice);
+    });
+    const pending = loader.snap(
+      [2_500_000, 1_100_000],
+      new AbortController().signal,
+    );
+    const worker = currentWorker();
+    const request = worker.messages[0];
+
+    worker.respond({
+      type: 'notice',
+      notice: 'hiking-enrichment-unavailable',
+    });
+
+    expect(notices).toEqual(['hiking-enrichment-unavailable']);
+
+    worker.respond({
+      type: 'success',
+      requestId: request.requestId,
+      result: [2_500_000, 1_100_000],
+    });
+
+    await expect(pending).resolves.toEqual([2_500_000, 1_100_000]);
+    unsubscribe();
+    loader.dispose();
+  });
+
+  it('replays a notice received before the UI subscribes', async () => {
+    const loader = new DynamicRoutingNetworkLoader();
+    const pending = loader.snap(
+      [2_500_000, 1_100_000],
+      new AbortController().signal,
+    );
+    const worker = currentWorker();
+    const request = worker.messages[0];
+
+    worker.respond({
+      type: 'notice',
+      notice: 'hiking-enrichment-unavailable',
+    });
+
+    const notices: string[] = [];
+    loader.subscribeToNotices((notice) => notices.push(notice));
+
+    expect(notices).toEqual(['hiking-enrichment-unavailable']);
+
+    worker.respond({
+      type: 'success',
+      requestId: request.requestId,
+      result: [2_500_000, 1_100_000],
+    });
+
+    await expect(pending).resolves.toEqual([2_500_000, 1_100_000]);
+    loader.dispose();
+  });
+
   it('rejects immediately and asks the worker to cancel an aborted request', async () => {
     const loader = new DynamicRoutingNetworkLoader();
     const controller = new AbortController();

@@ -57,6 +57,58 @@ describe('fetchSwissTlmNetworkData request resilience', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('disables hiking requests for the shared session after a combined rejection', async () => {
+    let hikingEnrichmentEnabled = true;
+    const onHikingEnrichmentUnavailable = vi.fn(() => {
+      hikingEnrichmentEnabled = false;
+    });
+    fetchMock
+      .mockResolvedValueOnce(createResponse(400))
+      .mockResolvedValueOnce(createResponse(200))
+      .mockResolvedValueOnce(createResponse(200));
+
+    await expect(
+      fetchSwissTlmNetworkData(
+        TEST_EXTENT,
+        new AbortController().signal,
+        {
+          allowEmpty: true,
+          shouldRequestHikingEnrichment: () =>
+            hikingEnrichmentEnabled,
+          onHikingEnrichmentUnavailable,
+        },
+      ),
+    ).resolves.toEqual({ roads: [], hikingTrails: [] });
+
+    await expect(
+      fetchSwissTlmNetworkData(
+        TEST_EXTENT,
+        new AbortController().signal,
+        {
+          allowEmpty: true,
+          shouldRequestHikingEnrichment: () =>
+            hikingEnrichmentEnabled,
+          onHikingEnrichmentUnavailable,
+        },
+      ),
+    ).resolves.toEqual({ roads: [], hikingTrails: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      'ch.swisstopo.swisstlm3d-wanderwege',
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      'ch.swisstopo.swisstlm3d-strassen',
+    );
+    expect(String(fetchMock.mock.calls[1][0])).not.toContain(
+      'ch.swisstopo.swisstlm3d-wanderwege',
+    );
+    expect(String(fetchMock.mock.calls[2][0])).not.toContain(
+      'ch.swisstopo.swisstlm3d-wanderwege',
+    );
+    expect(onHikingEnrichmentUnavailable).toHaveBeenCalledTimes(1);
+  });
+
   it('retries one transient network failure after a jittered delay', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

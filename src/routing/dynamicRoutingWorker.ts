@@ -6,15 +6,33 @@
  * cross back to React.
  */
 import { DynamicRoutingNetworkEngine } from './dynamicRoutingEngine';
+import { shouldUseHikingEnrichment } from './routingConfig';
 import type {
   RoutingWorkerRequest,
   RoutingWorkerResponse,
+  RoutingWorkerNotice,
   SerializedRoutingWorkerError,
 } from './dynamicRoutingProtocol';
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
-const engine = new DynamicRoutingNetworkEngine();
 const requestControllers = new Map<number, AbortController>();
+
+/** Posts one non-blocking session notice to the main-thread route controller. */
+function postNotice(notice: RoutingWorkerNotice): void {
+  const response: RoutingWorkerResponse = {
+    type: 'notice',
+    notice,
+  };
+  workerScope.postMessage(response);
+}
+
+const engine = new DynamicRoutingNetworkEngine({
+  initialHikingEnrichmentEnabled: shouldUseHikingEnrichment(
+    workerScope.location.hostname,
+  ),
+  onHikingEnrichmentUnavailable: () =>
+    postNotice('hiking-enrichment-unavailable'),
+});
 
 /** Converts unknown failures into structured-clone-safe error data. */
 function serializeError(error: unknown): SerializedRoutingWorkerError {

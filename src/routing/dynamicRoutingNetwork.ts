@@ -8,6 +8,7 @@ import type { Coordinate } from 'ol/coordinate.js';
 import type { RoutedNetworkPath } from './networkRouter';
 import {
   RoutingAreaTooLargeError,
+  type RoutingWorkerNotice,
   type RoutingWorkerRequest,
   type RoutingWorkerResponse,
   type SerializedRoutingWorkerError,
@@ -25,6 +26,9 @@ interface PendingWorkerRequest {
   /** Removes the associated AbortSignal listener. */
   removeAbortListener?: () => void;
 }
+
+/** Receives non-blocking routing-session notices from the worker. */
+export type RoutingNoticeListener = (notice: RoutingWorkerNotice) => void;
 
 /** Creates the standard cancellation error expected by shared request handling. */
 function createAbortError(): DOMException {
@@ -65,7 +69,27 @@ export class DynamicRoutingNetworkLoader {
   private worker: Worker | null = null;
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingWorkerRequest>();
+  private readonly noticeListeners = new Set<RoutingNoticeListener>();
+  /** Notices retained so a subscriber mounted just after Worker startup still receives them. */
+  private readonly activeNotices = new Set<RoutingWorkerNotice>();
   private disposed = false;
+
+  /**
+   * Subscribes to non-blocking routing-session notices.
+   * @param listener - Callback invoked for each worker notice.
+   * @returns Cleanup function removing the listener.
+   */
+  subscribeToNotices(listener: RoutingNoticeListener): () => void {
+    this.noticeListeners.add(listener);
+
+    // React effects subscribe after render. Replaying an already received
+    // session notice prevents a Worker-startup race from hiding degradation.
+    for (const notice of this.activeNotices) {
+      listener(notice);
+    }
+
+    return () => this.noticeListeners.delete(listener);
+  }
 
   /**
    * Loads local cells and snaps one first waypoint inside the worker.
@@ -130,6 +154,8 @@ export class DynamicRoutingNetworkLoader {
     }
 
     this.pendingRequests.clear();
+    this.noticeListeners.clear();
+    this.activeNotices.clear();
   }
 
   /** Lazily creates the worker so pure grid tests do not require the Worker API. */
@@ -218,6 +244,20 @@ export class DynamicRoutingNetworkLoader {
     event: MessageEvent<RoutingWorkerResponse>,
   ): void => {
     const response = event.data;
+
+    if (response.type === 'notice') {
+      if (this.activeNotices.has(response.notice)) {
+        return;
+      }
+
+      this.activeNotices.add(response.notice);
+
+      for (const listener of this.noticeListeners) {
+        listener(response.notice);
+      }
+      return;
+    }
+
     const pending = this.pendingRequests.get(response.requestId);
 
     if (!pending) {

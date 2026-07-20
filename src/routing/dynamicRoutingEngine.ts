@@ -59,6 +59,17 @@ interface PendingCell {
   signal: AbortSignal;
 }
 
+/** Session callbacks emitted by the worker-owned routing engine. */
+export interface DynamicRoutingNetworkEngineOptions {
+  /**
+   * Initial provider choice. Defaults to `true`; local development may start in
+   * roads-only mode to exercise the fallback without a real provider failure.
+   */
+  initialHikingEnrichmentEnabled?: boolean;
+  /** Called once when optional hiking enrichment is disabled for the session. */
+  onHikingEnrichmentUnavailable?: () => void;
+}
+
 /**
  * Maps cells with a bounded worker pool to protect the public API and browser.
  * @param values - Ordered inputs to process.
@@ -126,6 +137,42 @@ export class DynamicRoutingNetworkEngine {
   private readonly pendingCells = new Map<CellKey, PendingCell>();
   /** Small most-recent-first cache of graphs for exact corridor cell sets. */
   private readonly networkCache: CachedNetwork[] = [];
+  /**
+   * Whether new cells should still request the optional hiking layer. Once a
+   * layer-specific rejection occurs, roads alone are used for the remaining
+   * worker session so every new waypoint does not repeat the same failure.
+   */
+  private hikingEnrichmentEnabled: boolean;
+  /** Session callbacks and initial provider policy. */
+  private readonly options: DynamicRoutingNetworkEngineOptions;
+  /** Prevents repeated UI notices after roads-only mode has been reported. */
+  private hikingEnrichmentUnavailableReported = false;
+
+  constructor(options: DynamicRoutingNetworkEngineOptions = {}) {
+    this.options = options;
+    this.hikingEnrichmentEnabled =
+      options.initialHikingEnrichmentEnabled ?? true;
+  }
+
+  /** Reports roads-only mode after a routing request has started. */
+  private reportHikingEnrichmentUnavailable(): void {
+    if (this.hikingEnrichmentUnavailableReported) {
+      return;
+    }
+
+    this.hikingEnrichmentUnavailableReported = true;
+    this.options.onHikingEnrichmentUnavailable?.();
+  }
+
+  /** Disables optional hiking requests and reports the transition only once. */
+  private disableHikingEnrichment(): void {
+    if (!this.hikingEnrichmentEnabled) {
+      return;
+    }
+
+    this.hikingEnrichmentEnabled = false;
+    this.reportHikingEnrichmentUnavailable();
+  }
 
   /**
    * Loads a neighbourhood around a point and snaps it to the local network.
@@ -139,6 +186,12 @@ export class DynamicRoutingNetworkEngine {
     coordinate: Coordinate,
     signal: AbortSignal,
   ): Promise<Coordinate | null> {
+    if (!this.hikingEnrichmentEnabled) {
+      // Emitting after the first operation arrives avoids losing the local-test
+      // notice while the Worker module is still starting up.
+      this.reportHikingEnrichmentUnavailable();
+    }
+
     const cellKeys = createLocalCellKeys(coordinate);
 
     try {
@@ -170,6 +223,11 @@ export class DynamicRoutingNetworkEngine {
     endCoordinate: Coordinate,
     signal: AbortSignal,
   ): Promise<RoutedNetworkPath | null> {
+    if (!this.hikingEnrichmentEnabled) {
+      // A route request can be the first Worker operation after local startup.
+      this.reportHikingEnrichmentUnavailable();
+    }
+
     return this.routeInternal(startCoordinate, endCoordinate, signal);
   }
 
@@ -336,6 +394,10 @@ export class DynamicRoutingNetworkEngine {
 
     promise = fetchSwissTlmNetworkData(extent, signal, {
       allowEmpty: true,
+      shouldRequestHikingEnrichment: () =>
+        this.hikingEnrichmentEnabled,
+      onHikingEnrichmentUnavailable: () =>
+        this.disableHikingEnrichment(),
     })
       .then((data): LoadedCell => {
         const cell = { data };

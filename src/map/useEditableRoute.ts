@@ -148,10 +148,9 @@ export function useEditableRoute(
   const routeOperationPendingRef = useRef(false);
   const routingLoaderRef = useRef<DynamicRoutingNetworkLoader | null>(null);
   const routingAbortControllerRef = useRef<AbortController | null>(null);
-
-  if (!routingLoaderRef.current) {
-    routingLoaderRef.current = new DynamicRoutingNetworkLoader();
-  }
+  /** Latest translation helper read by the long-lived routing notice listener. */
+  const translationRef = useRef(options.t);
+  translationRef.current = options.t;
 
   const [isRouteCreationActive, setIsRouteCreationActive] = useState(false);
   const [isRouteSnapEnabled, setIsRouteSnapEnabled] = useState(true);
@@ -737,15 +736,33 @@ export function useEditableRoute(
     );
   }, [options.mapRuntimeRef, routeHistory.closure, routeHistory.steps]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // The Worker and its notice subscription belong to the same effect lifetime.
+    // React Strict Mode intentionally runs setup, cleanup, then setup again in
+    // development; recreating both here prevents a fresh Worker from losing its
+    // listener after that lifecycle check.
+    const routingLoader = new DynamicRoutingNetworkLoader();
+    routingLoaderRef.current = routingLoader;
+
+    const unsubscribeFromNotices = routingLoader.subscribeToNotices((notice) => {
+      if (notice === 'hiking-enrichment-unavailable') {
+        showTemporaryRouteMessage(
+          translationRef.current('route.hikingEnrichmentUnavailable'),
+        );
+      }
+    });
+
+    return () => {
       clearRouteMessageTimer();
       routingAbortControllerRef.current?.abort();
-      routingLoaderRef.current?.dispose();
-      routingLoaderRef.current = null;
-    },
-    [clearRouteMessageTimer],
-  );
+      unsubscribeFromNotices();
+      routingLoader.dispose();
+
+      if (routingLoaderRef.current === routingLoader) {
+        routingLoaderRef.current = null;
+      }
+    };
+  }, [clearRouteMessageTimer, showTemporaryRouteMessage]);
 
   return {
     routeHistory,

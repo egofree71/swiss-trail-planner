@@ -1,19 +1,24 @@
 /**
- * Business context: retrieves the swissTLM3D road network and official hiking
- * trail geometries needed by the browser-side router. GeoAdmin's identify API
+ * Business context: retrieves the swissTLM3D road network and optional official
+ * hiking-trail enrichment used by the browser-side router. GeoAdmin's identify API
  * is queried in bounded tiles, dense tiles are subdivided to respect the
  * per-request result cap, and overlapping responses are normalized and
  * deduplicated before graph construction.
  */
 import type { Coordinate } from 'ol/coordinate.js';
 import type { Extent } from 'ol/extent.js';
+import { isAbortedRequest } from '../network/abort';
 
 /** Official GeoAdmin identify endpoint used for bounded vector queries. */
 const IDENTIFY_ENDPOINT =
   'https://api3.geo.admin.ch/rest/services/ech/MapServer/identify';
 /** swissTLM3D road and path layer used to build the pedestrian graph. */
 const ROAD_LAYER_ID = 'ch.swisstopo.swisstlm3d-strassen';
-/** Official hiking-trail portrayal used to classify preferred road segments. */
+/**
+ * Official hiking-trail portrayal used only as optional routing enrichment.
+ * GeoAdmin does not advertise tooltip/feature inspection for this layer, so a
+ * failure must never make the required road-and-path network unavailable.
+ */
 const HIKING_LAYER_ID = 'ch.swisstopo.swisstlm3d-wanderwege';
 /**
  * Initial request tile width and height in metres. Smaller tiles reduce the
@@ -54,6 +59,18 @@ class GeoAdminRequestTimeoutError extends Error {
   constructor() {
     super(`GeoAdmin identify request timed out after ${REQUEST_TIMEOUT_MS} ms.`);
     this.name = 'GeoAdminRequestTimeoutError';
+  }
+}
+
+/** HTTP failure retaining its status so layer-specific fallbacks stay selective. */
+class GeoAdminIdentifyHttpError extends Error {
+  /** HTTP status returned by GeoAdmin. */
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`GeoAdmin identify request failed (${status}).`);
+    this.name = 'GeoAdminIdentifyHttpError';
+    this.status = status;
   }
 }
 
@@ -154,6 +171,17 @@ export interface NetworkLoadOptions {
   allowEmpty?: boolean;
   /** Called whenever completed or expected request counts change. */
   onProgress?: ProgressCallback;
+  /**
+   * Returns whether the shared routing session should still request optional
+   * hiking geometry. A callback keeps concurrently loaded cells synchronized
+   * after the first layer-specific failure.
+   */
+  shouldRequestHikingEnrichment?: () => boolean;
+  /**
+   * Disables hiking enrichment for the shared routing session after GeoAdmin
+   * rejects the non-guaranteed combined layer request.
+   */
+  onHikingEnrichmentUnavailable?: () => void;
 }
 
 /** Splits an extent into fixed-size initial requests. */
@@ -475,15 +503,17 @@ function isRetryableFetchFailure(error: unknown): boolean {
 }
 
 /**
- * Fetches one identify tile from GeoAdmin.
+ * Fetches one identify tile for an explicit layer set.
  * @param tile - Tile extent and current subdivision depth.
+ * @param layerIds - Technical GeoAdmin layers requested together.
  * @param signal - Abort signal owned by the current route operation.
  * @returns Normalized tile contents and cap-detection counts.
  * @throws {Error} When both attempts fail or GeoAdmin returns a non-retryable status.
  * @throws {DOMException} When the route operation is intentionally aborted.
  */
-async function fetchTile(
+async function fetchTileForLayers(
   tile: TileRequest,
+  layerIds: string[],
   signal: AbortSignal,
 ): Promise<ParsedTile> {
   const extentText = tile.extent.join(',');
@@ -493,7 +523,7 @@ async function fetchTile(
     imageDisplay: '1024,1024,96',
     mapExtent: extentText,
     tolerance: '0',
-    layers: `all:${ROAD_LAYER_ID},${HIKING_LAYER_ID}`,
+    layers: `all:${layerIds.join(',')}`,
     returnGeometry: 'true',
     geometryFormat: 'geojson',
     sr: '2056',
@@ -528,12 +558,57 @@ async function fetchTile(
       continue;
     }
 
-    throw new Error(
-      `GeoAdmin identify request failed (${result.response.status}).`,
-    );
+    throw new GeoAdminIdentifyHttpError(result.response.status);
   }
 
   throw new Error('GeoAdmin identify request failed after retry.');
+}
+
+/**
+ * Loads roads and optional hiking enrichment without doubling requests during
+ * normal operation. The combined request preserves today's efficient path; if
+ * that non-guaranteed layer combination fails, the same tile is retried with the
+ * road-and-path layer alone.
+ */
+async function fetchTile(
+  tile: TileRequest,
+  signal: AbortSignal,
+  options: NetworkLoadOptions,
+): Promise<ParsedTile> {
+  if (options.shouldRequestHikingEnrichment?.() === false) {
+    return fetchTileForLayers(tile, [ROAD_LAYER_ID], signal);
+  }
+
+  try {
+    return await fetchTileForLayers(
+      tile,
+      [ROAD_LAYER_ID, HIKING_LAYER_ID],
+      signal,
+    );
+  } catch (error) {
+    if (isAbortedRequest(error, signal)) {
+      throw error;
+    }
+
+    // Timeouts, network failures, rate limiting, and temporary service errors
+    // affect the whole endpoint and should remain visible after their normal
+    // retry. A non-retryable HTTP rejection can instead be caused by the
+    // optional layer combination, so only that case receives a road-only retry.
+    if (
+      !(error instanceof GeoAdminIdentifyHttpError) ||
+      RETRYABLE_HTTP_STATUSES.has(error.status)
+    ) {
+      throw error;
+    }
+
+    // Hiking classification improves route choice but does not define the
+    // routable graph. Falling back here keeps route planning available if the
+    // non-advertised identify behavior for the hiking layer changes or fails.
+    // The callback also prevents later cells from repeating the rejected layer
+    // combination for the rest of the routing Worker session.
+    options.onHikingEnrichmentUnavailable?.();
+    return fetchTileForLayers(tile, [ROAD_LAYER_ID], signal);
+  }
 }
 
 /**
@@ -575,9 +650,9 @@ async function mapWithConcurrency<T, R>(
  * @param extent - Requested EPSG:2056 extent in map units/metres.
  * @param signal - Abort signal for the current route operation.
  * @param options - Empty-cell handling and optional progress reporting.
- * @returns Deduplicated road and hiking features covering the extent.
- * @throws {Error} When an HTTP request fails, no roads are returned while empty
- * data is disallowed, or subdivision cannot get below the result cap.
+ * @returns Deduplicated road features plus hiking enrichment when available.
+ * @throws {Error} When the required road request fails, no roads are returned
+ * while empty data is disallowed, or road subdivision cannot get below the cap.
  * @throws {DOMException} When the operation is aborted.
  */
 export async function fetchSwissTlmNetworkData(
@@ -596,24 +671,28 @@ export async function fetchSwissTlmNetworkData(
   const fetchRecursively = async (
     tile: TileRequest,
   ): Promise<ParsedTile[]> => {
-    const result = await fetchTile(tile, signal);
+    const result = await fetchTile(tile, signal, options);
     completedRequests += 1;
     reportProgress();
 
-    // A count equal to the cap is ambiguous. Treat it as truncated and
-    // subdivide rather than silently lose features.
-    const reachedLimit =
-      result.roadResultCount >= RESULT_LIMIT ||
-      result.hikingResultCount >= RESULT_LIMIT;
+    // Road truncation can remove graph connectivity and must remain a hard
+    // error. Hiking truncation only weakens route preference, so it may be
+    // accepted at the smallest tile instead of blocking the complete route.
+    const roadsReachedLimit = result.roadResultCount >= RESULT_LIMIT;
+    const hikingReachedLimit = result.hikingResultCount >= RESULT_LIMIT;
 
-    if (!reachedLimit) {
+    if (!roadsReachedLimit && !hikingReachedLimit) {
       return [result];
     }
 
     if (tile.depth >= MAX_SUBDIVISION_DEPTH) {
-      throw new Error(
-        'A swissTLM3D request still reached the 200-feature limit after subdivision.',
-      );
+      if (roadsReachedLimit) {
+        throw new Error(
+          'A swissTLM3D road request still reached the 200-feature limit after subdivision.',
+        );
+      }
+
+      return [result];
     }
 
     const childTiles = subdivideTile(tile);

@@ -3,10 +3,12 @@
 Via Helvetica is an open-source, map-centered web application for
 planning hiking routes in Switzerland with official swisstopo maps and geodata.
 It is intentionally lightweight, frontend-only, and focused on one route at a
-time.
+time. The public application is designed to remain free to use without an
+account or a project-owned application server.
 
 ## Table of contents
 
+- [Project principles](#project-principles)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Basic usage](#basic-usage)
@@ -15,6 +17,18 @@ time.
 - [Regression tests](#regression-tests)
 - [Production build and deployment](#production-build-and-deployment)
 - [License](#license)
+
+## Project principles
+
+Via Helvetica deliberately keeps route planning in the browser. Users do not
+need to register, routes are not uploaded to a project-owned server, and static
+hosting keeps recurring operating costs as low as possible. External official
+services still receive the bounded requests required for maps and geodata.
+
+The router is an interactive planning aid rather than an autonomous navigation
+system. The official hiking portrayal remains visible on the map, and users can
+add a closer waypoint whenever parallel paths or a complex junction make their
+intent ambiguous.
 
 ## Features
 
@@ -67,7 +81,8 @@ http://localhost:5173/via-helvetica/
 3. Keep snapping enabled to create or reshape sections along available
    swissTLM3D roads and paths, or disable it to create or rebuild them as
    straight lines. A section also falls back to a straight line when no
-   routable path can be resolved.
+   routable path can be resolved. If several nearby paths make the selected
+   route ambiguous, add a waypoint closer to the intended path.
 4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
    or export the current itinerary. Compact **A** and **B** markers identify the
    current start and finish. Sparse hollow arrows centred on the line show travel direction
@@ -106,9 +121,32 @@ geolocation, location-search results, and GPX input or output.
 Walking-time estimates apply the slope-sensitive model published by Schweizer
 Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
+Browser routing does not download and preprocess the
+[official national swissTLM3D packages](https://www.swisstopo.admin.ch/en/landscape-model-swisstlm3d).
+It uses bounded requests to GeoAdmin's
+[documented REST `MapServer/identify` endpoint](https://docs.geo.admin.ch/access-data/identify-features.html)
+instead. The official
+`ch.swisstopo.swisstlm3d-strassen` layer supplies the required road-and-path
+graph. The official `ch.swisstopo.swisstlm3d-wanderwege` layer is requested only
+as optional enrichment so matching graph edges can be preferred.
+
+GeoAdmin's
+[layer configuration](https://api3.geo.admin.ch/rest/services/api/MapServer/layersTable)
+advertises feature tooltips for the road layer but not for the hiking layer.
+Obtaining hiking geometries through `identify` is
+therefore treated as a useful but non-guaranteed behavior: the normal request
+asks for both layers to avoid doubling traffic, then retries the same tile with
+roads alone if the combined layer request is rejected. That first rejection
+disables further hiking-layer requests for the remaining routing Worker session,
+and the interface shows one localized non-blocking notice that subsequent
+calculations use only the road-and-path network. Routing remains available
+without hiking enrichment, although ambiguous parallel paths may require a
+closer waypoint.
+
 Current limitations:
 
 - dynamic swissTLM3D routing is experimental and runs entirely in the browser; network loading, graph construction, snapping, and A* run in a dedicated Web Worker, while each GeoAdmin identify attempt has a 15-second timeout and one bounded retry for transient failures;
+- the identify API returns at most 200 features per request, so dense road or hiking responses are recursively subdivided; the service is used for bounded interactive routing rather than bulk data extraction;
 - closures and danger zones are informational and do not automatically change
   route calculation;
 - imported GPX routes are read-only and replace the current editable route;
@@ -136,11 +174,21 @@ GPX parsing, batch projection, and export, route metrics, directional-arrow
 placement, location-search caching and provider normalization, passenger-stop
 filtering and buffered viewport loading, routing-grid
 footprints, worker-client messaging, and the dynamic routing engine's corridor,
-cache, cancellation cleanup, retry, and fallback behaviour. Run it once with:
+cache, cancellation cleanup, retry, session-wide hiking-enrichment fallback,
+and straight-fallback behaviour. Run it once with:
 
 ```bash
 npm test
 ```
+
+To verify the roads-only fallback manually, set `useHikingEnrichment` to
+`false` in `src/routing/routingConfig.ts`, restart Vite, and create a route on
+`localhost`. The Worker then skips hiking geometry from its first request and
+shows the same translated session notice when that first routing operation
+starts. This switch
+is ignored outside `localhost`, `127.0.0.1`, and the IPv6 loopback address, so a
+forgotten local test value cannot change the deployed application. The rendered
+hiking-trail map overlay remains independent and visible.
 
 During development, use `npm run test:watch` to rerun affected tests after each
 change. GitHub Actions runs the complete suite before building and deploying the

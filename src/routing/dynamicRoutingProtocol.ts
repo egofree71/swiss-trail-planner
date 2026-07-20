@@ -85,7 +85,19 @@ export interface RoutingWorkerErrorResponse {
   error: SerializedRoutingWorkerError;
 }
 
+/** Non-blocking routing notices emitted independently from one request result. */
+export type RoutingWorkerNotice = 'hiking-enrichment-unavailable';
+
+/** Session notice posted when the worker changes its provider strategy. */
+export interface RoutingWorkerNoticeResponse {
+  /** Response discriminator handled without resolving a request promise. */
+  type: 'notice';
+  /** Stable notice code translated by the main-thread route controller. */
+  notice: RoutingWorkerNotice;
+}
+
 /** Every response emitted by the worker. */
 export type RoutingWorkerResponse =
   | RoutingWorkerSuccessResponse
-  | RoutingWorkerErrorResponse;
+  | RoutingWorkerErrorResponse
+  | RoutingWorkerNoticeResponse;
