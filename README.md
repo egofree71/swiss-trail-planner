@@ -22,7 +22,7 @@ time.
 |---|---|
 | Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
 | Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, sparse hollow direction arrows, optional swissTLM3D snapping in a dedicated routing worker, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; pointer position is mirrored in both directions between the map route and the open profile, including horizontal finger exploration on touch screens |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; the mobile summary condenses the four values into one row, and pointer position is mirrored in both directions between the map route and the open profile, including horizontal finger exploration on touch screens |
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX track export with sub-metre geometry simplification, geographic metadata bounds, and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |

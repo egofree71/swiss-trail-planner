@@ -145,14 +145,14 @@ export default function RouteStatistics({
         aria-busy={elevationStatus === 'loading'}
       >
         <div className="route-statistics-item">
-          <span>{t('statistics.distance')}</span>
+          <span className="route-statistics-label">{t('statistics.distance')}</span>
           <strong>
             {formatDistance(distanceMeters, integerFormat, distanceFormat)}
           </strong>
         </div>
 
         <div className="route-statistics-item">
-          <span>{t('statistics.ascent')}</span>
+          <span className="route-statistics-label">{t('statistics.ascent')}</span>
           <strong>
             {hasElevation
               ? formatElevation(ascentMeters, integerFormat)
@@ -161,7 +161,7 @@ export default function RouteStatistics({
         </div>
 
         <div className="route-statistics-item">
-          <span>{t('statistics.descent')}</span>
+          <span className="route-statistics-label">{t('statistics.descent')}</span>
           <strong>
             {hasElevation
               ? formatElevation(descentMeters, integerFormat)
@@ -173,7 +173,7 @@ export default function RouteStatistics({
           className="route-statistics-item"
           title={t('statistics.durationTitle')}
         >
-          <span>{t('statistics.duration')}</span>
+          <span className="route-statistics-label">{t('statistics.duration')}</span>
           <strong>
             {hasElevation
               ? formatDuration(

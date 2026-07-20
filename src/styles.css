@@ -1340,25 +1340,64 @@ select {
 
   .route-statistics {
     width: 100%;
-    grid-template-columns: repeat(4, 1fr) 2.85rem;
+    grid-template-columns:
+      minmax(3.4rem, 1fr)
+      minmax(3.2rem, 0.9fr)
+      minmax(3.2rem, 0.9fr)
+      minmax(4.2rem, 1.2fr)
+      2.85rem;
   }
 
   .route-statistics-item {
     min-width: 0;
-    flex-direction: column;
+    min-height: 2.85rem;
     align-items: center;
-    gap: 0.15rem;
-    padding: 0.55rem 0.3rem;
+    gap: 0.12rem;
+    padding: 0.4rem 0.15rem;
+  }
+
+  /* Narrow screens prioritize the four values, while the full localized
+     labels remain available to assistive technology. */
+  .route-statistics-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .route-statistics-item:nth-child(2)::before,
+  .route-statistics-item:nth-child(3)::before {
+    color: #53606b;
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+
+  .route-statistics-item:nth-child(2)::before {
+    content: '↑';
+  }
+
+  .route-statistics-item:nth-child(3)::before {
+    content: '↓';
   }
 
   .route-statistics-item strong {
     min-width: 0;
-    font-size: 0.86rem;
+    font-size: clamp(0.72rem, 3.3vw, 0.86rem);
     text-align: center;
   }
 
   .route-profile-toggle {
     width: 2.85rem;
+  }
+
+  .route-profile-toggle svg {
+    width: 1.5rem;
+    height: 1.5rem;
   }
 
   .route-elevation-profile-chart {
@@ -1372,19 +1411,6 @@ select {
 
 
 @media (max-width: 430px) {
-  .route-statistics {
-    grid-template-columns: repeat(2, 1fr) 2.85rem;
-  }
-
-  .route-statistics-item:nth-child(-n + 2) {
-    border-bottom: 1px solid rgb(32 47 60 / 12%);
-  }
-
-  .route-profile-toggle {
-    grid-column: 3;
-    grid-row: 1 / span 2;
-  }
-
   .route-elevation-profile {
     padding-right: 0.45rem;
     padding-left: 0.45rem;

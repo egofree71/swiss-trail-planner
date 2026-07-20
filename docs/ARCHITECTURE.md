@@ -823,9 +823,12 @@ that boundary rather than extrapolating the 15th-degree curve.
 `src/components/RouteStatistics.tsx` renders the floating bottom summary and
 owns the show/hide state of the profile panel. It shows distance immediately,
 uses an ellipsis while elevations are loading, and keeps distance visible with
-dashes for the remaining values if the external profile request fails. Walking
-time follows the Schweizer Wanderwege section-by-section polynomial and is
-rounded to five minutes because it remains an estimate excluding breaks.
+dashes for the remaining values if the external profile request fails. On narrow
+screens, CSS keeps the four values and profile toggle in one compact row, hides
+the visible labels while retaining them for assistive technology, and adds
+up/down symbols to distinguish ascent and descent. Walking time follows the
+Schweizer Wanderwege section-by-section polynomial and is rounded to five
+minutes because it remains an estimate excluding breaks.
 
 `src/components/RouteElevationProfile.tsx` draws the ordered elevation samples
 as a lightweight responsive SVG above the summary bar. It scales cumulative
