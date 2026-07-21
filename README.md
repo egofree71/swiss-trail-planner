@@ -1,23 +1,42 @@
 # Via Helvetica
 
-Via Helvetica is an open-source, map-centered web application for
-planning hiking routes in Switzerland with official swisstopo maps and geodata.
-It is intentionally lightweight, frontend-only, and focused on one route at a
-time. The public application is designed to remain free to use without an
-account or a project-owned application server.
+[![Deploy](https://github.com/egofree71/via-helvetica/actions/workflows/deploy.yml/badge.svg)](https://github.com/egofree71/via-helvetica/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Via Helvetica is a free, open-source web application for planning hiking
+routes in Switzerland with official swisstopo maps and geodata. It stays
+focused on one route at a time and runs entirely in the browser, so the public
+application can remain usable without an account or a project-owned backend.
+
+**Live application:** [viahelvetica.ch](https://viahelvetica.ch/)
+
+![Via Helvetica route-planning interface on official swisstopo maps](docs/images/via-helvetica-overview.png)
 
 ## Table of contents
 
-- [Project principles](#project-principles)
 - [Features](#features)
+- [Project principles](#project-principles)
 - [Quick start](#quick-start)
 - [Basic usage](#basic-usage)
-- [Data sources and limitations](#data-sources-and-limitations)
+- [Data sources](#data-sources)
+- [Known limitations](#known-limitations)
 - [Documentation](#documentation)
 - [Regression tests](#regression-tests)
 - [Production build and deployment](#production-build-and-deployment)
-- [Search and social metadata](#search-and-social-metadata)
+- [Contributing](#contributing)
 - [License](#license)
+
+## Features
+
+| Area | Highlights |
+|---|---|
+| Map | Full-screen OpenLayers map in native Swiss LV95 (`EPSG:2056`), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
+| Route planning | Editable ordered waypoints, start and finish markers, sparse direction arrows, optional swissTLM3D snapping in a dedicated routing Worker, undo, redo, reversal, loop closure, route deletion, and straight fallback segments when no routable path is found |
+| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with pointer synchronisation between the chart and the map |
+| Import and export | Read-only GPX loading with route statistics and elevation profile, plus named GPX export with simplified geometry and smoothed elevations when available |
+| Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
+| Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
+| Interface | Compact floating controls, no permanent toolbar, French, German, Italian, and English translations, and a localized About dialog with project, support, professional profile, safety, and data-credit information |
 
 ## Project principles
 
@@ -31,22 +50,10 @@ system. The official hiking portrayal remains visible on the map, and users can
 add a closer waypoint whenever parallel paths or a complex junction make their
 intent ambiguous.
 
-## Features
-
-| Area | Available functionality |
-|---|---|
-| Map | Full-screen OpenLayers map in native Swiss LV95 (EPSG:2056), with official swisstopo color, grey, and aerial backgrounds, hiking trails, search, geolocation, scale, and fullscreen mode |
-| Route planning | Ordered waypoints that can be moved, inserted by dragging the route, or deleted individually, visible start and finish markers, sparse hollow direction arrows, optional swissTLM3D snapping in a dedicated routing worker, straight fallback segments, undo, redo, reversal, loop closure, and complete route deletion |
-| Route information | Distance, ascent, descent, Swiss hiking-time estimate, and a collapsible elevation profile with altitude and distance graduations; the mobile summary condenses the four values into one row, and pointer position is mirrored in both directions between the map route and the open profile, including horizontal finger exploration on touch screens |
-| Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX track export with sub-metre geometry simplification, geographic metadata bounds, and smoothed elevations when available |
-| Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
-| Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
-| Interface | Compact floating controls, no permanent toolbar, French, German, Italian, and English translations, and a localized About dialog with project, support, professional profile, safety, and data-credit information |
-
 ## Quick start
 
-Vite 8 requires Node.js 20.19 or later, or Node.js 22.12 or later. A recent LTS
-release is recommended.
+Vite 8 requires Node.js 20.19 or later, or Node.js 22.12 or later. A recent
+LTS release is recommended.
 
 ```bash
 node --version
@@ -63,151 +70,117 @@ http://localhost:5173/
 
 ## Basic usage
 
-1. Use the **Layers** button to choose a background and enable or disable
-   information overlays.
-2. Activate route creation. Snapping is enabled by default and can be changed
-   before placing the first waypoint. Then click or tap the map to add
-   waypoints. A simple click on an existing red route section also adds the next
-   waypoint
-   from the current endpoint, which allows the itinerary to reuse the same path.
-   Drag an existing red waypoint to move it, click it to delete it, or drag a
-   red route section to insert a waypoint into that stored section. Contextual
-   labels describe these actions when a mouse or hover-capable pointer is used.
-   On touch-only devices, tap an existing waypoint to delete it, deliberately
-   drag a waypoint to move it, or start a drag very close to a route section to
-   insert a new waypoint. Finger drags that start farther from the itinerary
-   remain available for map panning, and a second finger keeps pinch zoom available.
-   Only the affected sections are recalculated after an edit, using the current
-   snapping choice.
-3. Keep snapping enabled to create or reshape sections along available
-   swissTLM3D roads and paths, or disable it to create or rebuild them as
-   straight lines. A section also falls back to a straight line when no
-   routable path can be resolved. If several nearby paths make the selected
-   route ambiguous, add a waypoint closer to the intended path.
-4. Use the route controls to undo, redo, reverse, close or reopen a loop, delete,
-   or export the current itinerary. Compact **A** and **B** markers identify the
-   current start and finish. Sparse hollow arrows centred on the line show travel direction
-   without covering waypoints. Reversing an open route swaps A and B and reverses
-   the arrows, while a closed loop keeps its split green/red **A/B** marker at the
-   same physical start and reverses only the arrows and traversal order. A waypoint
-   move, insertion, or individual deletion is restored as one complete undoable
-   edit.
-5. Load a GPX file as the current purple, read-only itinerary. Its overall start
-   and finish use the same **A**, **B**, or split **A/B** markers, while sparse
-   hollow purple arrows show the recorded travel direction. Its distance,
-   ascent, descent, Swiss hiking-time estimate, and elevation profile use the same
-   bottom summary as an editable route. Moving the pointer over either itinerary
-   shows its position with a circle on the map; when the profile is open, the same
-   position is also mirrored in the chart. Moving over the chart, or dragging a
-   finger horizontally across it, shows the matching position on the map.
-   Complete embedded GPX elevations are
-   reused; GeoAdmin supplies the profile only when they are unavailable.
-   Starting a new route replaces the imported itinerary.
-6. Outside route-creation mode, click visible closures, danger zones, or public
-   transport stops to inspect their available information. Starting route
-   creation, loading a GPX, opening map information, or changing the interface
-   language clears the temporary location marker, search text, and result list.
-7. Use the information button to open the localized About dialog. It stays in
-   the lower-right corner on wide screens and joins the right-side control stack
-   below the language selector when the viewport narrows. The dialog summarizes
-   the project, experimental-routing limitation, creator and support contact,
-   source code, license, professional profile, and official data credits.
+### Choose maps and information layers
+
+- Use the **Layers** button to choose the background map and enable or disable
+  information overlays.
+- The application uses official swisstopo portrayals for map backgrounds and
+  hiking trails.
+
+### Create and edit a route
+
+- Activate route creation, then click or tap the map to place waypoints.
+- Snapping is enabled by default and can be changed before the first waypoint.
+  With snapping enabled, sections follow available swissTLM3D roads and paths.
+  With snapping disabled, sections are created as straight lines.
+- Drag an existing waypoint to move it, click it to delete it, or drag a route
+  section to insert a new waypoint.
+- Use the route controls to undo, redo, reverse, close or reopen a loop,
+  delete, or export the current itinerary.
+- Compact **A** and **B** markers identify the current start and finish.
+
+### Import and export GPX
+
+- Load a GPX file as the current purple, read-only itinerary.
+- Imported GPX routes reuse embedded elevations when available, otherwise the
+  profile is requested from GeoAdmin.
+- Export the current editable route as a named GPX file with route statistics.
+- Starting a new route replaces the imported itinerary.
+
+### Inspect route and map information
+
+- Distance, ascent, descent, Swiss hiking-time estimate, and the elevation
+  profile are shown in the bottom summary.
+- When the profile is open, moving over the route or the chart mirrors the same
+  position in both directions.
+- Outside route-creation mode, click visible closures, danger zones, or public
+  transport stops to inspect their available information.
+- Use the information button to open the localized About dialog with the
+  project summary, support contact, source code, license, professional profile,
+  and official data credits.
 
 The application requests browser geolocation only after the location button is
-pressed. Deployed geolocation requires HTTPS. At narrow phone widths, the metric
-scale is hidden because the bottom route summary occupies the same map area.
+pressed. Deployed geolocation requires HTTPS.
 
-## Data sources and limitations
+## Data sources
 
-The application uses official swisstopo backgrounds and swissTLM3D geodata,
+Via Helvetica uses official swisstopo backgrounds and swissTLM3D geodata,
 official hiking-closure and military danger-zone layers, Federal Office of
 Transport stop data, GeoAdmin services, and `transport.opendata.ch` departure
-data. The map, editable route, information layers, and routing graph use native
-Swiss LV95 coordinates (`EPSG:2056`); WGS 84 conversion is limited to browser
-geolocation, location-search results, and GPX input or output.
+data.
+
+- **swisstopo** provides the official Swiss maps and geodata.
+- **swissTLM3D** is swisstopo's topographic landscape model and supplies the
+  road-and-path network used for route snapping.
+- **GeoAdmin** is the federal geodata platform used for bounded routing,
+  elevation, and map-information requests.
+- **LV95 / EPSG:2056** is the Swiss national projected coordinate system used
+  internally by the map, routing graph, and editable geometries.
+
 Walking-time estimates apply the slope-sensitive model published by Schweizer
 Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
-Browser routing does not download and preprocess the
-[official national swissTLM3D packages](https://www.swisstopo.admin.ch/en/landscape-model-swisstlm3d).
-It uses bounded requests to GeoAdmin's
-[documented REST `MapServer/identify` endpoint](https://docs.geo.admin.ch/access-data/identify-features.html)
-instead. The official
-`ch.swisstopo.swisstlm3d-strassen` layer supplies the required road-and-path
-graph. The official `ch.swisstopo.swisstlm3d-wanderwege` layer is requested only
-as optional enrichment so matching graph edges can be preferred.
+For provider identifiers, request strategies, fallback behaviour, layer
+ordering, projections, caching, and routing internals, see the
+[architecture document](docs/ARCHITECTURE.md).
 
-GeoAdmin's
-[layer configuration](https://api3.geo.admin.ch/rest/services/api/MapServer/layersTable)
-advertises feature tooltips for the road layer but not for the hiking layer.
-Obtaining hiking geometries through `identify` is
-therefore treated as a useful but non-guaranteed behavior: the normal request
-asks for both layers to avoid doubling traffic, then retries the same tile with
-roads alone if the combined layer request is rejected. That first rejection
-disables further hiking-layer requests for the remaining routing Worker session,
-and the interface shows one localized non-blocking notice that subsequent
-calculations use only the road-and-path network. Routing remains available
-without hiking enrichment, although ambiguous parallel paths may require a
-closer waypoint.
+## Known limitations
 
-Current limitations:
-
-- dynamic swissTLM3D routing is experimental and runs entirely in the browser; network loading, graph construction, snapping, and A* run in a dedicated Web Worker, while each GeoAdmin identify attempt has a 15-second timeout and one bounded retry for transient failures;
-- the identify API returns at most 200 features per request, so dense road or hiking responses are recursively subdivided; the service is used for bounded interactive routing rather than bulk data extraction;
-- closures and danger zones are informational and do not automatically change
-  route calculation;
-- imported GPX routes are read-only and replace the current editable route;
-- routes are not persisted locally or remotely;
-- external map, elevation, routing, and timetable services can be temporarily
+- Dynamic swissTLM3D routing is experimental and runs entirely in the browser.
+- A route section falls back to a straight line when no routable path can be
+  resolved.
+- Closures and danger zones are informational and do not automatically change
+  route calculation.
+- Imported GPX routes are read-only and replace the current editable route.
+- Routes are not persisted locally or remotely.
+- External map, elevation, routing, and timetable services can be temporarily
   unavailable or incomplete.
-
-Detailed provider identifiers, request strategies, filtering rules, layer
-ordering, projections, caching, and routing internals are documented in the
-architecture document rather than duplicated here.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md): current structure, file responsibilities,
-  data flows, and technical choices, including the disposable OpenLayers runtime,
-  focused information, map-control, editable-route, imported-GPX, and
-  itinerary-metrics hooks, plus the separation between route state, route
-  rendering, low-level pointer interaction, reconstruction, and
-  buffered public-transport loading, normalization, and display.
+- [Architecture](docs/ARCHITECTURE.md): current structure, file
+  responsibilities, data flows, validation scope, and technical choices,
+  including the disposable OpenLayers runtime, route and GPX state management,
+  routing Worker behaviour, and public-transport loading.
 
 ## Regression tests
 
-The focused Vitest suite protects immutable route transformations, route editing,
-GPX parsing, batch projection, and export, route metrics, directional-arrow
-placement, location-search caching and provider normalization, passenger-stop
-filtering and buffered viewport loading, routing-grid
-footprints, worker-client messaging, and the dynamic routing engine's corridor,
-cache, cancellation cleanup, retry, session-wide hiking-enrichment fallback,
-and straight-fallback behaviour. Run it once with:
+The focused Vitest suite covers immutable route transformations, route editing,
+GPX parsing and export, route metrics, directional-arrow placement,
+location-search provider normalization, passenger-stop filtering and viewport
+loading, worker-client messaging, and the dynamic routing engine's corridor,
+cache, cancellation cleanup, retry, hiking-enrichment fallback, and
+straight-fallback behaviour.
+
+Run the test suite with:
 
 ```bash
 npm test
 ```
 
-To verify the roads-only fallback manually, set `useHikingEnrichment` to
-`false` in `src/routing/routingConfig.ts`, restart Vite, and create a route on
-`localhost`. The Worker then skips hiking geometry from its first request and
-shows the same translated session notice when that first routing operation
-starts. This switch
-is ignored outside `localhost`, `127.0.0.1`, and the IPv6 loopback address, so a
-forgotten local test value cannot change the deployed application. The rendered
-hiking-trail map overlay remains independent and visible.
-
 During development, use `npm run test:watch` to rerun affected tests after each
-change. GitHub Actions runs the complete suite before building and deploying the
-site.
+change. GitHub Actions runs the complete suite before building and deploying
+the site.
 
 ## Production build and deployment
+
+Build the production bundle with:
 
 ```bash
 npm run build
 ```
 
-The production files are written to `dist/`. To preview them locally:
+Preview it locally with:
 
 ```bash
 npm run preview
@@ -219,18 +192,20 @@ application to GitHub Pages after a push to `main`. GitHub Pages must use
 the custom domain root at [viahelvetica.ch](https://viahelvetica.ch/), so Vite
 uses `base: '/'` for generated assets.
 
-## Search and social metadata
+## Contributing
 
-`index.html` declares the canonical custom-domain URL, localized runtime title
-and description support, Open Graph and social-card metadata, and
-`WebApplication` structured data. `public/social-preview.png` is the 1200 × 630
-sharing image. `public/robots.txt` allows crawling and points search engines to
-the single-page `public/sitemap.xml`.
+Bug reports and focused improvement proposals are welcome through GitHub Issues.
 
-The placeholder author name in `index.html` and the placeholder LinkedIn URL in
-`src/components/AboutDialog.tsx` must be replaced before public promotion.
-Google Search Console setup and sitemap submission remain external deployment
-steps rather than repository configuration.
+Before opening a code contribution, please run:
+
+```bash
+npm test
+npm run build
+```
+
+Keep user-facing text available in French, German, Italian, and English.
+Detailed architecture notes belong in `docs/ARCHITECTURE.md`, while `README.md`
+should stay concise and user-oriented.
 
 ## License
 
