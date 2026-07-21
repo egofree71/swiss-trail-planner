@@ -130,9 +130,10 @@ data.
 Walking-time estimates apply the slope-sensitive model published by Schweizer
 Wanderwege in *Wanderzeitberechnung, Version 2020.2* (8 June 2020).
 
-For provider identifiers, request strategies, fallback behaviour, layer
-ordering, projections, caching, and routing internals, see the
-[architecture document](docs/ARCHITECTURE.md).
+For the application-wide design, see the
+[architecture document](docs/ARCHITECTURE.md). Detailed routing data sources,
+cell loading, graph construction, snapping, A*, caching, and fallback behaviour
+are documented in [Browser routing](docs/ROUTING.md).
 
 ## Known limitations
 
@@ -148,10 +149,12 @@ ordering, projections, caching, and routing internals, see the
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md): current structure, file
-  responsibilities, data flows, validation scope, and technical choices,
-  including the disposable OpenLayers runtime, route and GPX state management,
-  routing Worker behaviour, and public-transport loading.
+- [Architecture](docs/ARCHITECTURE.md): product constraints, component
+  boundaries, state model, main workflows, provider integration, performance,
+  errors, testing, and deployment.
+- [Browser routing](docs/ROUTING.md): bounded swissTLM3D loading, Worker
+  protocol, cell and graph caches, hiking enrichment, snapping, A*, fallback
+  semantics, tests, and validation scope.
 
 ## Regression tests
 
@@ -204,8 +207,9 @@ npm run build
 ```
 
 Keep user-facing text available in French, German, Italian, and English.
-Detailed architecture notes belong in `docs/ARCHITECTURE.md`, while `README.md`
-should stay concise and user-oriented.
+Application-wide design belongs in `docs/ARCHITECTURE.md`; routing-specific
+design belongs in `docs/ROUTING.md`; `README.md` should stay concise and
+user-oriented.
 
 ## License
 
