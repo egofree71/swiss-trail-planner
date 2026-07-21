@@ -21,8 +21,10 @@ export const LANGUAGE_METADATA: Record<
 };
 
 const frenchTranslations = {
+  'app.title':
+    'Via Helvetica – Planificateur d’itinéraires de randonnée en Suisse',
   'app.description':
-    "Via Helvetica — planificateur open source d'itinéraires de randonnée en Suisse.",
+    'Planifiez des itinéraires de randonnée en Suisse sur les cartes officielles, consultez le dénivelé et les informations sur les sentiers, puis importez ou exportez des fichiers GPX.',
   'about.open': 'À propos de Via Helvetica',
   'about.title': 'Via Helvetica',
   'about.tagline':
@@ -195,8 +197,10 @@ const frenchTranslations = {
 export type TranslationKey = keyof typeof frenchTranslations;
 
 const germanTranslations: Record<TranslationKey, string> = {
+  'app.title':
+    'Via Helvetica – Routenplaner für Wanderungen in der Schweiz',
   'app.description':
-    'Via Helvetica — quelloffener Routenplaner für Wanderungen in der Schweiz.',
+    'Planen Sie Wanderungen in der Schweiz auf offiziellen Karten, prüfen Sie Höhenprofil und Weginformationen und importieren oder exportieren Sie GPX-Dateien.',
   'about.open': 'Über Via Helvetica',
   'about.title': 'Via Helvetica',
   'about.tagline':
@@ -368,8 +372,10 @@ const germanTranslations: Record<TranslationKey, string> = {
 };
 
 const italianTranslations: Record<TranslationKey, string> = {
+  'app.title':
+    'Via Helvetica – Pianificatore di itinerari escursionistici in Svizzera',
   'app.description':
-    'Via Helvetica — pianificatore open source di itinerari escursionistici in Svizzera.',
+    'Pianifica itinerari escursionistici in Svizzera sulle carte ufficiali, consulta dislivello e informazioni sui sentieri e importa o esporta file GPX.',
   'about.open': 'Informazioni su Via Helvetica',
   'about.title': 'Via Helvetica',
   'about.tagline':
@@ -541,8 +547,9 @@ const italianTranslations: Record<TranslationKey, string> = {
 };
 
 const englishTranslations: Record<TranslationKey, string> = {
+  'app.title': 'Via Helvetica – Swiss Hiking Route Planner',
   'app.description':
-    'Via Helvetica — open-source hiking route planner for Switzerland.',
+    'Plan hiking routes in Switzerland on official maps, inspect elevation and trail information, and import or export GPX files. Free and open source.',
   'about.open': 'About Via Helvetica',
   'about.title': 'Via Helvetica',
   'about.tagline':

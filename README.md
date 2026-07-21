@@ -16,6 +16,7 @@ account or a project-owned application server.
 - [Documentation](#documentation)
 - [Regression tests](#regression-tests)
 - [Production build and deployment](#production-build-and-deployment)
+- [Search and social metadata](#search-and-social-metadata)
 - [License](#license)
 
 ## Project principles
@@ -214,6 +215,19 @@ application to GitHub Pages after a push to `main`. GitHub Pages must use
 **GitHub Actions** as its deployment source. The production site is served from
 the custom domain root at [viahelvetica.ch](https://viahelvetica.ch/), so Vite
 uses `base: '/'` for generated assets.
+
+## Search and social metadata
+
+`index.html` declares the canonical custom-domain URL, localized runtime title
+and description support, Open Graph and social-card metadata, and
+`WebApplication` structured data. `public/social-preview.png` is the 1200 × 630
+sharing image. `public/robots.txt` allows crawling and points search engines to
+the single-page `public/sitemap.xml`.
+
+The placeholder author name in `index.html` and the placeholder LinkedIn URL in
+`src/components/AboutDialog.tsx` must be replaced before public promotion.
+Google Search Console setup and sitemap submission remain external deployment
+steps rather than repository configuration.
 
 ## License
 

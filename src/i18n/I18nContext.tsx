@@ -99,6 +99,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = language;
+    document.title = t('app.title');
 
     const description = document.querySelector<HTMLMetaElement>(
       'meta[name="description"]',

@@ -320,14 +320,15 @@ Regression tests
    ├── JSDOM for browser XML APIs
    └── colocated route, GPX import/export, metric, transport-domain, routing-grid, Worker-client, and routing-engine suites
 
-Deployment
+Deployment and discovery
    │
    ├── push to main
    ├── GitHub Actions
    │      ├── npm ci
    │      ├── npm test
    │      └── npm run build
-   └── GitHub Pages
+   ├── GitHub Pages at https://viahelvetica.ch/
+   └── static canonical, Open Graph, JSON-LD, robots, sitemap, and social-preview assets
 ```
 
 No project-owned service runs on the server. Vite only compiles and serves
@@ -360,7 +361,8 @@ around the selected route section.
 | Browser File API and DOMParser | Local GPX selection and validation |
 | Browser Fullscreen API | Distraction-free map display |
 | Typed in-project i18n dictionaries | Four-language UI without an additional runtime dependency |
-| HTML/CSS | Full-screen layout, floating controls, and result panel |
+| HTML/CSS | Full-screen layout, floating controls, result panels, and static search/social metadata |
+| Schema.org JSON-LD and Open Graph | Search-engine application description and social-link previews |
 | GitHub Actions | Automated GitHub Pages deployment |
 | GitHub Pages | Static production hosting over HTTPS |
 | npm | Dependency installation and lockfile management |
@@ -1035,6 +1037,29 @@ newer push cancels an obsolete deployment.
 GitHub Pages serves the application over HTTPS. This is important because
 browser geolocation requires a secure context outside `localhost`.
 
+### 13.1 Search discovery and social sharing
+
+`index.html` declares `https://viahelvetica.ch/` as the canonical URL and
+provides an English initial title and description for crawlers before React
+starts. It also contains Open Graph and large-image social-card metadata plus
+Schema.org `WebApplication` JSON-LD. The structured data describes the
+application as free, browser-based, open source, and focused on Swiss hiking
+route planning; it does not claim live navigation or route persistence.
+
+`I18nProvider` updates the document language, title, and ordinary meta
+description after resolving the stored or browser-selected interface language.
+Open Graph metadata remains stable in English because link-preview crawlers
+usually do not execute the application or carry a user's language preference.
+The application continues to use one canonical URL rather than presenting four
+crawlable language-specific pages.
+
+Vite copies `public/social-preview.png`, `public/robots.txt`, and
+`public/sitemap.xml` unchanged to the domain root. The preview is 1200 × 630 and
+includes the swisstopo attribution visible in its map extract. The sitemap
+contains the single canonical application URL and intentionally omits a
+manually maintained `lastmod` value. Search-console verification and sitemap
+submission are operational tasks outside the repository.
+
 ## 14. Geographic constraint
 
 The application uses a rectangular extent covering Switzerland with a small
@@ -1067,7 +1092,10 @@ via-helvetica/
 │   │   ├── aerial.png
 │   │   ├── color.png
 │   │   └── gray.png
-│   └── favicon.svg
+│   ├── favicon.svg
+│   ├── robots.txt
+│   ├── sitemap.xml
+│   └── social-preview.png
 ├── src/
 │   ├── assets/
 │   │   └── public-transport-stops/
@@ -1705,7 +1733,9 @@ labels.
 ### `src/i18n/I18nContext.tsx`
 
 Detects, persists, and publishes the current language and Swiss number-format
-locale. It also updates the document language and description metadata.
+locale. It also updates the document language, title, and ordinary description
+metadata after startup; canonical, Open Graph, and structured metadata remain
+static in `index.html`.
 
 ### `src/i18n/translations.ts`
 
@@ -1777,7 +1807,9 @@ that a disabled local test value cannot escape to a deployed hostname.
 ### Remaining root files
 
 - `src/main.tsx` mounts React, the language provider, and styles.
-- `index.html` is the browser entry point.
+- `index.html` is the browser entry point and owns canonical, Open Graph,
+  social-card, and Schema.org `WebApplication` metadata plus the no-JavaScript
+  fallback.
 - `package.json` declares dependencies and npm scripts for development,
   regression tests, and the production build.
 - `package-lock.json` locks dependency versions.
@@ -1787,6 +1819,9 @@ that a disabled local test value cannot escape to a deployed hostname.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
   thumbnails used by the Layers menu without another map request.
 - `public/favicon.svg` provides the browser favicon referenced by `index.html`.
+- `public/social-preview.png` is the 1200 × 630 Open Graph and social-card image.
+- `public/robots.txt` allows crawling and advertises the canonical sitemap.
+- `public/sitemap.xml` lists the single canonical application URL.
 - `tsconfig.json` enables strict TypeScript.
 - `.editorconfig` and `.gitignore` define repository conventions.
 - `README.md` is the quick-start guide.
@@ -1796,7 +1831,9 @@ that a disabled local test value cannot escape to a deployed hostname.
 
 1. The browser registers EPSG:2056 through `proj4`, then resolves a stored or
    browser language.
-2. The language provider updates document metadata and exposes localized strings.
+2. The language provider updates the document language, title, and ordinary
+   meta description and exposes localized strings; canonical and social metadata
+   remain stable for the single public URL.
 3. `useMapRuntime` creates one disposable runtime through `mapRuntime.ts`;
    the runtime builds the native LV95 OpenLayers view, ordered tile and vector
    layers, editable-route display, imported-route display, and transient markers,
@@ -1952,7 +1989,8 @@ that a disabled local test value cannot escape to a deployed hostname.
     the map target are cleaned up by their owning components.
 52. A push to `main` triggers the Pages workflow, which installs locked
     dependencies, runs the regression suite, builds the application, and deploys
-    `dist`.
+    `dist`, including the canonical metadata, social preview, robots file, and
+    sitemap copied from the static public assets.
 
 ## 18. Error handling
 

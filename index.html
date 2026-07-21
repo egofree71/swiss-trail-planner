@@ -3,15 +3,110 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="robots" content="index, follow" />
     <meta
       name="description"
-      content="Via Helvetica — open-source hiking route planner for Switzerland."
+      content="Plan hiking routes in Switzerland on official maps, inspect elevation and trail information, and import or export GPX files. Free and open source."
     />
-    <title>Via Helvetica</title>
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href="https://viahelvetica.ch/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Via Helvetica" />
+    <meta property="og:locale" content="en_CH" />
+    <meta property="og:locale:alternate" content="fr_CH" />
+    <meta property="og:locale:alternate" content="de_CH" />
+    <meta property="og:locale:alternate" content="it_CH" />
+    <meta
+      property="og:title"
+      content="Via Helvetica – Swiss Hiking Route Planner"
+    />
+    <meta
+      property="og:description"
+      content="Plan hiking routes on official Swiss maps, inspect elevation and trail information, and import or export GPX files. Free and open source."
+    />
+    <meta property="og:url" content="https://viahelvetica.ch/" />
+    <meta
+      property="og:image"
+      content="https://viahelvetica.ch/social-preview.png"
+    />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Via Helvetica hiking route planner displayed on an official Swiss map"
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="Via Helvetica – Swiss Hiking Route Planner"
+    />
+    <meta
+      name="twitter:description"
+      content="Plan hiking routes on official Swiss maps, inspect elevation and trail information, and import or export GPX files."
+    />
+    <meta
+      name="twitter:image"
+      content="https://viahelvetica.ch/social-preview.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Via Helvetica hiking route planner displayed on an official Swiss map"
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Via Helvetica",
+        "url": "https://viahelvetica.ch/",
+        "description": "Free and open-source web application for planning hiking routes in Switzerland on official maps.",
+        "applicationCategory": "TravelApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript and a modern web browser.",
+        "isAccessibleForFree": true,
+        "inLanguage": ["fr", "de", "it", "en"],
+        "image": "https://viahelvetica.ch/social-preview.png",
+        "screenshot": "https://viahelvetica.ch/social-preview.png",
+        "codeRepository": "https://github.com/egofree71/via-helvetica",
+        "license": "https://opensource.org/license/mit/",
+        "author": {
+          "@type": "Person",
+          "name": "Philippe De Pol"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "CHF"
+        },
+        "featureList": [
+          "Hiking route planning on official Swiss maps",
+          "Experimental browser-side swissTLM3D routing",
+          "Elevation profile and hiking-time estimate",
+          "GPX import and export",
+          "Hiking closures, danger zones and public-transport information"
+        ]
+      }
+    </script>
+
+    <title>Via Helvetica – Swiss Hiking Route Planner</title>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>Via Helvetica – Swiss Hiking Route Planner</h1>
+        <p>
+          Via Helvetica is a free, open-source web application for planning
+          hiking routes in Switzerland on official maps, reviewing elevation
+          information, and importing or exporting GPX files.
+        </p>
+        <p>This application requires JavaScript to display the interactive map.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
