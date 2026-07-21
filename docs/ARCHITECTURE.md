@@ -82,7 +82,7 @@ It can:
 - reveal a compact route action strip for snap mode, reversal, loop closure, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
-- display a metric scale and permanently visible swisstopo attribution;
+- display a metric scale where lower-left space is available and permanently visible swisstopo attribution;
 - open a localized About dialog with project context, experimental-routing guidance, creator and support details, source, license, and professional profile links, and official data credits;
 - report map, search, geolocation, and routing failures.
 
@@ -101,10 +101,15 @@ It does not yet include:
 ### 3.1 The map is the main interface
 
 No permanent toolbar occupies the top of the window. Tools use compact floating
-controls and temporary panels so the map retains as much space as possible. A
-single lower-right information button uses a project-owned vector icon and
-opens the modal About dialog only when needed, while the required swisstopo
-attribution remains visible beside it.
+controls and temporary panels so the map retains as much space as possible. The
+information button uses a project-owned vector icon and opens the modal About
+dialog only when needed. It and the permanently visible swisstopo attribution
+stay at the lower-right edge on wide screens, then join the existing right-side
+control stack before they can collide with the centered route summary. The
+summary therefore remains on the bottom edge instead of consuming a second
+full-width strip of map height on narrow screens. The compact attribution loses
+button-like shadow and padding in every layout, and the metric scale is hidden at
+phone widths where the route summary would permanently cover it.
 
 ### 3.2 Incremental delivery
 
@@ -903,7 +908,11 @@ uses an ellipsis while elevations are loading, and keeps distance visible with
 dashes for the remaining values if the external profile request fails. On narrow
 screens, CSS keeps the four values and profile toggle in one compact row, hides
 the visible labels while retaining them for assistive technology, and adds
-up/down symbols to distinguish ascent and descent. Walking time follows the
+up/down symbols to distinguish ascent and descent. The summary remains attached
+to the bottom edge; the smaller About and attribution controls relocate into the
+right-side stack when horizontal space becomes tight. At phone widths, the metric
+scale is hidden because this summary occupies the same lower-left map area.
+Walking time follows the
 Schweizer Wanderwege section-by-section polynomial and is rounded to five
 minutes because it remains an estimate excluding breaks.
 
@@ -1312,7 +1321,7 @@ ignored consistently instead of being reported as an application failure.
 
 ### `src/components/AboutDialog.tsx`
 
-Renders the localized native modal opened by the lower-right information button.
+Renders the localized native modal opened by the responsive information button.
 It keeps the project summary, privacy and experimental-routing guidance,
 placeholder creator name, support email, source, MIT-license, and LinkedIn
 links, and provider credits out of the permanent map surface. Its project
@@ -1767,9 +1776,13 @@ zoom-level semantics, and explicit WMTS tile-grid/source factories.
 ### `src/styles.css`
 
 Defines the full-screen layout, left-side search control, right-side map
-controls, lower-right information button and visible attribution, modal About
-dialog, shared information panel, route statistics, result panels, status
-messages, and OpenLayers control placement.
+controls, responsive information button and visible attribution, modal About
+dialog, bottom route statistics, result panels, status messages, and OpenLayers
+control placement. A collision-oriented breakpoint moves the information button
+and attribution into the right-side stack while leaving the statistics summary
+on the bottom edge. It also gives the legal attribution a label-like treatment
+instead of a button-like shadow and hides the metric scale at phone widths where
+it would remain covered by the summary.
 
 ### Regression test files
 
@@ -1843,9 +1856,13 @@ that a disabled local test value cannot escape to a deployed hostname.
 5. The Layers menu changes controlled layer choices. `useMapViewControls`
    applies the base map and persisted rendered hiking-overlay preference, while
    `useMapInformationLayers` persists and applies the three inspectable overlays.
-   The separate lower-right information button closes any map-feature popup and
-   opens the localized About dialog; the compact swisstopo credit beside it
-   remains visible without using OpenLayers' attribution expander.
+   The separate information button closes any map-feature popup and opens the
+   localized About dialog. On wide screens it shares the lower-right edge with
+   the compact swisstopo credit; before either control can collide with the
+   centered route summary, both join the right-side control stack below the
+   language selector. The credit remains visible without using OpenLayers'
+   attribution expander. At phone widths, the metric scale is hidden instead of
+   remaining obscured below the bottom route summary.
 6. The rendered hiking overlay is enabled by default unless a stored preference
    hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.

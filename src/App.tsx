@@ -477,6 +477,29 @@ export default function App() {
 
         <LanguageSelector />
 
+        <button
+          type="button"
+          className="map-control-button about-button"
+          aria-label={t('about.open')}
+          title={t('about.open')}
+          onClick={openAboutDialog}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v6M12 7.5h.01" />
+          </svg>
+        </button>
+
+        <div className="map-attribution" aria-label={t('about.maps')}>
+          <a
+            href="https://www.swisstopo.admin.ch/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            © swisstopo
+          </a>
+        </div>
+
         {locationMessage && (
           <div
             className={[
@@ -493,29 +516,6 @@ export default function App() {
           </div>
         )}
       </nav>
-
-      <div className="map-attribution" aria-label={t('about.maps')}>
-        <a
-          href="https://www.swisstopo.admin.ch/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          © swisstopo
-        </a>
-      </div>
-
-      <button
-        type="button"
-        className="map-control-button about-button"
-        aria-label={t('about.open')}
-        title={t('about.open')}
-        onClick={openAboutDialog}
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v6M12 7.5h.01" />
-        </svg>
-      </button>
 
       {trailClosurePopup && (
         <TrailClosurePopup

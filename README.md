@@ -107,12 +107,15 @@ http://localhost:5173/
    transport stops to inspect their available information. Starting route
    creation, loading a GPX, opening map information, or changing the interface
    language clears the temporary location marker, search text, and result list.
-7. Use the information button in the lower-right corner to open the localized
-   About dialog. It summarizes the project, experimental-routing limitation,
-   creator and support contact, source code, license, professional profile, and official data credits.
+7. Use the information button to open the localized About dialog. It stays in
+   the lower-right corner on wide screens and joins the right-side control stack
+   below the language selector when the viewport narrows. The dialog summarizes
+   the project, experimental-routing limitation, creator and support contact,
+   source code, license, professional profile, and official data credits.
 
 The application requests browser geolocation only after the location button is
-pressed. Deployed geolocation requires HTTPS.
+pressed. Deployed geolocation requires HTTPS. At narrow phone widths, the metric
+scale is hidden because the bottom route summary occupies the same map area.
 
 ## Data sources and limitations
 

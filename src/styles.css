@@ -287,6 +287,7 @@ select {
 
 .map-controls button,
 .map-controls select,
+.map-controls .map-attribution,
 .map-controls .map-layers-menu {
   pointer-events: auto;
 }
@@ -475,27 +476,29 @@ select {
 }
 
 .about-button {
-  position: absolute;
+  position: fixed;
   z-index: 21;
   right: 0.75rem;
   bottom: 0.75rem;
+  flex: 0 0 auto;
 }
 
 .map-attribution {
-  position: absolute;
+  position: fixed;
   z-index: 20;
   right: 4.15rem;
   bottom: 0.75rem;
   display: flex;
-  min-height: 1.8rem;
+  min-height: 1.5rem;
   align-items: center;
-  padding: 0 0.5rem;
-  border: 1px solid rgb(32 47 60 / 18%);
-  border-radius: 6px;
-  background: rgb(255 255 255 / 90%);
-  box-shadow: 0 2px 7px rgb(0 0 0 / 13%);
-  font-size: 0.72rem;
-  backdrop-filter: blur(6px);
+  padding: 0.12rem 0.36rem;
+  border: 1px solid rgb(32 47 60 / 14%);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 84%);
+  box-shadow: none;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  backdrop-filter: blur(4px);
 }
 
 .map-attribution a {
@@ -1498,7 +1501,31 @@ select {
   left: 0.6rem;
 }
 
+/* Once the centered statistics bar approaches the lower-right controls,
+   keep the summary on the bottom edge and move the compact information
+   controls into the existing right-side stack instead of sacrificing a full
+   strip of map height. */
+@media (max-width: 1140px) {
+  .about-button,
+  .map-attribution {
+    position: static;
+    right: auto;
+    bottom: auto;
+  }
+
+  .map-attribution {
+    align-self: flex-end;
+  }
+}
+
 @media (max-width: 700px) {
+  /* The bottom route summary occupies the scale bar's only useful position on
+     narrow screens. Hiding the decorative scale avoids a permanently obscured
+     control while preserving more map height than moving either element. */
+  .ol-scale-bar {
+    display: none;
+  }
+
   .location-search {
     top: 0.75rem;
     left: 0.75rem;
@@ -1532,16 +1559,6 @@ select {
     height: 2.85rem;
   }
 
-  .about-button {
-    right: 0.75rem;
-    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  }
-
-  .map-attribution {
-    right: 3.95rem;
-    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-  }
-
   .about-dialog-details > div,
   .about-dialog-credits > div {
     grid-template-columns: 1fr;
@@ -1554,9 +1571,7 @@ select {
   }
 
   .route-summary {
-    /* Keep the full-width mobile summary above the attribution and About
-       controls instead of letting its profile toggle sit underneath them. */
-    bottom: calc(4.15rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
     width: calc(100vw - 1.5rem);
   }
 
