@@ -6,6 +6,6 @@ export default defineConfig({
    * GitHub Pages publishes this repository below /via-helvetica/.
    * Vite prefixes generated production asset URLs with this base path.
    */
-  base: '/via-helvetica/',
+  base: '/',
   plugins: [react()],
 });
