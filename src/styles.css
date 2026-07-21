@@ -1534,12 +1534,12 @@ select {
 
   .about-button {
     right: 0.75rem;
-    bottom: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .map-attribution {
     right: 3.95rem;
-    bottom: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .about-dialog-details > div,
@@ -1554,7 +1554,9 @@ select {
   }
 
   .route-summary {
-    bottom: 2.35rem;
+    /* Keep the full-width mobile summary above the attribution and About
+       controls instead of letting its profile toggle sit underneath them. */
+    bottom: calc(4.15rem + env(safe-area-inset-bottom, 0px));
     width: calc(100vw - 1.5rem);
   }
 
