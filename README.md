@@ -40,7 +40,7 @@ intent ambiguous.
 | Import and export | Read-only GPX loading with statistics and elevation profile, plus named GPX track export with sub-metre geometry simplification, geographic metadata bounds, and smoothed elevations when available |
 | Safety | Official hiking-trail closures and detours, plus military shooting notices and danger zones with localized details |
 | Public transport | Passenger-relevant stops, mode-specific symbols, next departures grouped by date, and links to the official SBB/CFF/FFS timetable |
-| Interface | Compact floating controls, no permanent toolbar, and French, German, Italian, and English translations |
+| Interface | Compact floating controls, no permanent toolbar, French, German, Italian, and English translations, and a localized About dialog with project, support, professional profile, safety, and data-credit information |
 
 ## Quick start
 
@@ -57,7 +57,7 @@ npm run dev
 Vite then displays the project address, usually:
 
 ```text
-http://localhost:5173/via-helvetica/
+http://localhost:5173/
 ```
 
 ## Basic usage
@@ -106,6 +106,9 @@ http://localhost:5173/via-helvetica/
    transport stops to inspect their available information. Starting route
    creation, loading a GPX, opening map information, or changing the interface
    language clears the temporary location marker, search text, and result list.
+7. Use the information button in the lower-right corner to open the localized
+   About dialog. It summarizes the project, experimental-routing limitation,
+   creator and support contact, source code, license, professional profile, and official data credits.
 
 The application requests browser geolocation only after the location button is
 pressed. Deployed geolocation requires HTTPS.
@@ -208,7 +211,9 @@ npm run preview
 
 The repository includes a GitHub Actions workflow that builds and deploys the
 application to GitHub Pages after a push to `main`. GitHub Pages must use
-**GitHub Actions** as its deployment source.
+**GitHub Actions** as its deployment source. The production site is served from
+the custom domain root at [viahelvetica.ch](https://viahelvetica.ch/), so Vite
+uses `base: '/'` for generated assets.
 
 ## License
 

@@ -23,6 +23,30 @@ export const LANGUAGE_METADATA: Record<
 const frenchTranslations = {
   'app.description':
     "Via Helvetica — planificateur open source d'itinéraires de randonnée en Suisse.",
+  'about.open': 'À propos de Via Helvetica',
+  'about.title': 'Via Helvetica',
+  'about.tagline':
+    'Planifiez vos itinéraires de randonnée en Suisse sur les cartes officielles.',
+  'about.description':
+    'Via Helvetica est une application web gratuite et open source. Elle permet de créer ou d’importer un itinéraire, d’en consulter la distance, le dénivelé et le profil d’altitude, puis de l’exporter au format GPX.',
+  'about.privacy':
+    'Aucun compte n’est nécessaire. Les itinéraires ne sont pas enregistrés sur un serveur appartenant à Via Helvetica.',
+  'about.safetyTitle': 'À savoir',
+  'about.safety':
+    'Le calcul d’itinéraire est une aide expérimentale à la planification. Via Helvetica ne fournit pas de guidage en direct. Vérifiez les conditions, fermetures et avis officiels avant votre départ.',
+  'about.projectTitle': 'Projet',
+  'about.createdBy': 'Créé par',
+  'about.support': 'Support',
+  'about.sourceCode': 'Code source',
+  'about.license': 'Licence',
+  'about.linkedin': 'Profil professionnel',
+  'about.creditsTitle': 'Cartes et données',
+  'about.maps': 'Cartes et géodonnées',
+  'about.closures': 'Fermetures et déviations',
+  'about.dangerZones': 'Avis de tir et zones de danger',
+  'about.transportStops': 'Arrêts de transports publics',
+  'about.departures': 'Horaires des transports publics',
+  'about.close': 'Fermer',
   'language.select': 'Choisir la langue',
   'language.fr': 'Français',
   'language.de': 'Allemand',
@@ -173,6 +197,30 @@ export type TranslationKey = keyof typeof frenchTranslations;
 const germanTranslations: Record<TranslationKey, string> = {
   'app.description':
     'Via Helvetica — quelloffener Routenplaner für Wanderungen in der Schweiz.',
+  'about.open': 'Über Via Helvetica',
+  'about.title': 'Via Helvetica',
+  'about.tagline':
+    'Planen Sie Wanderungen in der Schweiz auf offiziellen Karten.',
+  'about.description':
+    'Via Helvetica ist eine kostenlose Open-Source-Webanwendung. Sie können eine Route erstellen oder importieren, Distanz, Höhenunterschiede und Höhenprofil prüfen und die Route als GPX exportieren.',
+  'about.privacy':
+    'Es ist kein Konto erforderlich. Routen werden nicht auf einem Server von Via Helvetica gespeichert.',
+  'about.safetyTitle': 'Hinweis',
+  'about.safety':
+    'Die Routenberechnung ist eine experimentelle Planungshilfe. Via Helvetica bietet keine Live-Navigation. Prüfen Sie vor dem Aufbruch die Bedingungen, Sperrungen und offiziellen Hinweise.',
+  'about.projectTitle': 'Projekt',
+  'about.createdBy': 'Erstellt von',
+  'about.support': 'Support',
+  'about.sourceCode': 'Quellcode',
+  'about.license': 'Lizenz',
+  'about.linkedin': 'Berufsprofil',
+  'about.creditsTitle': 'Karten und Daten',
+  'about.maps': 'Karten und Geodaten',
+  'about.closures': 'Sperrungen und Umleitungen',
+  'about.dangerZones': 'Schiessanzeigen und Gefahrenzonen',
+  'about.transportStops': 'Haltestellen des öffentlichen Verkehrs',
+  'about.departures': 'Fahrplandaten',
+  'about.close': 'Schliessen',
   'language.select': 'Sprache wählen',
   'language.fr': 'Französisch',
   'language.de': 'Deutsch',
@@ -322,6 +370,30 @@ const germanTranslations: Record<TranslationKey, string> = {
 const italianTranslations: Record<TranslationKey, string> = {
   'app.description':
     'Via Helvetica — pianificatore open source di itinerari escursionistici in Svizzera.',
+  'about.open': 'Informazioni su Via Helvetica',
+  'about.title': 'Via Helvetica',
+  'about.tagline':
+    'Pianifica itinerari escursionistici in Svizzera sulle carte ufficiali.',
+  'about.description':
+    'Via Helvetica è un’applicazione web gratuita e open source. Permette di creare o importare un itinerario, consultarne distanza, dislivello e profilo altimetrico, quindi esportarlo in formato GPX.',
+  'about.privacy':
+    'Non è necessario alcun account. Gli itinerari non vengono salvati su un server di Via Helvetica.',
+  'about.safetyTitle': 'Da sapere',
+  'about.safety':
+    'Il calcolo dell’itinerario è un aiuto sperimentale alla pianificazione. Via Helvetica non offre navigazione in tempo reale. Prima di partire, verifica condizioni, chiusure e avvisi ufficiali.',
+  'about.projectTitle': 'Progetto',
+  'about.createdBy': 'Creato da',
+  'about.support': 'Supporto',
+  'about.sourceCode': 'Codice sorgente',
+  'about.license': 'Licenza',
+  'about.linkedin': 'Profilo professionale',
+  'about.creditsTitle': 'Carte e dati',
+  'about.maps': 'Carte e geodati',
+  'about.closures': 'Chiusure e deviazioni',
+  'about.dangerZones': 'Avvisi di tiro e zone di pericolo',
+  'about.transportStops': 'Fermate dei trasporti pubblici',
+  'about.departures': 'Orari dei trasporti pubblici',
+  'about.close': 'Chiudi',
   'language.select': 'Scegli la lingua',
   'language.fr': 'Francese',
   'language.de': 'Tedesco',
@@ -471,6 +543,30 @@ const italianTranslations: Record<TranslationKey, string> = {
 const englishTranslations: Record<TranslationKey, string> = {
   'app.description':
     'Via Helvetica — open-source hiking route planner for Switzerland.',
+  'about.open': 'About Via Helvetica',
+  'about.title': 'Via Helvetica',
+  'about.tagline':
+    'Plan hiking routes in Switzerland on official maps.',
+  'about.description':
+    'Via Helvetica is a free, open-source web application. It lets you create or import a route, review its distance, elevation gain and profile, and export it as GPX.',
+  'about.privacy':
+    'No account is required. Routes are not stored on a server operated by Via Helvetica.',
+  'about.safetyTitle': 'Important',
+  'about.safety':
+    'Route calculation is an experimental planning aid. Via Helvetica does not provide live navigation. Check conditions, closures, and official notices before setting out.',
+  'about.projectTitle': 'Project',
+  'about.createdBy': 'Created by',
+  'about.support': 'Support',
+  'about.sourceCode': 'Source code',
+  'about.license': 'License',
+  'about.linkedin': 'Professional profile',
+  'about.creditsTitle': 'Maps and data',
+  'about.maps': 'Maps and geodata',
+  'about.closures': 'Closures and detours',
+  'about.dangerZones': 'Shooting notices and danger zones',
+  'about.transportStops': 'Public transport stops',
+  'about.departures': 'Public transport departures',
+  'about.close': 'Close',
   'language.select': 'Choose language',
   'language.fr': 'French',
   'language.de': 'German',

@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { containsCoordinate } from 'ol/extent.js';
+import AboutDialog from './components/AboutDialog';
 import MapLayersSelector from './components/MapLayersSelector';
 import LanguageSelector from './components/LanguageSelector';
 import LocationSearch from './components/LocationSearch';
@@ -58,6 +59,7 @@ export default function App() {
   const appRef = useRef<HTMLElement>(null);
   const mapTargetRef = useRef<HTMLDivElement>(null);
 
+  const [isAboutDialogOpen, setIsAboutDialogOpen] = useState(false);
   const [isRouteExportDialogOpen, setIsRouteExportDialogOpen] =
     useState(false);
   const [locationSearchResetVersion, setLocationSearchResetVersion] =
@@ -230,6 +232,12 @@ export default function App() {
     isRouteCreationActive,
     onInformationSelected: clearSelectedSearchResult,
   });
+
+  /** Opens project information after dismissing any map-feature popup behind it. */
+  const openAboutDialog = useCallback(() => {
+    closeMapInformationPopup();
+    setIsAboutDialogOpen(true);
+  }, [closeMapInformationPopup]);
 
   /** Places a temporary marker and frames one official search result. */
   const selectSearchResult = (result: LocationSearchResult) => {
@@ -486,6 +494,29 @@ export default function App() {
         )}
       </nav>
 
+      <div className="map-attribution" aria-label={t('about.maps')}>
+        <a
+          href="https://www.swisstopo.admin.ch/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          © swisstopo
+        </a>
+      </div>
+
+      <button
+        type="button"
+        className="map-control-button about-button"
+        aria-label={t('about.open')}
+        title={t('about.open')}
+        onClick={openAboutDialog}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v6M12 7.5h.01" />
+        </svg>
+      </button>
+
       {trailClosurePopup && (
         <TrailClosurePopup
           status={trailClosurePopup}
@@ -535,6 +566,11 @@ export default function App() {
           {routeMessage}
         </div>
       )}
+
+      <AboutDialog
+        isOpen={isAboutDialogOpen}
+        onClose={() => setIsAboutDialogOpen(false)}
+      />
 
       <RouteExportDialog
         isOpen={isRouteExportDialogOpen}

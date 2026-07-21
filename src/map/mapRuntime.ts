@@ -267,6 +267,9 @@ export function createMapRuntime(
     }),
     controls: defaultControls({
       zoom: false,
+      // Project-owned attribution and About controls keep credits readable and
+      // provide localized context without relying on OpenLayers' tiny expander.
+      attribution: false,
     }).extend([
       new ScaleLine({
         units: 'metric',

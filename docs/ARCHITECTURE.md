@@ -3,7 +3,7 @@
 > Documented state: native LV95 (`EPSG:2056`) map rendering with selectable
 > raster backgrounds, hiking, closure, military shooting-danger, and
 > public-transport overlays,
-> search, geolocation, fullscreen, manual route creation with draggable,
+> search, geolocation, fullscreen, a localized About dialog, manual route creation with draggable,
 > insertable, and individually removable waypoints, start/finish markers, sparse
 > direction arrowheads, optional loop closure, route statistics, elevation profile,
 > GPX export, and experimental
@@ -82,7 +82,8 @@ It can:
 - reveal a compact route action strip for snap mode, reversal, loop closure, deletion, and export;
 - pan and zoom with custom floating controls;
 - restrict navigation to Switzerland and a small border area;
-- display a metric scale and swisstopo attribution;
+- display a metric scale and permanently visible swisstopo attribution;
+- open a localized About dialog with project context, experimental-routing guidance, creator and support details, source, license, and professional profile links, and official data credits;
 - report map, search, geolocation, and routing failures.
 
 It does not yet include:
@@ -100,7 +101,10 @@ It does not yet include:
 ### 3.1 The map is the main interface
 
 No permanent toolbar occupies the top of the window. Tools use compact floating
-controls and temporary panels so the map retains as much space as possible.
+controls and temporary panels so the map retains as much space as possible. A
+single lower-right information button uses a project-owned vector icon and
+opens the modal About dialog only when needed, while the required swisstopo
+attribution remains visible beside it.
 
 ### 3.2 Incremental delivery
 
@@ -235,7 +239,7 @@ Browser
    │
    ├── React 19 + TypeScript
    │      │
-   │      ├── LocationSearch component
+   │      ├── AboutDialog and LocationSearch components
    │      │      └── geo.admin.ch SearchServer
    │      ├── MapLayersSelector, shared information popup wrappers, RouteControls, RouteImportControl, RouteExportDialog, RouteStatistics, and LanguageSelector
    │      ├── typed French, German, Italian, and English dictionaries
@@ -340,7 +344,7 @@ around the selected route section.
 | TypeScript 5 | Static typing and compile-time verification |
 | OpenLayers 10 | Map, native LV95 view, layers, projections, markers, controls, and route-shaping pointer interaction |
 | proj4 | EPSG:2056 definition and OpenLayers transformation registration |
-| Vite 8 | Development server, production build, and Pages base path |
+| Vite 8 | Development server, production build, and custom-domain root asset path |
 | Vitest 4 | Deterministic regression tests for route, GPX import/export, metric, and transport-domain contracts |
 | JSDOM | Browser XML APIs for local GPX import and export tests without launching the application |
 | geo.admin.ch SearchServer | Official location search |
@@ -997,21 +1001,22 @@ used by editable routes.
 
 ## 13. GitHub Pages deployment
 
-The repository is deployed as a GitHub Pages project site:
+The repository is deployed through GitHub Pages and served from the custom
+domain root:
 
 ```text
-https://<username>.github.io/via-helvetica/
+https://viahelvetica.ch/
 ```
 
-Because the application is hosted below a repository-specific path rather than
-the domain root, `vite.config.ts` sets:
+Because the custom domain serves the application at `/`, `vite.config.ts` sets:
 
 ```ts
-base: '/via-helvetica/'
+base: '/'
 ```
 
-Vite uses this value when generating production asset URLs. Production
-artifacts are written to `dist/`.
+Vite therefore generates root-relative production asset URLs. Production
+artifacts are written to `dist/`. The previous repository project URL may still
+redirect, but the custom domain is the canonical public address.
 
 The workflow `.github/workflows/deploy.yml` runs on every push to `main` and can
 also be started manually. It:
@@ -1083,6 +1088,7 @@ via-helvetica/
 │   │   ├── publicTransportStopsViewport.ts
 │   │   └── stationBoard.ts
 │   ├── components/
+│   │   ├── AboutDialog.tsx
 │   │   ├── MapInformationPopup.tsx
 │   │   ├── MapLayersSelector.tsx
 │   │   ├── PublicTransportStopPopup.tsx
@@ -1177,8 +1183,8 @@ via-helvetica/
 
 Composes application capabilities through one shared `MapRuntime` ref.
 
-It retains temporary location-search selection and the GPX export dialog, then
-wires focused controllers to presentational components. Native map construction
+It retains temporary location-search selection plus the About and GPX export
+dialog state, then wires focused controllers to presentational components. Native map construction
 and browser fullscreen state are delegated to `useMapRuntime`; background,
 hiking-overlay, zoom, fullscreen requests, and geolocation are delegated to
 `useMapViewControls`; information overlays are delegated to
@@ -1234,7 +1240,9 @@ map navigation, and multi-touch cancellation restores the last committed route.
 Creates the single native-LV95 OpenLayers map as one disposable runtime. It owns
 the explicit WMTS/WMS/vector layer order, base-map replacement, shared route and
 GPX displays, information-layer displays, transient markers, initial base-map
-load reporting, and DOM-target cleanup. It contains no React state.
+load reporting, and DOM-target cleanup. The default OpenLayers attribution
+control is disabled because `App.tsx` owns the permanently visible swisstopo
+credit and the localized About dialog. It contains no React state.
 
 ### `src/map/useMapRuntime.ts`
 
@@ -1273,6 +1281,17 @@ and focused public-transport API/model/display modules.
 Normalizes the browser's two cancellation signals—an aborted signal and a
 rejected `AbortError`—so intentional replacement of map or routing requests is
 ignored consistently instead of being reported as an application failure.
+
+### `src/components/AboutDialog.tsx`
+
+Renders the localized native modal opened by the lower-right information button.
+It keeps the project summary, privacy and experimental-routing guidance,
+placeholder creator name, support email, source, MIT-license, and LinkedIn
+links, and provider credits out of the permanent map surface. Its project
+details share one aligned definition-list layout, and the scrollable content
+keeps extra bottom spacing above the fixed footer. Escape, the close controls,
+and a backdrop press dismiss it. `App.tsx` closes any map-feature popup before
+opening the dialog so temporary information surfaces do not compete.
 
 ### `src/components/MapLayersSelector.tsx`
 
@@ -1718,7 +1737,8 @@ zoom-level semantics, and explicit WMTS tile-grid/source factories.
 ### `src/styles.css`
 
 Defines the full-screen layout, left-side search control, right-side map
-controls, shared information panel, route statistics, result panels, status
+controls, lower-right information button and visible attribution, modal About
+dialog, shared information panel, route statistics, result panels, status
 messages, and OpenLayers control placement.
 
 ### Regression test files
@@ -1761,7 +1781,7 @@ that a disabled local test value cannot escape to a deployed hostname.
 - `package.json` declares dependencies and npm scripts for development,
   regression tests, and the production build.
 - `package-lock.json` locks dependency versions.
-- `vite.config.ts` configures React and the GitHub Pages base path.
+- `vite.config.ts` configures React and the custom-domain root asset path.
 - `vitest.config.ts` selects JSDOM and the application test suites.
 - `.github/workflows/deploy.yml` tests, builds, and deploys `dist/` to GitHub Pages.
 - `public/base-map-previews/*.png` provides the static color, grey, and aerial
@@ -1786,6 +1806,9 @@ that a disabled local test value cannot escape to a deployed hostname.
 5. The Layers menu changes controlled layer choices. `useMapViewControls`
    applies the base map and persisted rendered hiking-overlay preference, while
    `useMapInformationLayers` persists and applies the three inspectable overlays.
+   The separate lower-right information button closes any map-feature popup and
+   opens the localized About dialog; the compact swisstopo credit beside it
+   remains visible without using OpenLayers' attribution expander.
 6. The rendered hiking overlay is enabled by default unless a stored preference
    hides it, and starts loading when the native view moves beyond level 18.
 7. The official closure WMS is enabled by default unless a stored preference hides it, and appears only beyond the hiking-overlay zoom threshold.
@@ -2017,7 +2040,8 @@ to the normal GeoAdmin profile service.
   concurrency limits, caches, and stale-result guards.
 - Regression tests must not depend on live external services.
 - `npm test` and `npm run build` must succeed before an important commit.
-- Production asset paths must remain compatible with the configured Pages base.
+- Production asset paths must remain compatible with the custom-domain root Pages base.
+- Keep the visible swisstopo credit and the complete provider credits in the About dialog synchronized with configured data sources.
 
 ## 20. Possible evolution
 

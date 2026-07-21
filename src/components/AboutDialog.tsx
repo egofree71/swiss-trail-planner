@@ -1,0 +1,218 @@
+/**
+ * Business context: presents project identity, planning limitations, contact
+ * details, and data credits without occupying permanent map space. The modal
+ * replaces the small provider-only attribution expander with one accessible,
+ * localized information surface.
+ */
+import { useLayoutEffect, useRef } from 'react';
+import { useI18n } from '../i18n/I18nContext';
+
+/** Controlled visibility and close callback for the application information dialog. */
+interface AboutDialogProps {
+  /** Whether the modal information dialog should be displayed. */
+  isOpen: boolean;
+  /** Closes the dialog and returns focus to the information button. */
+  onClose: () => void;
+}
+
+/** Public project links kept together so visible labels remain fully localized. */
+const PROJECT_LINKS = {
+  email: 'mailto:contact@viahelvetica.ch',
+  source: 'https://github.com/egofree71/via-helvetica',
+  license: 'https://github.com/egofree71/via-helvetica/blob/main/LICENSE',
+  // Replace this placeholder with the creator's final public profile before release.
+  linkedin: 'https://www.linkedin.com/in/philippe-de-pol/',
+  swisstopo: 'https://www.swisstopo.admin.ch/',
+  bav: 'https://www.bav.admin.ch/',
+  transportOpenData: 'https://transport.opendata.ch/',
+} as const;
+
+/** Renders the localized About dialog above the otherwise map-centred interface. */
+export default function AboutDialog({
+  isOpen,
+  onClose,
+}: AboutDialogProps) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+
+    if (!dialog) {
+      return;
+    }
+
+    if (isOpen) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+
+      return;
+    }
+
+    if (dialog.open) {
+      dialog.close();
+    }
+  }, [isOpen]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="about-dialog"
+      aria-labelledby="about-dialog-title"
+      aria-describedby="about-dialog-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <article className="about-dialog-panel">
+        <header className="about-dialog-header">
+          <div>
+            <h2 id="about-dialog-title">{t('about.title')}</h2>
+            <p className="about-dialog-tagline">{t('about.tagline')}</p>
+          </div>
+
+          <button
+            type="button"
+            className="about-dialog-icon-close"
+            aria-label={t('about.close')}
+            title={t('about.close')}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="about-dialog-content">
+          <section className="about-dialog-section">
+            <p id="about-dialog-description">{t('about.description')}</p>
+            <p>{t('about.privacy')}</p>
+          </section>
+
+          <section className="about-dialog-notice">
+            <h3>{t('about.safetyTitle')}</h3>
+            <p>{t('about.safety')}</p>
+          </section>
+
+          <section className="about-dialog-section">
+            <h3>{t('about.projectTitle')}</h3>
+            <dl className="about-dialog-details">
+              <div>
+                <dt>{t('about.createdBy')}</dt>
+                <dd>Philippe De Pol</dd>
+              </div>
+              <div>
+                <dt>{t('about.support')}</dt>
+                <dd>
+                  <a href={PROJECT_LINKS.email}>contact@viahelvetica.ch</a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('about.sourceCode')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GitHub
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('about.license')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.license}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    MIT
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('about.linkedin')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.linkedin}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    LinkedIn
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="about-dialog-section">
+            <h3>{t('about.creditsTitle')}</h3>
+            <dl className="about-dialog-credits">
+              <div>
+                <dt>{t('about.maps')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.swisstopo}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    © swisstopo
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('about.closures')}</dt>
+                <dd>© ASTRA, Kantone, Schweizer Wanderwege, SchweizMobil</dd>
+              </div>
+              <div>
+                <dt>{t('about.dangerZones')}</dt>
+                <dd>© Schweizer Armee</dd>
+              </div>
+              <div>
+                <dt>{t('about.transportStops')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.bav}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    © BAV
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('about.departures')}</dt>
+                <dd>
+                  <a
+                    href={PROJECT_LINKS.transportOpenData}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    transport.opendata.ch
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+
+        <footer className="about-dialog-footer">
+          <button
+            type="button"
+            className="about-dialog-close"
+            onClick={onClose}
+          >
+            {t('about.close')}
+          </button>
+        </footer>
+      </article>
+    </dialog>
+  );
+}
