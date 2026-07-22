@@ -267,8 +267,8 @@ export function createMapRuntime(
     }),
     controls: defaultControls({
       zoom: false,
-      // Project-owned attribution and About controls keep credits readable and
-      // provide localized context without relying on OpenLayers' tiny expander.
+      // Complete provider credits live in the accessible About dialog, so the
+      // OpenLayers attribution expander would duplicate that information.
       attribution: false,
     }).extend([
       new ScaleLine({

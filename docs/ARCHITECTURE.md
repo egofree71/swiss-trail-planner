@@ -83,10 +83,9 @@ contextual and temporary:
 
 The responsive layout resolves collisions by moving small controls rather than
 permanently reserving large strips of viewport space. The route summary stays on
-the bottom edge, while the About control and visible swisstopo attribution join
-the right-side control stack when horizontal space becomes tight. The metric
-scale is hidden at phone widths where it would otherwise remain covered by the
-summary.
+the bottom edge, while the About control joins the right-side control stack when
+horizontal space becomes tight. The metric scale is hidden at phone widths where
+it would otherwise remain covered by the summary.
 
 ### 1.5 Explicit workflow boundaries
 
@@ -456,8 +455,9 @@ Fullscreen requests target the complete application root. A
 
 The About dialog contains project context, experimental-routing guidance,
 creator and support details, source and license links, professional profile, and
-complete data credits. A permanently visible compact swisstopo attribution
-remains on the map.
+complete data credits. Its permanently visible map control provides direct
+access to the centralized source references without occupying additional map
+space.
 
 ## 6. Map and geodata integration
 

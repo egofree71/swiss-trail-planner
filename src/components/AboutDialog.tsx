@@ -1,8 +1,8 @@
 /**
  * Business context: presents project identity, planning limitations, contact
- * details, and data credits without occupying permanent map space. The modal
- * replaces the small provider-only attribution expander with one accessible,
- * localized information surface.
+ * details, and complete data credits without occupying permanent map space.
+ * The visible About control keeps those credits directly accessible from the
+ * map in one localized information surface.
  */
 import { useLayoutEffect, useRef } from 'react';
 import { useI18n } from '../i18n/I18nContext';

@@ -490,16 +490,6 @@ export default function App() {
           </svg>
         </button>
 
-        <div className="map-attribution" aria-label={t('about.maps')}>
-          <a
-            href="https://www.swisstopo.admin.ch/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            © swisstopo
-          </a>
-        </div>
-
         {locationMessage && (
           <div
             className={[

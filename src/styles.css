@@ -287,7 +287,6 @@ select {
 
 .map-controls button,
 .map-controls select,
-.map-controls .map-attribution,
 .map-controls .map-layers-menu {
   pointer-events: auto;
 }
@@ -481,35 +480,6 @@ select {
   right: 0.75rem;
   bottom: 0.75rem;
   flex: 0 0 auto;
-}
-
-.map-attribution {
-  position: fixed;
-  z-index: 20;
-  right: 4.15rem;
-  bottom: 0.75rem;
-  display: flex;
-  min-height: 1.5rem;
-  align-items: center;
-  padding: 0.12rem 0.36rem;
-  border: 1px solid rgb(32 47 60 / 14%);
-  border-radius: 4px;
-  background: rgb(255 255 255 / 84%);
-  box-shadow: none;
-  font-size: 0.68rem;
-  line-height: 1.2;
-  backdrop-filter: blur(4px);
-}
-
-.map-attribution a {
-  color: #33414c;
-  text-decoration: none;
-}
-
-.map-attribution a:hover,
-.map-attribution a:focus-visible {
-  color: #1769e0;
-  text-decoration: underline;
 }
 
 .language-selector {
@@ -1501,20 +1471,15 @@ select {
   left: 0.6rem;
 }
 
-/* Once the centered statistics bar approaches the lower-right controls,
-   keep the summary on the bottom edge and move the compact information
-   controls into the existing right-side stack instead of sacrificing a full
-   strip of map height. */
+/* Once the centered statistics bar approaches the lower-right corner,
+   keep the summary on the bottom edge and move the compact About control into
+   the existing right-side stack instead of sacrificing a full strip of map
+   height. */
 @media (max-width: 1140px) {
-  .about-button,
-  .map-attribution {
+  .about-button {
     position: static;
     right: auto;
     bottom: auto;
-  }
-
-  .map-attribution {
-    align-self: flex-end;
   }
 }
 
